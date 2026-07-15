@@ -62,10 +62,21 @@ docker run --rm -p 3000:3000 \
 也可用 Compose，宿主机端口映射为 `8059`：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-打开 `http://localhost:8059`。`docker-compose.yml` 会自动读取同目录 `.env` 做变量替换，因此 `NATS_SERVERS` 必须填**容器内可达**的地址——不要用 `127.0.0.1`（那是容器自身）。Docker Desktop 下访问宿主机的 NATS 用 `host.docker.internal`，生产环境直接填 NATS 集群地址。
+打开 `http://localhost:8059`。`docker-compose.yml` 使用远程镜像 `ghcr.io/tallcode/iaxweb:latest`（见下方 CI），并会自动读取同目录 `.env` 做变量替换，因此 `NATS_SERVERS` 必须填**容器内可达**的地址——不要用 `127.0.0.1`（那是容器自身）。Docker Desktop 下访问宿主机的 NATS 用 `host.docker.internal`，生产环境直接填 NATS 集群地址。
+
+## 镜像发布（GitHub Actions）
+
+`.github/workflows/docker-publish.yml` 为**手动触发**（Actions 页面点击 “Run workflow”），构建镜像并推送到 GitHub Packages：
+
+```
+ghcr.io/tallcode/iaxweb:latest
+ghcr.io/tallcode/iaxweb:sha-<commit>
+```
+
+首次发布后，包默认是私有的：`docker compose up` 拉取前需要 `docker login ghcr.io`，或在 GitHub 的 Package 设置里把可见性改为 Public。
 
 ## WebSocket 数据
 

@@ -1,7 +1,7 @@
 services:
   iaxweb:
-    build: .
-    image: iaxweb:latest
+    # Built and published by .github/workflows/docker-publish.yml
+    image: ghcr.io/tallcode/iaxweb:latest
     container_name: iaxweb
     restart: unless-stopped
     ports:
