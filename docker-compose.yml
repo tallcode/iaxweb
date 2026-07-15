@@ -1,0 +1,18 @@
+services:
+  iaxweb:
+    build: .
+    image: iaxweb:latest
+    container_name: iaxweb
+    restart: unless-stopped
+    ports:
+      # host 8059 -> container 3000
+      - "8059:3000"
+    environment:
+      # Point this at your NATS cluster. On Docker Desktop use
+      # host.docker.internal to reach a NATS server running on the host.
+      NATS_SERVERS: ${NATS_SERVERS:-nats://host.docker.internal:4222}
+      NATS_SUBJECT_PREFIX: ${NATS_SUBJECT_PREFIX:-iaxmon.nodes.1999}
+      # Optional auth (leave unset to disable):
+      NATS_USERNAME: ${NATS_USERNAME:-}
+      NATS_PASSWORD: ${NATS_PASSWORD:-}
+      NATS_TOKEN: ${NATS_TOKEN:-}
