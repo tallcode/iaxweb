@@ -44,6 +44,21 @@ npm start
 
 反向代理需要允许 `/audio` 的 WebSocket Upgrade。`GET /healthz` 可用于存活检查。
 
+## Docker
+
+镜像基于 `node:24-alpine` 多阶段构建，只安装生产依赖，以非 root 用户 `node` 运行，内置 `/healthz` 健康检查，并通过 `tini` 保证 `SIGTERM` 能触发优雅关闭。
+
+```bash
+docker build -t iaxweb .
+
+docker run --rm -p 3000:3000 \
+  -e NATS_SERVERS=nats://nats.example:4222 \
+  -e NATS_SUBJECT_PREFIX=iaxmon.nodes.1999 \
+  iaxweb
+```
+
+配置全部通过环境变量注入（`-e` 或 `--env-file`），镜像内不包含 `.env`。容器默认监听 `0.0.0.0:3000`，可用 `-e PORT=` 调整。
+
 ## WebSocket 数据
 
 网关直接把 `<subject_prefix>.audio` 的 NATS 二进制 payload 转发为 WebSocket 二进制消息，把 `<subject_prefix>.events` 以及当前状态快照转发为文本 JSON。浏览器依据 iaxmon `NATS.md` 中的版本、类型、时间戳和 PCMU payload 解码播放。

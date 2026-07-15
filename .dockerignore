@@ -1,0 +1,14 @@
+node_modules
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+dist
+.DS_Store
+Dockerfile
+.dockerignore
+README.md
+eslint.config.mjs
+test
