@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101114">
+    <title>IAX Monitor</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <main class="panel">
+      <div class="visualizer" aria-hidden="true">
+        <div class="spectrum" id="spectrum"></div>
+        <div class="level">
+          <div class="level-fill" id="level-fill"></div>
+          <div class="level-peak" id="level-peak"></div>
+        </div>
+      </div>
+      <button id="play" type="button" aria-pressed="false">播放</button>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
