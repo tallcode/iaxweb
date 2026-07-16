@@ -80,7 +80,7 @@ function renderNode(nodeId, node) {
   const source = online && !isHub ? node.TX_SOURCE : null
   const hasAudio = isHub && node.AUDIO === true
   const displayName = mobileViewport.matches ? (node.NAME || nodeId) : (node.DESC || node.NAME || nodeId)
-  element.className = `node ${isHub ? 'hub' : 'repeater'} ${online ? 'online' : 'offline'}${source ? ` tx-${source}` : ''}`
+  element.className = `node ${isHub ? 'hub' : 'repeater'} ${online ? 'online' : 'offline'}${source ? ` tx-${source}` : ''}${hasAudio ? ' has-audio' : ''}`
   element.querySelector('.node-kind').hidden = !isHub
   element.querySelector('.node-name').textContent = displayName
 

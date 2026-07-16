@@ -140,7 +140,7 @@ export class TopologyLayout {
       const dx = target.x - source.x
       const dy = target.y - source.y
       const distance = Math.max(1, Math.hypot(dx, dy))
-      const idealDistance = width < 680 ? clamp(width * 0.42, 120, 170) : 265
+      const idealDistance = width < 680 ? clamp(width * 0.3, 80, 120) : 265
       const force = (distance - idealDistance) * 0.0028
       const fx = dx / distance * force
       const fy = dy / distance * force
@@ -152,8 +152,9 @@ export class TopologyLayout {
 
     for (const [nodeId, position] of entries) {
       const element = this.elements.get(nodeId)
-      const marginX = Math.min(width / 2, (element?.offsetWidth || 0) / 2 + 8)
-      const marginY = Math.min(height / 2, (element?.offsetHeight || 0) / 2 + 8)
+      const edgePadding = width < 680 ? 16 : 8
+      const marginX = Math.min(width / 2, (element?.offsetWidth || 0) / 2 + edgePadding)
+      const marginY = Math.min(height / 2, (element?.offsetHeight || 0) / 2 + edgePadding)
       position.vx += (width / 2 - position.x) * 0.0007
       position.vy += (height / 2 - position.y) * 0.0007
       position.vx *= 0.88
