@@ -10,7 +10,8 @@ RUN npm ci --omit=dev
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=3000
+    PORT=3000 \
+    ALLMON3_BASE_URL=http://172.16.211.199/allmon3/
 WORKDIR /app
 
 # tini gives us a real init so SIGTERM reaches Node and triggers graceful shutdown.

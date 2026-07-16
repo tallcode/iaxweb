@@ -1,106 +1,93 @@
+import { ReconnectingWebSocket } from './reconnecting-websocket.js'
+
 const SAMPLE_RATE = 8_000
 const JITTER_SECONDS = 0.1
 const SPECTRUM_BARS = 28
-const RECONNECT_DELAYS = [1_000, 2_000, 8_000, 32_000]
 
-export class Player {
-  constructor(button, meter, labels = { play: '播放', stop: '停止' }) {
-    this.button = button
-    this.meter = meter
-    this.labels = labels
-    this.socket = null
+export class AudioStreamPlayer {
+  constructor() {
+    this.binding = null
+    this.connection = null
     this.context = null
     this.analyser = null
-    this.reconnectAttempts = 0
-    this.reconnectTimer = null
     this.baseTimestamp = null
     this.baseAudioTime = 0
     this.lastTimestamp = null
   }
 
-  async start() {
-    if (this.context)
-      return
+  get playingKey() {
+    return this.binding?.key ?? null
+  }
 
+  async toggle(key, button, meter, labels = { play: '播放', stop: '停止' }) {
+    if (this.context && this.playingKey === key) {
+      await this.stop()
+      return
+    }
+    if (this.context)
+      await this.stop()
+    await this.start(key, button, meter, labels)
+  }
+
+  async start(key, button, meter, labels = { play: '播放', stop: '停止' }) {
     const context = new AudioContext({ sampleRate: SAMPLE_RATE })
-    await context.resume()
     this.context = context
+    try {
+      await context.resume()
+    }
+    catch (error) {
+      this.context = null
+      await context.close()
+      throw error
+    }
+    this.binding = { button, key, labels, meter }
 
     const analyser = context.createAnalyser()
     analyser.fftSize = 256
     analyser.smoothingTimeConstant = 0.7
     analyser.connect(context.destination)
     this.analyser = analyser
-    this.meter.attach(analyser)
+    meter.attach(analyser)
 
     this.resetTimeline()
-    this.reconnectAttempts = 0
     this.setPlaying(true)
-    this.connect()
-  }
-
-  connect() {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const socket = new WebSocket(`${protocol}//${location.host}/audio`)
-    socket.binaryType = 'arraybuffer'
-    this.socket = socket
-    this.resetTimeline()
-
-    socket.addEventListener('open', () => {
-      this.reconnectAttempts = 0
+    this.connection = new ReconnectingWebSocket('/audio', {
+      binaryType: 'arraybuffer',
+      delays: [1_000, 2_000, 8_000, 32_000],
+      maxFailures: 4,
+      onDisconnect: () => this.resetTimeline(),
+      onExhausted: () => void this.stop(false),
+      onMessage: event => this.handleMessage(event),
     })
-    socket.addEventListener('message', event => this.handleMessage(event))
-    socket.addEventListener('close', () => {
-      if (this.socket === socket)
-        this.scheduleReconnect()
-    })
-    socket.addEventListener('error', () => socket.close())
-  }
-
-  scheduleReconnect() {
-    this.socket = null
-    this.resetTimeline()
-
-    const delay = RECONNECT_DELAYS[this.reconnectAttempts]
-    if (delay === undefined) {
-      void this.stop()
-      return
-    }
-
-    this.reconnectAttempts++
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null
-      if (this.context)
-        this.connect()
-    }, delay)
+    this.connection.start()
   }
 
   async stop(closeSocket = true) {
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-
-    const socket = this.socket
-    this.socket = null
+    const connection = this.connection
+    this.connection = null
     if (closeSocket)
-      socket?.close(1000, 'Playback stopped')
+      connection?.stop(1000, 'Playback stopped')
 
-    this.meter.detach()
+    const binding = this.binding
+    this.binding = null
+    binding?.meter.detach()
     this.analyser = null
 
     const context = this.context
     this.context = null
     this.resetTimeline()
     await context?.close()
-    this.setPlaying(false)
+    this.setBindingPlaying(binding, false)
   }
 
   handleMessage(event) {
     if (typeof event.data === 'string') {
       try {
         const message = JSON.parse(event.data)
-        if (message.type === 'state' && message.online === false)
+        if (message.type !== 'state' || typeof message.online !== 'boolean')
+          return
+        this.connection?.markHealthy()
+        if (message.online === false)
           this.resetTimeline()
       }
       catch {
@@ -109,17 +96,18 @@ export class Player {
       return
     }
 
-    this.scheduleFrame(event.data)
+    if (this.scheduleFrame(event.data))
+      this.connection?.markHealthy()
   }
 
   scheduleFrame(data) {
     const context = this.context
     if (!context || data.byteLength < 11)
-      return
+      return false
 
     const view = new DataView(data)
     if (view.getUint8(0) !== 1 || view.getUint8(1) !== 1)
-      return
+      return false
 
     const timestamp = view.getUint32(6, false)
     if (this.lastTimestamp !== null && signedDifference(timestamp, this.lastTimestamp) < -1_000)
@@ -148,6 +136,7 @@ export class Player {
     source.connect(this.analyser ?? context.destination)
     source.start(Math.max(startTime, context.currentTime))
     this.lastTimestamp = timestamp
+    return true
   }
 
   resetTimeline() {
@@ -157,13 +146,19 @@ export class Player {
   }
 
   setPlaying(playing) {
-    this.button.textContent = playing ? this.labels.stop : this.labels.play
-    this.button.setAttribute('aria-label', playing ? '停止播放' : '播放音频')
-    this.button.setAttribute('aria-pressed', String(playing))
+    this.setBindingPlaying(this.binding, playing)
+  }
+
+  setBindingPlaying(binding, playing) {
+    if (!binding)
+      return
+    binding.button.textContent = playing ? binding.labels.stop : binding.labels.play
+    binding.button.setAttribute('aria-label', playing ? '停止播放' : '播放音频')
+    binding.button.setAttribute('aria-pressed', String(playing))
   }
 }
 
-export class Meter {
+export class SpectrumMeter {
   constructor(root) {
     this.spectrum = root.querySelector('.spectrum')
     this.levelFill = root.querySelector('.level-fill')
@@ -219,7 +214,6 @@ export class Meter {
       return
 
     this.frame = requestAnimationFrame(this.render)
-
     if (this.levelFill && this.levelPeak) {
       analyser.getByteTimeDomainData(this.timeData)
       let sumSquares = 0

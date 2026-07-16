@@ -26,7 +26,7 @@ cp .env.example .env
 | `NATS_SUBJECT_PREFIX` | `iaxmon.nodes.1999` | 与 iaxmon 配置一致的 subject 根 |
 | `NATS_USERNAME` / `NATS_PASSWORD` | 未设置 | 用户名密码认证，必须一起配置 |
 | `NATS_TOKEN` | 未设置 | Token 认证，不能与用户名密码共用 |
-| `ALLMON3_BASE_URL` | `http://44.27.31.33/allmon3/` | Allmon3 根地址，必须以 HTTP(S) 访问 |
+| `ALLMON3_BASE_URL` | `http://172.16.211.199/allmon3/` | Allmon3 根地址，必须以 HTTP(S) 访问 |
 | `ALLMON3_REFRESH_INTERVAL_MS` | `30000` | 刷新节点列表、名称和端口的间隔 |
 | `ALLMON3_REQUEST_TIMEOUT_MS` | `10000` | Allmon3 HTTP 请求超时 |
 

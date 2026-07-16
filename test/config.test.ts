@@ -6,7 +6,7 @@ import { loadConfig } from '../src/config.js'
 test('loads defaults', () => {
   const config = loadConfig({})
   assert.equal(config.port, 3000)
-  assert.equal(config.allmon3.baseUrl, 'http://44.27.31.33/allmon3/')
+  assert.equal(config.allmon3.baseUrl, 'http://172.16.211.199/allmon3/')
   assert.deepEqual(config.nats.servers, ['nats://127.0.0.1:4222'])
   assert.equal(config.nats.subjectPrefix, 'iaxmon.nodes.1999')
 })

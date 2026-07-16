@@ -1,9 +1,16 @@
-import type { NodeDefinitions, NodeStatus } from '../src/allmon3.js'
+import type { NodeConfig, NodeDefinitions, NodeStatus, StatusSnapshot } from '../src/allmon3.js'
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildSnapshot, parseNodeDefinitions, statusFingerprint, transmitSource } from '../src/allmon3.js'
+import {
+  buildSnapshot,
+  mergeNodeConfigs,
+  parseNodeDefinitions,
+  statusFingerprint,
+  TransmissionTracker,
+  transmitSource,
+} from '../src/allmon3.js'
 
 const definitions: NodeDefinitions = {
   1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },
@@ -89,4 +96,47 @@ test('distinguishes local, remote, system and idle transmission', () => {
   assert.equal(transmitSource({ CONNKEYED: false, RXKEYED: false, TXKEYED: true }), 'system')
   assert.equal(transmitSource({ RXKEYED: false, TXKEYED: false }), null)
   assert.equal(transmitSource({ ERROR: 'offline', TXKEYED: true }), null)
+})
+
+test('records last transmit time only when transmission starts from idle', () => {
+  const timestamps = ['2026-07-16T01:00:00.000Z', '2026-07-16T02:00:00.000Z']
+  const tracker = new TransmissionTracker(() => timestamps.shift() ?? 'unexpected')
+  const snapshot: StatusSnapshot = {
+    1901: { CONNKEYED: false, ERROR: null, RXKEYED: true, TXKEYED: true, TYPE: 'REPEATER' },
+  }
+  const node = snapshot['1901']
+  assert.ok(node)
+
+  tracker.enrich(snapshot)
+  assert.equal(node.LAST_TX_AT, '2026-07-16T01:00:00.000Z')
+
+  node.RXKEYED = false
+  node.CONNKEYED = true
+  tracker.enrich(snapshot)
+  assert.equal(node.LAST_TX_AT, '2026-07-16T01:00:00.000Z')
+
+  node.TXKEYED = false
+  tracker.enrich(snapshot)
+  node.TXKEYED = true
+  tracker.enrich(snapshot)
+  assert.equal(node.LAST_TX_AT, '2026-07-16T02:00:00.000Z')
+})
+
+test('keeps previous node configs when one catalog request fails', () => {
+  const previous = new Map<string, NodeConfig>([['1901', { statport: 16700 }]])
+  const failed = new Error('temporary failure')
+  const result = mergeNodeConfigs(
+    ['1900', '1901', '1902'],
+    [
+      { status: 'fulfilled', value: { statport: 16699 } },
+      { reason: failed, status: 'rejected' },
+      { reason: failed, status: 'rejected' },
+    ],
+    previous,
+  )
+
+  assert.equal(result.configs.get('1900')?.statport, 16699)
+  assert.equal(result.configs.get('1901')?.statport, 16700)
+  assert.deepEqual(result.retained, ['1901'])
+  assert.deepEqual(result.unavailable, ['1902'])
 })

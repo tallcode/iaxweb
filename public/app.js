@@ -1,12 +1,9 @@
-import { Meter, Player } from './audio-player.js'
+import { AudioStreamPlayer, SpectrumMeter } from './audio-player.js'
 
 const button = document.querySelector('#play')
-const meter = new Meter(document)
-const player = new Player(button, meter)
+const meter = new SpectrumMeter(document)
+const player = new AudioStreamPlayer()
 
 button.addEventListener('click', () => {
-  if (player.context)
-    void player.stop()
-  else
-    void player.start().catch(() => player.stop())
+  void player.toggle('audio-page', button, meter).catch(() => player.stop())
 })

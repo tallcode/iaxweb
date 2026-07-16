@@ -1,5 +1,3 @@
-import type { NatsConnection, Subscription } from '@nats-io/transport-node'
-
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebSocket } from 'ws'
 import type { StatusSnapshot } from './allmon3.js'
@@ -10,17 +8,11 @@ import { createServer } from 'node:http'
 import { dirname, extname, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { connect, RequestError, TimeoutError } from '@nats-io/transport-node'
 import { config as loadEnv } from 'dotenv'
 import { WebSocketServer } from 'ws'
 import { Allmon3StatusService, parseNodeDefinitions } from './allmon3.js'
 import { loadConfig } from './config.js'
-
-interface StateEvent {
-  type: 'state'
-  online: boolean
-  speaking: boolean
-}
+import { NatsAudioService } from './nats-audio.js'
 
 loadEnv({ quiet: true })
 const config = loadConfig()
@@ -33,9 +25,6 @@ const mimeTypes: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
 }
 
-let latestState: StateEvent = { type: 'state', online: false, speaking: false }
-let nats: NatsConnection
-
 const httpServer = createServer(serveHttp)
 const audioWebSockets = new WebSocketServer({ noServer: true })
 const statusWebSockets = new WebSocketServer({ noServer: true })
@@ -43,6 +32,12 @@ const allmon3 = new Allmon3StatusService({
   ...config.allmon3,
   nodes: nodeDefinitions,
   onChange: publishAllmon3Status,
+})
+const natsAudio = new NatsAudioService({
+  config: config.nats,
+  onAudio: data => broadcastAudio(data, true),
+  onEvent: text => broadcastAudio(text, false),
+  onState: state => broadcastAudio(JSON.stringify(state), false),
 })
 
 httpServer.on('upgrade', (request, socket, head) => {
@@ -64,7 +59,7 @@ httpServer.on('upgrade', (request, socket, head) => {
 })
 
 audioWebSockets.on('connection', (client) => {
-  client.send(JSON.stringify(latestState))
+  client.send(JSON.stringify(natsAudio.currentState))
 })
 
 statusWebSockets.on('connection', (client) => {
@@ -73,28 +68,9 @@ statusWebSockets.on('connection', (client) => {
     client.send(JSON.stringify(snapshot))
 })
 
-const prefix = config.nats.subjectPrefix
-
-async function main(): Promise<void> {
-  nats = await connect({
-    servers: config.nats.servers,
-    ...(config.nats.username
-      ? { user: config.nats.username, pass: config.nats.password }
-      : {}),
-    ...(config.nats.token ? { token: config.nats.token } : {}),
-    name: 'iaxweb',
-    maxReconnectAttempts: -1,
-  })
-
-  const audioSubscription = nats.subscribe(`${prefix}.audio`)
-  const eventSubscription = nats.subscribe(`${prefix}.events`)
-  void relayAudio(audioSubscription)
-  void relayEvents(eventSubscription)
-  void logNatsStatus(nats)
-
-  await nats.flush()
-  await requestSnapshot(nats)
+function main(): void {
   allmon3.start()
+  natsAudio.start()
 
   httpServer.listen(config.port, config.host, () => {
     console.log(`iaxweb listening on http://${config.host}:${config.port}`)
@@ -107,7 +83,7 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
     response.end(JSON.stringify({
       allmon3: Boolean(allmon3.currentSnapshot),
-      nats: !nats.isClosed(),
+      nats: natsAudio.connected,
       ok: true,
     }))
     return
@@ -146,26 +122,6 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
   }
 }
 
-async function relayAudio(subscription: Subscription): Promise<void> {
-  for await (const message of subscription)
-    broadcastAudio(message.data, true)
-}
-
-async function relayEvents(subscription: Subscription): Promise<void> {
-  for await (const message of subscription) {
-    const text = new TextDecoder().decode(message.data)
-    try {
-      const event = JSON.parse(text) as unknown
-      if (isStateEvent(event))
-        latestState = event
-      broadcastAudio(text, false)
-    }
-    catch (error) {
-      console.warn('Ignoring invalid NATS event:', error)
-    }
-  }
-}
-
 function broadcastAudio(data: Uint8Array | string, binary: boolean): void {
   for (const client of audioWebSockets.clients) {
     if (client.readyState !== client.OPEN)
@@ -188,47 +144,6 @@ function publishAllmon3Status(snapshot: StatusSnapshot): void {
   }
 }
 
-async function requestSnapshot(connection: NatsConnection): Promise<void> {
-  try {
-    const reply = await connection.request(`${prefix}.snapshot`, undefined, { timeout: 2_000 })
-    const state = JSON.parse(new TextDecoder().decode(reply.data)) as unknown
-    if (isStateEvent(state))
-      latestState = state
-  }
-  catch (error) {
-    if ((error instanceof RequestError && error.isNoResponders()) || error instanceof TimeoutError) {
-      console.warn(`NATS snapshot responder is unavailable on ${prefix}.snapshot; continuing offline`)
-      return
-    }
-
-    console.warn('Failed to read NATS state snapshot:', error)
-  }
-}
-
-function isStateEvent(value: unknown): value is StateEvent {
-  if (typeof value !== 'object' || value === null)
-    return false
-  const event = value as Record<string, unknown>
-  return event.type === 'state'
-    && typeof event.online === 'boolean'
-    && typeof event.speaking === 'boolean'
-}
-
-async function logNatsStatus(connection: NatsConnection): Promise<void> {
-  for await (const status of connection.status()) {
-    console.log(`NATS ${status.type}`, status)
-
-    if (status.type === 'disconnect') {
-      latestState = { type: 'state', online: false, speaking: false }
-      broadcastAudio(JSON.stringify(latestState), false)
-    }
-    else if (status.type === 'reconnect') {
-      await requestSnapshot(connection)
-      broadcastAudio(JSON.stringify(latestState), false)
-    }
-  }
-}
-
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}, shutting down`)
   allmon3.stop()
@@ -237,7 +152,7 @@ async function shutdown(signal: string): Promise<void> {
   audioWebSockets.close()
   statusWebSockets.close()
   await new Promise<void>(resolveClose => httpServer.close(() => resolveClose()))
-  await nats.drain()
+  await natsAudio.stop()
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -246,7 +161,4 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   })
 }
 
-void main().catch((error) => {
-  console.error(error)
-  process.exitCode = 1
-})
+main()

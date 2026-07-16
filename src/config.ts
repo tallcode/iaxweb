@@ -50,7 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (token && username)
     throw new Error('NATS_TOKEN cannot be combined with NATS_USERNAME/NATS_PASSWORD')
 
-  const allmon3BaseUrl = optional(env, 'ALLMON3_BASE_URL') ?? 'http://44.27.31.33/allmon3/'
+  const allmon3BaseUrl = optional(env, 'ALLMON3_BASE_URL') ?? 'http://172.16.211.199/allmon3/'
   const parsedAllmon3Url = new URL(allmon3BaseUrl)
   if (!['http:', 'https:'].includes(parsedAllmon3Url.protocol))
     throw new Error('ALLMON3_BASE_URL must use http or https')
