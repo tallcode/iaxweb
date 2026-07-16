@@ -116,7 +116,7 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
   const pathname = url.pathname === '/'
     ? '/index.html'
     : ['/map', '/map/'].includes(url.pathname)
-        ? '/map.html'
+        ? '/index.html'
         : url.pathname
   let decodedPath: string
   try {
@@ -181,7 +181,7 @@ function broadcastAudio(data: Uint8Array | string, binary: boolean): void {
 
 function publishAllmon3Status(snapshot: StatusSnapshot): void {
   const message = JSON.stringify(snapshot)
-  console.log(message)
+  // console.log(message)
   for (const client of statusWebSockets.clients) {
     if (client.readyState === client.OPEN)
       client.send(message)

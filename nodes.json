@@ -26,6 +26,7 @@
   "1900": {
     "NAME": "浙江HUB",
     "TYPE": "HUB",
+    "AUDIO": true,
     "LINK": [
       "1800",
       "1901",

@@ -241,11 +241,79 @@ header p {
 
 .node-status {
   display: flex;
+  flex: 1;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
   color: #aeb8c6;
   font-size: 0.7rem;
+}
+
+.node-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.node-audio {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.node-audio[hidden] {
+  display: none;
+}
+
+.node-audio .spectrum {
+  display: flex;
+  gap: 1px;
+  align-items: flex-end;
+  width: 3.8rem;
+  height: 1.65rem;
+  padding: 0.2rem;
+  overflow: hidden;
+  border: 1px solid #3f777a;
+  border-radius: 0.28rem;
+  background: #0b1519;
+}
+
+.node-audio .spectrum .bar {
+  flex: 1;
+  height: 100%;
+  border-radius: 1px;
+  background: linear-gradient(to top, #52c9c3, #a5e0df);
+  transform: scaleY(0.02);
+  transform-origin: bottom;
+  transition: transform 90ms ease-out;
+}
+
+.audio-toggle {
+  display: grid;
+  flex: none;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid #58b5b6;
+  border-radius: 50%;
+  color: #b9ecea;
+  background: #10282c;
+  font: inherit;
+  font-size: 0.58rem;
+  cursor: pointer;
+  place-items: center;
+}
+
+.audio-toggle:focus-visible {
+  outline: 2px solid #72efe7;
+  outline-offset: 2px;
+}
+
+.audio-toggle[aria-pressed="true"] {
+  color: #fff;
+  border-color: #ec6565;
+  background: #a83b3b;
 }
 
 .node-state {
@@ -328,6 +396,16 @@ header p {
   .node-meta,
   .node-status time {
     display: none;
+  }
+
+  .node-audio .spectrum {
+    display: none;
+  }
+
+  .audio-toggle {
+    width: 1.45rem;
+    height: 1.45rem;
+    font-size: 0.48rem;
   }
 
   .node-status,

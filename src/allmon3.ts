@@ -7,6 +7,7 @@ export type TransmitSource = 'local' | 'remote' | 'system' | null
 export type NodeType = 'HUB' | 'REPEATER'
 
 export interface NodeDefinition {
+  AUDIO?: boolean
   FREQ?: string
   LINK?: string[]
   NAME?: string
@@ -291,6 +292,12 @@ export class Allmon3StatusService {
   private enrichTransmissionState(snapshot: StatusSnapshot): void {
     const now = new Date().toISOString()
     for (const [node, status] of Object.entries(snapshot)) {
+      if (status.TYPE === 'HUB') {
+        this.transmissions.delete(node)
+        status.TX_SOURCE = null
+        status.LAST_TX_AT = null
+        continue
+      }
       const source = transmitSource(status)
       const previous = this.transmissions.get(node)
       const lastTransmitAt = source && source !== previous?.activeSource
@@ -373,8 +380,13 @@ export function parseNodeDefinitions(value: unknown): NodeDefinitions {
     if (name !== undefined && typeof name !== 'string')
       throw new Error(`nodes.json node ${node} has an invalid NAME`)
 
+    const audio = rawDefinition.AUDIO
+    if (audio !== undefined && typeof audio !== 'boolean')
+      throw new Error(`nodes.json node ${node} has an invalid AUDIO`)
+
     definitions[node] = {
       TYPE: type,
+      ...(audio !== undefined ? { AUDIO: audio } : {}),
       ...(link ? { LINK: [...link] } : {}),
       ...(freq ? { FREQ: freq } : {}),
       ...(name ? { NAME: name } : {}),
@@ -432,6 +444,7 @@ function defaultNodeStatus(node: string, definition?: NodeDefinition): NodeStatu
 
 function definitionFields(definition?: NodeDefinition): NodeStatus {
   return {
+    ...(definition?.AUDIO !== undefined ? { AUDIO: definition.AUDIO } : {}),
     LINK: definition?.LINK ?? [],
     TYPE: definition?.TYPE ?? 'REPEATER',
     ...(definition?.FREQ ? { FREQ: definition.FREQ } : {}),

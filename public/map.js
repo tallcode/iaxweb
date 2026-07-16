@@ -1,3 +1,5 @@
+import { Meter, Player } from './audio-player.js'
+
 const topology = document.querySelector('#topology')
 const canvas = document.querySelector('#edges')
 const nodesLayer = document.querySelector('#nodes')
@@ -6,6 +8,7 @@ const summary = document.querySelector('#summary')
 const context = canvas.getContext('2d')
 const positions = new Map()
 const elements = new Map()
+const audioPlayers = new Map()
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
 const mobileViewport = matchMedia('(max-width: 680px)')
 
@@ -13,6 +16,7 @@ let state = {}
 let edges = []
 let animationFrame = 0
 let reconnectAttempt = 0
+let statusExpired = false
 
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
   day: '2-digit',
@@ -27,23 +31,50 @@ function connect() {
   const socket = new WebSocket(`${protocol}//${location.host}/status`)
 
   socket.addEventListener('open', () => {
-    reconnectAttempt = 0
     summary.textContent = '已连接，等待完整节点状态…'
   })
   socket.addEventListener('message', (event) => {
     try {
-      update(JSON.parse(event.data))
+      const nextState = JSON.parse(event.data)
+      reconnectAttempt = 0
+      statusExpired = false
+      update(nextState)
     }
     catch {
       summary.textContent = '收到无法解析的状态数据'
     }
   })
   socket.addEventListener('close', () => {
+    if (reconnectAttempt >= 5 && !statusExpired)
+      expireStatus()
     summary.textContent = '状态服务已断开，正在重连…'
-    const delay = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt++, 5))
-    setTimeout(connect, delay)
+    const delay = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt, 5))
+    setTimeout(() => {
+      reconnectAttempt++
+      connect()
+    }, delay)
   })
   socket.addEventListener('error', () => socket.close())
+}
+
+function expireStatus() {
+  statusExpired = true
+  const expiredState = Object.fromEntries(Object.entries(state).map(([nodeId, node]) => [
+    nodeId,
+    {
+      ...node,
+      CONNKEYED: false,
+      CONNKEYEDNODE: false,
+      CONNS: {},
+      ERROR: 'Status WebSocket disconnected',
+      ONLINE: false,
+      RXKEYED: false,
+      TXEKEYED: false,
+      TXKEYED: false,
+      TX_SOURCE: null,
+    },
+  ]))
+  update(expiredState)
 }
 
 function update(nextState) {
@@ -53,6 +84,11 @@ function update(nextState) {
 
   for (const [nodeId, element] of elements) {
     if (!activeIds.has(nodeId)) {
+      const player = audioPlayers.get(nodeId)
+      if (player) {
+        void player.stop()
+        audioPlayers.delete(nodeId)
+      }
       element.remove()
       elements.delete(nodeId)
       positions.delete(nodeId)
@@ -86,12 +122,18 @@ function renderNode(nodeId, node) {
         <span class="node-kind">HUB</span>
         <span class="node-frequency"></span>
       </div>
-      <div class="node-status">
-        <span class="node-state">
-          <span class="online-label"><i class="dot"></i><span></span></span>
-          <span class="tx-label"></span>
-        </span>
-        <time></time>
+      <div class="node-footer">
+        <div class="node-status">
+          <span class="node-state">
+            <span class="online-label"><i class="dot"></i><span></span></span>
+            <span class="tx-label"></span>
+          </span>
+          <time></time>
+        </div>
+        <div class="node-audio" hidden>
+          <div class="spectrum" aria-hidden="true"></div>
+          <button class="audio-toggle" type="button" aria-label="播放音频" aria-pressed="false">▶</button>
+        </div>
       </div>
     `
     nodesLayer.append(element)
@@ -101,6 +143,7 @@ function renderNode(nodeId, node) {
   const isHub = node.TYPE === 'HUB'
   const online = node.ONLINE === true
   const source = online && !isHub ? node.TX_SOURCE : null
+  const hasAudio = isHub && node.AUDIO === true
   const displayName = mobileViewport.matches ? (node.NAME || nodeId) : (node.DESC || node.NAME || nodeId)
   element.className = `node ${isHub ? 'hub' : 'repeater'} ${online ? 'online' : 'offline'}${source ? ` tx-${source}` : ''}`
   element.querySelector('.node-kind').hidden = !isHub
@@ -121,9 +164,37 @@ function renderNode(nodeId, node) {
   time.hidden = isHub || Boolean(source)
   time.textContent = node.LAST_TX_AT ? `上次 ${timeFormatter.format(new Date(node.LAST_TX_AT))}` : '暂无发射记录'
   time.dateTime = node.LAST_TX_AT || ''
+  renderAudioPlayer(nodeId, element, hasAudio)
   element.setAttribute('aria-label', isHub
     ? `${nodeId} ${displayName}，HUB，${online ? '在线' : '离线'}`
     : `${nodeId} ${displayName}，${online ? '在线' : '离线'}${source ? `，${transmitLabel(source)}` : ''}`)
+}
+
+function renderAudioPlayer(nodeId, element, hasAudio) {
+  const controls = element.querySelector('.node-audio')
+  controls.hidden = !hasAudio
+
+  if (!hasAudio) {
+    const player = audioPlayers.get(nodeId)
+    if (player) {
+      void player.stop()
+      audioPlayers.delete(nodeId)
+    }
+    return
+  }
+
+  if (audioPlayers.has(nodeId))
+    return
+
+  const button = controls.querySelector('.audio-toggle')
+  const player = new Player(button, new Meter(controls), { play: '▶', stop: '■' })
+  button.addEventListener('click', () => {
+    if (player.context)
+      void player.stop()
+    else
+      void player.start().catch(() => player.stop())
+  })
+  audioPlayers.set(nodeId, player)
 }
 
 function transmitLabel(source) {

@@ -3,21 +3,28 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#101114">
-    <title>IAX Monitor</title>
-    <link rel="stylesheet" href="/style.css">
+    <meta name="theme-color" content="#0b1017">
+    <title>节点拓扑</title>
+    <link rel="stylesheet" href="/map.css">
   </head>
   <body>
-    <main class="panel">
-      <div class="visualizer" aria-hidden="true">
-        <div class="spectrum" id="spectrum"></div>
-        <div class="level">
-          <div class="level-fill" id="level-fill"></div>
-          <div class="level-peak" id="level-peak"></div>
-        </div>
+    <header>
+      <div>
+        <p id="summary" aria-live="polite">正在连接状态服务…</p>
       </div>
-      <button id="play" type="button" aria-pressed="false">播放</button>
+      <div class="legend" aria-label="状态图例">
+        <span><i class="dot online"></i>在线</span>
+        <span><i class="dot offline"></i>离线</span>
+        <span><i class="dot local"></i>本地发射</span>
+        <span><i class="dot remote"></i>远程发射</span>
+        <span><i class="dot system"></i>系统发射</span>
+      </div>
+    </header>
+    <main id="topology" aria-label="AllStarLink 节点连接拓扑">
+      <canvas id="edges" aria-hidden="true"></canvas>
+      <div id="nodes"></div>
+      <p id="empty">等待完整节点状态…</p>
     </main>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/map.js"></script>
   </body>
 </html>

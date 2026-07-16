@@ -37,11 +37,11 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:3000`，点击“播放”后页面会连接同源的 `/audio` WebSocket；再次点击“停止”会关闭 WebSocket 和音频上下文。
+打开 `http://localhost:3000/audio.html`，点击“播放”后页面会连接同源的 `/audio` WebSocket；再次点击“停止”会关闭 WebSocket 和音频上下文。
 
-打开 `http://localhost:3000/map` 查看实时节点拓扑。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
+打开 `http://localhost:3000` 查看实时节点拓扑；`/map` 仍作为兼容入口。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
 
-根目录的 `nodes.json` 是地图的静态节点与链路配置。服务启动时会立即根据该文件生成默认离线状态，无需等待 Allmon3 返回；后续实时数据逐项覆盖默认值。`TYPE` 支持 `HUB` 和 `REPEATER`，`NAME` 保存节点短名称，`LINK` 声明允许显示的拓扑边，`FREQ` 保存中继频率信息。
+根目录的 `nodes.json` 是地图的静态节点与链路配置。服务启动时会立即根据该文件生成默认离线状态，无需等待 Allmon3 返回；后续实时数据逐项覆盖默认值。`TYPE` 支持 `HUB` 和 `REPEATER`，`NAME` 保存节点短名称，`LINK` 声明允许显示的拓扑边，`FREQ` 保存中继频率信息；HUB 配置 `AUDIO: true` 时，地图节点会显示音频播放控件。
 
 生产环境：
 

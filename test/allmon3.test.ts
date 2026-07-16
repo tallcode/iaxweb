@@ -6,7 +6,7 @@ import test from 'node:test'
 import { buildSnapshot, parseNodeDefinitions, statusFingerprint, transmitSource } from '../src/allmon3.js'
 
 const definitions: NodeDefinitions = {
-  1900: { LINK: ['1901'], TYPE: 'HUB' },
+  1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },
   1901: { FREQ: '145.400MHz/-0.6MHz/TSQ88.5Hz', NAME: 'BR5AI', TYPE: 'REPEATER' },
 }
 
@@ -17,6 +17,7 @@ test('builds defaults immediately when live details are missing', () => {
   const snapshot = buildSnapshot(new Set(['1900', '1901']), details, {}, definitions)
 
   assert.equal(snapshot['1900']?.TYPE, 'HUB')
+  assert.equal(snapshot['1900']?.AUDIO, true)
   assert.deepEqual(snapshot['1900']?.LINK, ['1901'])
   assert.equal(snapshot['1901']?.ONLINE, false)
   assert.equal(snapshot['1901']?.TXKEYED, false)
@@ -43,14 +44,15 @@ test('builds a sorted snapshot and applies name overrides', () => {
 
 test('validates static node definitions', () => {
   assert.deepEqual(parseNodeDefinitions({
-    1900: { LINK: ['1901'], TYPE: 'HUB' },
+    1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },
     1901: { NAME: 'BR5AI', TYPE: 'REPEATER' },
   }), {
-    1900: { LINK: ['1901'], TYPE: 'HUB' },
+    1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },
     1901: { NAME: 'BR5AI', TYPE: 'REPEATER' },
   })
   assert.throws(() => parseNodeDefinitions({ 1900: { TYPE: 'UNKNOWN' } }), /TYPE HUB or REPEATER/)
   assert.throws(() => parseNodeDefinitions({ 1900: { NAME: 1900, TYPE: 'HUB' } }), /invalid NAME/)
+  assert.throws(() => parseNodeDefinitions({ 1900: { AUDIO: 'yes', TYPE: 'HUB' } }), /invalid AUDIO/)
 })
 
 test('ignores continuously increasing timer fields when detecting changes', () => {
