@@ -13,6 +13,7 @@ import { WebSocketServer } from 'ws'
 import { Allmon3StatusService, parseNodeDefinitions } from './allmon3.js'
 import { loadConfig } from './config.js'
 import { NatsAudioService } from './nats-audio.js'
+import { startWebSocketHeartbeat } from './websocket-heartbeat.js'
 
 loadEnv({ quiet: true })
 const config = loadConfig()
@@ -28,6 +29,10 @@ const mimeTypes: Record<string, string> = {
 const httpServer = createServer(serveHttp)
 const audioWebSockets = new WebSocketServer({ noServer: true })
 const statusWebSockets = new WebSocketServer({ noServer: true })
+const stopWebSocketHeartbeat = startWebSocketHeartbeat([
+  { name: 'Audio', server: audioWebSockets },
+  { name: 'Status', server: statusWebSockets },
+])
 const allmon3 = new Allmon3StatusService({
   ...config.allmon3,
   nodes: nodeDefinitions,
@@ -147,6 +152,7 @@ function publishAllmon3Status(snapshot: StatusSnapshot): void {
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}, shutting down`)
   allmon3.stop()
+  stopWebSocketHeartbeat()
   audioWebSockets.clients.forEach((client: WebSocket) => client.close(1001, 'Server shutting down'))
   statusWebSockets.clients.forEach((client: WebSocket) => client.close(1001, 'Server shutting down'))
   audioWebSockets.close()

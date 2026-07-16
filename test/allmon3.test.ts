@@ -7,6 +7,7 @@ import {
   buildSnapshot,
   mergeNodeConfigs,
   parseNodeDefinitions,
+  SnapshotNotifier,
   statusFingerprint,
   TransmissionTracker,
   transmitSource,
@@ -139,4 +140,32 @@ test('keeps previous node configs when one catalog request fails', () => {
   assert.equal(result.configs.get('1901')?.statport, 16700)
   assert.deepEqual(result.retained, ['1901'])
   assert.deepEqual(result.unavailable, ['1902'])
+})
+
+test('coalesces status notifications into the latest snapshot within 200ms', () => {
+  const callbacks: Array<() => void> = []
+  const delivered: StatusSnapshot[] = []
+  const notifier = new SnapshotNotifier(
+    snapshot => delivered.push(snapshot),
+    200,
+    {
+      clear: () => {},
+      set: (callback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      },
+    },
+  )
+  const first: StatusSnapshot = { 1900: { ONLINE: false } }
+  const second: StatusSnapshot = { 1900: { ONLINE: true } }
+  const final: StatusSnapshot = { 1900: { ONLINE: true, TXKEYED: true } }
+
+  notifier.schedule(first)
+  notifier.schedule(second)
+  notifier.schedule(final)
+
+  assert.equal(callbacks.length, 1)
+  assert.deepEqual(delivered, [])
+  callbacks[0]?.()
+  assert.deepEqual(delivered, [final])
 })

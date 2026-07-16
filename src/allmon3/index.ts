@@ -1,6 +1,7 @@
 export { mergeNodeConfigs } from './catalog.js'
 export { parseNodeDefinitions } from './definitions.js'
 export { Allmon3StatusService } from './service.js'
+export { SnapshotNotifier } from './snapshot-notifier.js'
 export { buildSnapshot, statusFingerprint } from './snapshot.js'
 export { TransmissionTracker, transmitSource } from './transmission.js'
 export type {

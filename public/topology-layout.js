@@ -214,20 +214,26 @@ export class TopologyLayout {
     const distance = Math.max(1, Math.hypot(dx, dy))
     const unitX = dx / distance
     const unitY = dy / distance
-    const normalX = -unitY
-    const normalY = unitX
+    const travelMs = 2_500
+    const gapMs = 850
+    const cycleMs = (travelMs + gapMs) * 2
+    const elapsed = (timestamp + edgeIndex * 617) % cycleMs
 
-    for (const phase of [0, 0.5]) {
-      const progress = (timestamp / 1_650 + phase + edgeIndex * 0.13) % 1
-      this.drawDirectionalPulse(source, target, unitX, unitY, normalX, normalY, progress, 1)
-      this.drawDirectionalPulse(source, target, unitX, unitY, normalX, normalY, 1 - progress, -1)
+    if (elapsed < travelMs) {
+      this.drawDirectionalPulse(source, target, unitX, unitY, elapsed / travelMs, 1)
+      return
+    }
+
+    const returnStart = travelMs + gapMs
+    if (elapsed >= returnStart && elapsed < returnStart + travelMs) {
+      const progress = 1 - (elapsed - returnStart) / travelMs
+      this.drawDirectionalPulse(source, target, unitX, unitY, progress, -1)
     }
   }
 
-  drawDirectionalPulse(source, target, unitX, unitY, normalX, normalY, progress, direction) {
-    const laneOffset = direction * 3.5
-    const x = source.x + (target.x - source.x) * progress + normalX * laneOffset
-    const y = source.y + (target.y - source.y) * progress + normalY * laneOffset
+  drawDirectionalPulse(source, target, unitX, unitY, progress, direction) {
+    const x = source.x + (target.x - source.x) * progress
+    const y = source.y + (target.y - source.y) * progress
     const tailX = x - unitX * direction * 15
     const tailY = y - unitY * direction * 15
 

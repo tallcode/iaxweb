@@ -3,13 +3,14 @@ import { WebSocket } from 'ws'
 import { Allmon3ApiClient } from './api-client.js'
 import { mergeNodeConfigs } from './catalog.js'
 import { isRecord } from './definitions.js'
+import { SnapshotNotifier } from './snapshot-notifier.js'
 import { buildSnapshot, statusFingerprint } from './snapshot.js'
 import { TransmissionTracker } from './transmission.js'
 
 export class Allmon3StatusService {
   private readonly refreshIntervalMs: number
   private readonly requestTimeoutMs: number
-  private readonly onChange: (snapshot: StatusSnapshot) => void
+  private readonly notifier: SnapshotNotifier
   private readonly definitions: Allmon3ServiceOptions['nodes']
   private readonly api: Allmon3ApiClient
   private readonly configs = new Map<string, NodeConfig>()
@@ -31,7 +32,7 @@ export class Allmon3StatusService {
     this.expectedNodes = new Set(Object.keys(options.nodes))
     this.refreshIntervalMs = options.refreshIntervalMs
     this.requestTimeoutMs = options.requestTimeoutMs
-    this.onChange = options.onChange
+    this.notifier = new SnapshotNotifier(options.onChange)
     this.api = new Allmon3ApiClient(options.baseUrl, options.requestTimeoutMs)
   }
 
@@ -49,6 +50,7 @@ export class Allmon3StatusService {
 
   stop(): void {
     this.stopped = true
+    this.notifier.stop()
     if (this.refreshTimer)
       clearTimeout(this.refreshTimer)
     for (const timer of this.reconnectTimers.values())
@@ -264,7 +266,7 @@ export class Allmon3StatusService {
       return
 
     this.lastFingerprint = fingerprint
-    this.onChange(snapshot)
+    this.notifier.schedule(snapshot)
   }
 
   private nodesForPort(port: number): string[] {
