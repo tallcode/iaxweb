@@ -2,6 +2,8 @@ import type { NatsConnection, Subscription } from '@nats-io/transport-node'
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebSocket } from 'ws'
+import type { StatusSnapshot } from './allmon3.js'
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import { createServer } from 'node:http'
@@ -11,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { connect, RequestError, TimeoutError } from '@nats-io/transport-node'
 import { config as loadEnv } from 'dotenv'
 import { WebSocketServer } from 'ws'
+import { Allmon3StatusService, parseNodeDefinitions } from './allmon3.js'
 import { loadConfig } from './config.js'
 
 interface StateEvent {
@@ -22,6 +25,8 @@ interface StateEvent {
 loadEnv({ quiet: true })
 const config = loadConfig()
 const publicRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../public')
+const nodesPath = resolve(dirname(fileURLToPath(import.meta.url)), '../nodes.json')
+const nodeDefinitions = parseNodeDefinitions(JSON.parse(readFileSync(nodesPath, 'utf8')) as unknown)
 const mimeTypes: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -32,23 +37,40 @@ let latestState: StateEvent = { type: 'state', online: false, speaking: false }
 let nats: NatsConnection
 
 const httpServer = createServer(serveHttp)
-const webSockets = new WebSocketServer({ noServer: true })
+const audioWebSockets = new WebSocketServer({ noServer: true })
+const statusWebSockets = new WebSocketServer({ noServer: true })
+const allmon3 = new Allmon3StatusService({
+  ...config.allmon3,
+  nodes: nodeDefinitions,
+  onChange: publishAllmon3Status,
+})
 
 httpServer.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url ?? '/', 'http://localhost')
-  if (url.pathname !== '/audio') {
+  const server = url.pathname === '/audio'
+    ? audioWebSockets
+    : url.pathname === '/status'
+      ? statusWebSockets
+      : undefined
+  if (!server) {
     socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
     socket.destroy()
     return
   }
 
-  webSockets.handleUpgrade(request, socket, head, (client) => {
-    webSockets.emit('connection', client, request)
+  server.handleUpgrade(request, socket, head, (client) => {
+    server.emit('connection', client, request)
   })
 })
 
-webSockets.on('connection', (client) => {
+audioWebSockets.on('connection', (client) => {
   client.send(JSON.stringify(latestState))
+})
+
+statusWebSockets.on('connection', (client) => {
+  const snapshot = allmon3.currentSnapshot
+  if (snapshot)
+    client.send(JSON.stringify(snapshot))
 })
 
 const prefix = config.nats.subjectPrefix
@@ -72,6 +94,7 @@ async function main(): Promise<void> {
 
   await nats.flush()
   await requestSnapshot(nats)
+  allmon3.start()
 
   httpServer.listen(config.port, config.host, () => {
     console.log(`iaxweb listening on http://${config.host}:${config.port}`)
@@ -82,11 +105,19 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
   const url = new URL(request.url ?? '/', 'http://localhost')
   if (url.pathname === '/healthz') {
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
-    response.end(JSON.stringify({ ok: true, nats: !nats.isClosed() }))
+    response.end(JSON.stringify({
+      allmon3: Boolean(allmon3.currentSnapshot),
+      nats: !nats.isClosed(),
+      ok: true,
+    }))
     return
   }
 
-  const pathname = url.pathname === '/' ? '/index.html' : url.pathname
+  const pathname = url.pathname === '/'
+    ? '/index.html'
+    : ['/map', '/map/'].includes(url.pathname)
+        ? '/map.html'
+        : url.pathname
   let decodedPath: string
   try {
     decodedPath = decodeURIComponent(pathname)
@@ -117,7 +148,7 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
 
 async function relayAudio(subscription: Subscription): Promise<void> {
   for await (const message of subscription)
-    broadcast(message.data, true)
+    broadcastAudio(message.data, true)
 }
 
 async function relayEvents(subscription: Subscription): Promise<void> {
@@ -127,7 +158,7 @@ async function relayEvents(subscription: Subscription): Promise<void> {
       const event = JSON.parse(text) as unknown
       if (isStateEvent(event))
         latestState = event
-      broadcast(text, false)
+      broadcastAudio(text, false)
     }
     catch (error) {
       console.warn('Ignoring invalid NATS event:', error)
@@ -135,8 +166,8 @@ async function relayEvents(subscription: Subscription): Promise<void> {
   }
 }
 
-function broadcast(data: Uint8Array | string, binary: boolean): void {
-  for (const client of webSockets.clients) {
+function broadcastAudio(data: Uint8Array | string, binary: boolean): void {
+  for (const client of audioWebSockets.clients) {
     if (client.readyState !== client.OPEN)
       continue
 
@@ -145,6 +176,15 @@ function broadcast(data: Uint8Array | string, binary: boolean): void {
       continue
 
     client.send(data, { binary })
+  }
+}
+
+function publishAllmon3Status(snapshot: StatusSnapshot): void {
+  const message = JSON.stringify(snapshot)
+  console.log(message)
+  for (const client of statusWebSockets.clients) {
+    if (client.readyState === client.OPEN)
+      client.send(message)
   }
 }
 
@@ -180,19 +220,22 @@ async function logNatsStatus(connection: NatsConnection): Promise<void> {
 
     if (status.type === 'disconnect') {
       latestState = { type: 'state', online: false, speaking: false }
-      broadcast(JSON.stringify(latestState), false)
+      broadcastAudio(JSON.stringify(latestState), false)
     }
     else if (status.type === 'reconnect') {
       await requestSnapshot(connection)
-      broadcast(JSON.stringify(latestState), false)
+      broadcastAudio(JSON.stringify(latestState), false)
     }
   }
 }
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}, shutting down`)
-  webSockets.clients.forEach((client: WebSocket) => client.close(1001, 'Server shutting down'))
-  webSockets.close()
+  allmon3.stop()
+  audioWebSockets.clients.forEach((client: WebSocket) => client.close(1001, 'Server shutting down'))
+  statusWebSockets.clients.forEach((client: WebSocket) => client.close(1001, 'Server shutting down'))
+  audioWebSockets.close()
+  statusWebSockets.close()
   await new Promise<void>(resolveClose => httpServer.close(() => resolveClose()))
   await nats.drain()
 }

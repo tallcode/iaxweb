@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     ports:
       # host 8059 -> container 3000
-      - "8059:3000"
+      - '8059:3000'
     environment:
       # Point this at your NATS cluster. On Docker Desktop use
       # host.docker.internal to reach a NATS server running on the host.
@@ -16,3 +16,6 @@ services:
       NATS_USERNAME: ${NATS_USERNAME:-}
       NATS_PASSWORD: ${NATS_PASSWORD:-}
       NATS_TOKEN: ${NATS_TOKEN:-}
+      ALLMON3_BASE_URL: ${ALLMON3_BASE_URL:-http://44.27.31.33/allmon3/}
+      ALLMON3_REFRESH_INTERVAL_MS: ${ALLMON3_REFRESH_INTERVAL_MS:-30000}
+      ALLMON3_REQUEST_TIMEOUT_MS: ${ALLMON3_REQUEST_TIMEOUT_MS:-10000}

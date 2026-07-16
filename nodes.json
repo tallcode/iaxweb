@@ -1,0 +1,45 @@
+{
+  "1800": {
+    "NAME": "嘉兴HUB",
+    "TYPE": "HUB",
+    "LINK": [
+      "1801",
+      "1802",
+      "1803"
+    ]
+  },
+  "1801": {
+    "NAME": "BR5AF",
+    "TYPE": "REPEATER",
+    "FREQ": "145.520MHz/-0.6MHz/TSQ88.5Hz"
+  },
+  "1802": {
+    "NAME": "BR5AO",
+    "TYPE": "REPEATER",
+    "FREQ": "145.220MHz/-0.6MHz/TSQ88.5Hz"
+  },
+  "1803": {
+    "NAME": "BR5AR",
+    "TYPE": "REPEATER",
+    "FREQ": "145.420MHz/-0.6MHz/TSQ88.5Hz"
+  },
+  "1900": {
+    "NAME": "浙江HUB",
+    "TYPE": "HUB",
+    "LINK": [
+      "1800",
+      "1901",
+      "1902"
+    ]
+  },
+  "1901": {
+    "NAME": "BR5AI",
+    "TYPE": "REPEATER",
+    "FREQ": "145.400MHz/-0.6MHz/TSQ88.5Hz"
+  },
+  "1902": {
+    "NAME": "BR5BB",
+    "TYPE": "REPEATER",
+    "FREQ": "145.480MHz/-0.6MHz/TSQ88.5Hz"
+  }
+}

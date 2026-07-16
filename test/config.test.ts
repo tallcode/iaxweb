@@ -6,8 +6,14 @@ import { loadConfig } from '../src/config.js'
 test('loads defaults', () => {
   const config = loadConfig({})
   assert.equal(config.port, 3000)
+  assert.equal(config.allmon3.baseUrl, 'http://44.27.31.33/allmon3/')
   assert.deepEqual(config.nats.servers, ['nats://127.0.0.1:4222'])
   assert.equal(config.nats.subjectPrefix, 'iaxmon.nodes.1999')
+})
+
+test('normalizes the Allmon3 base URL', () => {
+  const config = loadConfig({ ALLMON3_BASE_URL: 'https://allmon.example/allmon3' })
+  assert.equal(config.allmon3.baseUrl, 'https://allmon.example/allmon3/')
 })
 
 test('loads a NATS cluster and username authentication', () => {

@@ -26,6 +26,9 @@ cp .env.example .env
 | `NATS_SUBJECT_PREFIX` | `iaxmon.nodes.1999` | 与 iaxmon 配置一致的 subject 根 |
 | `NATS_USERNAME` / `NATS_PASSWORD` | 未设置 | 用户名密码认证，必须一起配置 |
 | `NATS_TOKEN` | 未设置 | Token 认证，不能与用户名密码共用 |
+| `ALLMON3_BASE_URL` | `http://44.27.31.33/allmon3/` | Allmon3 根地址，必须以 HTTP(S) 访问 |
+| `ALLMON3_REFRESH_INTERVAL_MS` | `30000` | 刷新节点列表、名称和端口的间隔 |
+| `ALLMON3_REQUEST_TIMEOUT_MS` | `10000` | Allmon3 HTTP 请求超时 |
 
 ## 运行
 
@@ -36,13 +39,17 @@ npm run dev
 
 打开 `http://localhost:3000`，点击“播放”后页面会连接同源的 `/audio` WebSocket；再次点击“停止”会关闭 WebSocket 和音频上下文。
 
+打开 `http://localhost:3000/map` 查看实时节点拓扑。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
+
+根目录的 `nodes.json` 是地图的静态节点与链路配置。服务启动时会立即根据该文件生成默认离线状态，无需等待 Allmon3 返回；后续实时数据逐项覆盖默认值。`TYPE` 支持 `HUB` 和 `REPEATER`，`NAME` 保存节点短名称，`LINK` 声明允许显示的拓扑边，`FREQ` 保存中继频率信息。
+
 生产环境：
 
 ```bash
 npm start
 ```
 
-反向代理需要允许 `/audio` 的 WebSocket Upgrade。`GET /healthz` 可用于存活检查。
+反向代理需要允许 `/audio` 和 `/status` 的 WebSocket Upgrade。`GET /healthz` 可用于存活检查。
 
 ## Docker
 
@@ -80,6 +87,30 @@ ghcr.io/tallcode/iaxweb:sha-<commit>
 
 ## WebSocket 数据
 
+### `/audio`
+
 网关直接把 `<subject_prefix>.audio` 的 NATS 二进制 payload 转发为 WebSocket 二进制消息，把 `<subject_prefix>.events` 以及当前状态快照转发为文本 JSON。浏览器依据 iaxmon `NATS.md` 中的版本、类型、时间戳和 PCMU payload 解码播放。
 
 每个网关进程各自订阅完整 NATS 流，不使用 queue group；同一进程内的所有浏览器共享该订阅。慢速浏览器的待发送数据超过 4 KiB 时，网关会丢弃新音频帧，避免积压陈旧实时音频。网关与 NATS 断开时会向浏览器发送离线状态，重连后重新请求状态快照。
+
+### `/status`
+
+网关从 Allmon3 的节点列表、名称覆盖、节点端口和状态 WebSocket 聚合完整状态。消息是以节点号为 key 的 JSON：
+
+```json
+{
+  "1900": {
+    "ME": 1900,
+    "DESC": "浙江省业余无线电协会链路HUB",
+    "RXKEYED": false,
+    "TXKEYED": false,
+    "CONNS": {}
+  }
+}
+```
+
+首次收齐全部节点详情后发送一次。之后只有收发状态、PTT、连接、名称或节点列表等实际状态发生变化时才向所有客户端发送完整 JSON；`UPTIME`、`RELOADTIME`、`CTIME`、`SSK`、`SSU` 等持续递增的计时字段不会单独触发消息。新连接的客户端会立即收到当前完整快照。每次广播同样会向服务端控制台输出一行 JSON。
+
+每个节点还包含网关派生字段 `TX_SOURCE`（`local`、`remote`、`system` 或 `null`）和 `LAST_TX_AT`（ISO 8601 时间或 `null`）。最近发射时间保存在当前网关进程内；进程启动前的历史发射无法从 Allmon3 状态协议中恢复。
+
+地图只绘制 `nodes.json` 的 `LINK` 中声明的链路：Allmon3 `CONNS` 显示已建立连接时使用实线，否则使用虚线；未出现在 `LINK` 中的动态连接不绘制。HUB 使用独立样式并隐藏发射状态与最近发射时间，中继节点保持完整发射信息。

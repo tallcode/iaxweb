@@ -1,6 +1,11 @@
 import process from 'node:process'
 
 export interface Config {
+  allmon3: {
+    baseUrl: string
+    refreshIntervalMs: number
+    requestTimeoutMs: number
+  }
   host: string
   port: number
   nats: {
@@ -45,7 +50,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (token && username)
     throw new Error('NATS_TOKEN cannot be combined with NATS_USERNAME/NATS_PASSWORD')
 
+  const allmon3BaseUrl = optional(env, 'ALLMON3_BASE_URL') ?? 'http://44.27.31.33/allmon3/'
+  const parsedAllmon3Url = new URL(allmon3BaseUrl)
+  if (!['http:', 'https:'].includes(parsedAllmon3Url.protocol))
+    throw new Error('ALLMON3_BASE_URL must use http or https')
+  if (!parsedAllmon3Url.pathname.endsWith('/'))
+    parsedAllmon3Url.pathname += '/'
+
+  const refreshIntervalMs = parsePositiveInteger(
+    optional(env, 'ALLMON3_REFRESH_INTERVAL_MS') ?? '30000',
+    'ALLMON3_REFRESH_INTERVAL_MS',
+  )
+  const requestTimeoutMs = parsePositiveInteger(
+    optional(env, 'ALLMON3_REQUEST_TIMEOUT_MS') ?? '10000',
+    'ALLMON3_REQUEST_TIMEOUT_MS',
+  )
+
   return {
+    allmon3: {
+      baseUrl: parsedAllmon3Url.toString(),
+      refreshIntervalMs,
+      requestTimeoutMs,
+    },
     host: optional(env, 'HOST') ?? '0.0.0.0',
     port,
     nats: {
@@ -55,4 +81,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ...(token ? { token } : {}),
     },
   }
+}
+
+function parsePositiveInteger(value: string, name: string): number {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1)
+    throw new Error(`${name} must be a positive integer, got: ${value}`)
+  return parsed
 }

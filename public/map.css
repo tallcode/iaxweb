@@ -1,0 +1,351 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #e9eef6;
+  background: #0b1017;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 10%, rgb(37 59 85 / 28%), transparent 42%),
+    #0b1017;
+}
+
+header {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #273241;
+  background: rgb(11 16 23 / 88%);
+  backdrop-filter: blur(16px);
+}
+
+header p {
+  margin: 0;
+  color: #96a4b7;
+  font-size: 0.82rem;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem 1rem;
+  color: #aab5c4;
+  font-size: 0.76rem;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  white-space: nowrap;
+}
+
+.dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #5f6c7c;
+}
+
+.dot.online {
+  background: #4bc88b;
+}
+
+.dot.offline {
+  background: #6c7787;
+}
+
+.dot.local {
+  background: #ffb44a;
+}
+
+.dot.remote {
+  background: #62a8ff;
+}
+
+.dot.system {
+  background: #ad78df;
+}
+
+#topology {
+  position: relative;
+  min-height: 34rem;
+  overflow: hidden;
+}
+
+#topology::before {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(#334154 1px, transparent 1px);
+  background-size: 26px 26px;
+  content: "";
+  opacity: 0.22;
+}
+
+#edges,
+#nodes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  color: #96a4b7;
+  transform: translate(-50%, -50%);
+}
+
+.node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 0.38rem;
+  width: 14rem;
+  padding: 0.78rem 0.85rem;
+  border: 1px solid #354254;
+  border-radius: 0.9rem;
+  color: #e9eef6;
+  background: linear-gradient(rgb(21 29 40 / 94%), rgb(21 29 40 / 94%)), #0b1017;
+  box-shadow: 0 0.8rem 2.2rem rgb(0 0 0 / 24%);
+  transform: translate(-50%, -50%);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.node.offline {
+  color: #a2adba;
+  background: linear-gradient(rgb(23 28 35 / 94%), rgb(23 28 35 / 94%)), #0b1017;
+  border-color: #414a57;
+}
+
+.node.hub {
+  border-color: #3f8f91;
+  background: linear-gradient(rgb(18 46 51 / 96%), rgb(18 46 51 / 96%)), #0b1017;
+  box-shadow: 0 0 0 3px rgb(77 190 190 / 10%), 0 0.8rem 2.2rem rgb(0 0 0 / 24%);
+}
+
+.node.hub.offline {
+  border-color: #46565d;
+  background: linear-gradient(rgb(24 35 39 / 96%), rgb(24 35 39 / 96%)), #0b1017;
+  box-shadow: 0 0.8rem 2.2rem rgb(0 0 0 / 24%);
+}
+
+.node.repeater.online {
+  border-color: #3f8f91;
+  background: linear-gradient(rgb(18 46 51 / 96%), rgb(18 46 51 / 96%)), #0b1017;
+  box-shadow: 0 0 0 3px rgb(77 190 190 / 10%), 0 0.8rem 2.2rem rgb(0 0 0 / 24%);
+}
+
+.node.repeater.tx-local {
+  border-color: #d99132;
+  background: linear-gradient(rgb(61 43 22 / 96%), rgb(61 43 22 / 96%)), #0b1017;
+  box-shadow: 0 0 0 3px rgb(255 180 74 / 12%), 0 0.8rem 2.2rem rgb(0 0 0 / 24%);
+}
+
+.node.repeater.tx-remote {
+  border-color: #4b92e7;
+  background: linear-gradient(rgb(22 43 68 / 96%), rgb(22 43 68 / 96%)), #0b1017;
+  box-shadow: 0 0 0 3px rgb(98 168 255 / 12%), 0 0.8rem 2.2rem rgb(0 0 0 / 24%);
+}
+
+.node.repeater.tx-system {
+  border-color: #ad78df;
+  background: linear-gradient(rgb(48 31 65 / 96%), rgb(48 31 65 / 96%)), #0b1017;
+  box-shadow: 0 0 0 3px rgb(173 120 223 / 14%), 0 0.8rem 2.2rem rgb(0 0 0 / 24%);
+}
+
+.node-kind {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.15rem;
+  padding: 0.08rem 0.34rem;
+  border: 1px solid #4f999b;
+  border-radius: 999px;
+  color: #a5e0df;
+  font-size: 0.56rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.node-kind[hidden] {
+  display: none;
+}
+
+.online-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  color: #91d9b4;
+  font-size: 0.7rem;
+}
+
+.offline .online-label {
+  color: #919ba8;
+}
+
+.node-name {
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.15;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hub .node-name {
+  color: #c5e3e2;
+}
+
+.node-meta {
+  display: flex;
+  align-items: center;
+  min-height: 1.2rem;
+  overflow: hidden;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.node-frequency {
+  display: block;
+  overflow: hidden;
+  color: #aeb8c6;
+  font-size: 0.62rem;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+}
+
+.node-frequency[hidden] {
+  display: none;
+}
+
+.node-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #aeb8c6;
+  font-size: 0.7rem;
+}
+
+.node-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.node-status[hidden] {
+  display: none;
+}
+
+.tx-label {
+  color: #d3d9e2;
+  font-weight: 600;
+}
+
+.tx-label[hidden],
+.online-label[hidden],
+.node-status time[hidden] {
+  display: none;
+}
+
+.tx-local .tx-label {
+  color: #ffd08d;
+}
+
+.tx-remote .tx-label {
+  color: #a8d1ff;
+}
+
+.tx-system .tx-label {
+  color: #d8b1fb;
+}
+
+@media (max-width: 680px) {
+  header {
+    align-items: center;
+    flex-direction: row;
+    gap: 0.5rem;
+    padding: 0.65rem 0.7rem;
+  }
+
+  header p {
+    font-size: 0.68rem;
+    white-space: nowrap;
+  }
+
+  .legend {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 0.35rem;
+    min-width: 0;
+    font-size: 0.62rem;
+  }
+
+  .legend span {
+    gap: 0.22rem;
+  }
+
+  .legend .dot {
+    width: 0.42rem;
+    height: 0.42rem;
+  }
+
+  #topology {
+    min-height: 38rem;
+  }
+
+  .node {
+    gap: 0.28rem;
+    width: 6rem;
+    padding: 0.52rem 0.56rem;
+  }
+
+  .node-name {
+    font-size: 0.68rem;
+  }
+
+  .node-meta,
+  .node-status time {
+    display: none;
+  }
+
+  .node-status,
+  .online-label {
+    font-size: 0.62rem;
+  }
+
+  .node-status {
+    gap: 0.25rem;
+  }
+
+  .node-state {
+    gap: 0.3rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node {
+    transition: none;
+  }
+}
