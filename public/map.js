@@ -113,17 +113,19 @@ function createNodeElement() {
   element.className = 'node'
   element.innerHTML = `
     <p class="node-name"></p>
-    <div class="node-meta">
-      <span class="node-kind">HUB</span>
-      <span class="node-frequency"></span>
-    </div>
     <div class="node-footer">
-      <div class="node-status">
-        <span class="node-state">
-          <span class="online-label"><i class="dot"></i><span></span></span>
-          <span class="tx-label"></span>
-        </span>
-        <time></time>
+      <div class="node-details">
+        <div class="node-meta">
+          <span class="node-kind">HUB</span>
+          <span class="node-frequency"></span>
+        </div>
+        <div class="node-status">
+          <span class="node-state">
+            <span class="online-label"><i class="dot"></i><span></span></span>
+            <span class="tx-label"></span>
+          </span>
+          <time></time>
+        </div>
       </div>
       <div class="node-audio" hidden>
         <div class="spectrum" aria-hidden="true"></div>
