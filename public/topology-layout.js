@@ -40,7 +40,8 @@ export class TopologyLayout {
     const width = this.topology.clientWidth || 800
     const height = this.topology.clientHeight || 600
     const angle = total > 1 ? index / total * Math.PI * 2 : 0
-    const radius = Math.min(width, height) * 0.3
+    const radiusRatio = width < 680 ? 0.22 : 0.3
+    const radius = Math.min(width, height) * radiusRatio
     return {
       vx: 0,
       vy: 0,
@@ -92,6 +93,11 @@ export class TopologyLayout {
     const entries = [...this.positions.entries()]
     const width = this.topology.clientWidth
     const height = this.topology.clientHeight
+    const mobile = width < 680
+    const repulsionStrength = mobile ? 13_500 : 18_000
+    const linkStrength = mobile ? 0.0045 : 0.0028
+    const centerStrength = mobile ? 0.00105 : 0.0007
+    const idealDistance = mobile ? clamp(width * 0.3, 80, 120) : 265
 
     for (let left = 0; left < entries.length; left++) {
       for (let right = left + 1; right < entries.length; right++) {
@@ -101,7 +107,7 @@ export class TopologyLayout {
         const dy = second.y - first.y || 0.1
         const distanceSquared = Math.max(400, dx * dx + dy * dy)
         const distance = Math.sqrt(distanceSquared)
-        const force = 18_000 / distanceSquared
+        const force = repulsionStrength / distanceSquared
         const fx = dx / distance * force
         const fy = dy / distance * force
         first.vx -= fx
@@ -140,8 +146,7 @@ export class TopologyLayout {
       const dx = target.x - source.x
       const dy = target.y - source.y
       const distance = Math.max(1, Math.hypot(dx, dy))
-      const idealDistance = width < 680 ? clamp(width * 0.3, 80, 120) : 265
-      const force = (distance - idealDistance) * 0.0028
+      const force = (distance - idealDistance) * linkStrength
       const fx = dx / distance * force
       const fy = dy / distance * force
       source.vx += fx
@@ -152,11 +157,11 @@ export class TopologyLayout {
 
     for (const [nodeId, position] of entries) {
       const element = this.elements.get(nodeId)
-      const edgePadding = width < 680 ? 16 : 8
+      const edgePadding = mobile ? 16 : 8
       const marginX = Math.min(width / 2, (element?.offsetWidth || 0) / 2 + edgePadding)
       const marginY = Math.min(height / 2, (element?.offsetHeight || 0) / 2 + edgePadding)
-      position.vx += (width / 2 - position.x) * 0.0007
-      position.vy += (height / 2 - position.y) * 0.0007
+      position.vx += (width / 2 - position.x) * centerStrength
+      position.vy += (height / 2 - position.y) * centerStrength
       position.vx *= 0.88
       position.vy *= 0.88
       position.x = clamp(position.x + position.vx, marginX, Math.max(marginX, width - marginX))

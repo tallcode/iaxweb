@@ -12,6 +12,22 @@ const elements = new Map()
 const audioMeters = new Map()
 const audioPlayer = new AudioStreamPlayer()
 const mobileViewport = matchMedia('(max-width: 680px)')
+
+let viewportHeight = 0
+
+function syncViewportHeight() {
+  const nextHeight = Math.floor(window.visualViewport?.height ?? window.innerHeight)
+  if (nextHeight === viewportHeight)
+    return
+
+  viewportHeight = nextHeight
+  document.documentElement.style.setProperty('--app-height', `${nextHeight}px`)
+}
+
+syncViewportHeight()
+window.addEventListener('resize', syncViewportHeight)
+window.visualViewport?.addEventListener('resize', syncViewportHeight)
+
 const layout = new TopologyLayout(
   topology,
   canvas,

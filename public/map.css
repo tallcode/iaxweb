@@ -1,8 +1,16 @@
 :root {
+  --app-height: 100vh;
+
   color-scheme: dark;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #e9eef6;
   background: #0b1017;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --app-height: 100dvh;
+  }
 }
 
 * {
@@ -11,13 +19,33 @@
 
 body {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-height: 100vh;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: var(--app-height);
+  min-height: 0;
   margin: 0;
   overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background:
     radial-gradient(circle at 50% 10%, rgb(37 59 85 / 28%), transparent 42%),
     #0b1017;
+}
+
+.site-footer {
+  z-index: 2;
+  padding: 0.2rem 0.7rem 0.28rem;
+  text-align: center;
+  background: rgb(11 16 23 / 88%);
+}
+
+.site-footer a {
+  color: rgb(89 101 117 / 20%);
+  font-size: 0.58rem;
+  text-decoration: none;
+}
+
+.site-footer a:hover,
+.site-footer a:focus-visible {
+  color: #596575;
 }
 
 header {
@@ -84,7 +112,7 @@ header p {
 
 #topology {
   position: relative;
-  min-height: 34rem;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -386,10 +414,6 @@ header p {
   .legend .dot {
     width: 0.42rem;
     height: 0.42rem;
-  }
-
-  #topology {
-    min-height: 38rem;
   }
 
   .node {
