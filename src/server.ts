@@ -10,7 +10,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { config as loadEnv } from 'dotenv'
 import { WebSocketServer } from 'ws'
-import { Allmon3StatusService, parseNodeDefinitions } from './allmon3.js'
+import { Allmon3StatusService, parseNodeDefinitions, publicStatusSnapshot } from './allmon3.js'
 import { loadConfig } from './config.js'
 import { NatsAudioService } from './nats-audio.js'
 import { startWebSocketHeartbeat } from './websocket-heartbeat.js'
@@ -70,7 +70,7 @@ audioWebSockets.on('connection', (client) => {
 statusWebSockets.on('connection', (client) => {
   const snapshot = allmon3.currentSnapshot
   if (snapshot)
-    client.send(JSON.stringify(snapshot))
+    client.send(JSON.stringify(publicStatusSnapshot(snapshot)))
 })
 
 function main(): void {
@@ -141,7 +141,7 @@ function broadcastAudio(data: Uint8Array | string, binary: boolean): void {
 }
 
 function publishAllmon3Status(snapshot: StatusSnapshot): void {
-  const message = JSON.stringify(snapshot)
+  const message = JSON.stringify(publicStatusSnapshot(snapshot))
   // console.log(message)
   for (const client of statusWebSockets.clients) {
     if (client.readyState === client.OPEN)

@@ -71,12 +71,22 @@ test('topology only draws configured links and does not relayout for connection 
   const disconnected = collectEdges({
     1900: { CONNS: {}, LINK: ['1901'] },
     1901: { CONNS: {}, LINK: [] },
-    1902: { CONNS: { 1901: { CSTATE: 'ESTABLISHED' } }, LINK: [] },
+    1902: { CONNS: {}, LINK: [] },
+  })
+  const connecting = collectEdges({
+    1900: { CONNS: { 1901: { CSTATE: 'CONNECTING' } }, LINK: ['1901'] },
+    1901: { CONNS: {}, LINK: [] },
+    1902: { CONNS: { 1901: { CSTATE: 'CONNECTING' } }, LINK: [] },
   })
   const connected = collectEdges({
     1900: { CONNS: { 1901: { CSTATE: 'ESTABLISHED' } }, LINK: ['1901'] },
     1901: { CONNS: {}, LINK: [] },
     1902: { CONNS: { 1901: { CSTATE: 'ESTABLISHED' } }, LINK: [] },
+  })
+  const fixedConnected = collectEdges({
+    1900: { CONNS: { 1901: { CSTATE: 'ESTABLISHED' } }, LINK: ['1901'] },
+    1901: { CONNS: {}, LINK: [] },
+    1902: { CONNS: {}, LINK: [] },
   })
   const elements = new Map([
     ['1900', { offsetHeight: 80, offsetWidth: 224 }],
@@ -84,9 +94,17 @@ test('topology only draws configured links and does not relayout for connection 
     ['1902', { offsetHeight: 80, offsetWidth: 224 }],
   ])
 
-  assert.deepEqual(disconnected, [{ connected: undefined, source: '1900', target: '1901' }])
-  assert.deepEqual(connected, [{ connected: true, source: '1900', target: '1901' }])
+  assert.deepEqual(disconnected, [{ connected: false, source: '1900', target: '1901' }])
+  assert.deepEqual(connecting, [{ connected: false, source: '1900', target: '1901' }])
+  assert.deepEqual(connected, [
+    { connected: true, source: '1900', target: '1901' },
+    { connected: true, source: '1901', target: '1902' },
+  ])
   assert.equal(
+    graphSignature(['1900', '1901', '1902'], disconnected, elements, false),
+    graphSignature(['1900', '1901', '1902'], fixedConnected, elements, false),
+  )
+  assert.notEqual(
     graphSignature(['1900', '1901', '1902'], disconnected, elements, false),
     graphSignature(['1900', '1901', '1902'], connected, elements, false),
   )

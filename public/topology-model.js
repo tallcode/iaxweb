@@ -1,6 +1,10 @@
 export function collectEdges(snapshot) {
   const knownNodes = new Set(Object.keys(snapshot))
   const found = new Map()
+
+  // LINK describes planned fixed links, so keep them visible even when offline.
+  // Established CONNS that are not in LINK are temporary links; show them only
+  // while they remain connected.
   for (const [nodeId, node] of Object.entries(snapshot)) {
     for (const linkedId of node.LINK || []) {
       if (!knownNodes.has(linkedId))
@@ -11,6 +15,21 @@ export function collectEdges(snapshot) {
         source: pair[0],
         target: pair[1],
       })
+    }
+
+    for (const [connectedId, connection] of Object.entries(node.CONNS || {})) {
+      if (!knownNodes.has(connectedId) || !connectionIsEstablished(connection))
+        continue
+
+      const pair = [nodeId, connectedId].sort((left, right) => Number(left) - Number(right))
+      const key = pair.join(':')
+      if (!found.has(key)) {
+        found.set(key, {
+          connected: true,
+          source: pair[0],
+          target: pair[1],
+        })
+      }
     }
   }
   return [...found.values()]
@@ -26,10 +45,11 @@ export function graphSignature(nodeIds, edges, elements, mobile) {
 }
 
 function isConnected(snapshot, source, target) {
-  return connectionIsEstablished(snapshot[source]?.CONNS?.[target])
-    || connectionIsEstablished(snapshot[target]?.CONNS?.[source])
+  return Boolean(connectionIsEstablished(snapshot[source]?.CONNS?.[target])
+    || connectionIsEstablished(snapshot[target]?.CONNS?.[source]),
+  )
 }
 
 function connectionIsEstablished(connection) {
-  return connection && (!connection.CSTATE || connection.CSTATE === 'ESTABLISHED')
+  return connection?.CSTATE === 'ESTABLISHED'
 }

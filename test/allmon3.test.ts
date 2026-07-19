@@ -7,6 +7,7 @@ import {
   buildSnapshot,
   mergeNodeConfigs,
   parseNodeDefinitions,
+  publicStatusSnapshot,
   SnapshotNotifier,
   statusFingerprint,
   TransmissionTracker,
@@ -89,6 +90,47 @@ test('detects meaningful status changes', () => {
   const idle = { 1900: { RXKEYED: false, TXKEYED: false } }
   const transmitting = { 1900: { RXKEYED: true, TXKEYED: true } }
   assert.notEqual(statusFingerprint(idle), statusFingerprint(transmitting))
+})
+
+test('trims public status payloads without mutating full snapshots', () => {
+  const snapshot: StatusSnapshot = {
+    1900: {
+      CONNKEYED: true,
+      CONNS: {
+        1901: { CSTATE: 'ESTABLISHED', CTIME: '00:01:00', IP: '127.0.0.1' },
+        1902: { CSTATE: 'CONNECTING', IP: '127.0.0.2' },
+      },
+      DESC: '浙江 HUB',
+      ERROR: null,
+      LAST_TX_AT: null,
+      LINK: ['1901'],
+      ME: 1900,
+      ONLINE: true,
+      RXKEYED: true,
+      TXKEYED: true,
+      TX_SOURCE: 'local',
+      TYPE: 'HUB',
+      UPTIME: 123,
+    },
+  }
+
+  const publicSnapshot = publicStatusSnapshot(snapshot)
+
+  assert.deepEqual(publicSnapshot, {
+    1900: {
+      CONNS: {
+        1901: { CSTATE: 'ESTABLISHED' },
+      },
+      DESC: '浙江 HUB',
+      LAST_TX_AT: null,
+      LINK: ['1901'],
+      ONLINE: true,
+      TX_SOURCE: 'local',
+      TYPE: 'HUB',
+    },
+  })
+  assert.equal(snapshot['1900']?.UPTIME, 123)
+  assert.equal(snapshot['1900']?.CONNS?.['1901']?.CTIME, '00:01:00')
 })
 
 test('distinguishes local, remote, system and idle transmission', () => {
