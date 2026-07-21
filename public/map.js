@@ -177,7 +177,7 @@ function renderAudioControl(nodeId, element, hasAudio) {
     return
 
   const button = controls.querySelector('.audio-toggle')
-  const meter = new SpectrumMeter(controls)
+  const meter = new SpectrumMeter(controls, { enabled: () => !mobileViewport.matches })
   button.addEventListener('click', () => {
     void audioPlayer.toggle(nodeId, button, meter, { play: '▶', stop: '■' })
       .catch(() => audioPlayer.stop())
@@ -196,7 +196,10 @@ function transmitLabel(source) {
 }
 
 new ResizeObserver(() => layout.relayout()).observe(topology)
-mobileViewport.addEventListener('change', () => renderSnapshot(snapshot))
+mobileViewport.addEventListener('change', (event) => {
+  audioPlayer.setVisualizationEnabled(!event.matches)
+  renderSnapshot(snapshot)
+})
 
 const statusClient = new StatusStreamClient({
   onExpired: () => renderSnapshot(expireSnapshot(snapshot)),

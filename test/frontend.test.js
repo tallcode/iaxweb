@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { AudioStreamPlayer, SpectrumMeter } from '../public/audio-player.js'
 import { ReconnectingWebSocket } from '../public/reconnecting-websocket.js'
 import { expireSnapshot } from '../public/status-client.js'
 import { collectEdges, graphSignature } from '../public/topology-model.js'
@@ -9,6 +10,63 @@ class FakeSocket extends EventTarget {
     this.dispatchEvent(new Event('close'))
   }
 }
+
+test('disabled spectrum meters do not create bars or animation frames', () => {
+  let appendedBars = 0
+  const root = {
+    classList: { toggle() {} },
+    querySelector: selector => selector === '.spectrum'
+      ? { append: () => appendedBars++ }
+      : null,
+  }
+  const meter = new SpectrumMeter(root, { enabled: () => false })
+
+  meter.attach({ fftSize: 256, frequencyBinCount: 128 })
+
+  assert.equal(appendedBars, 0)
+  assert.equal(meter.frame, 0)
+  assert.equal(meter.analyser, null)
+})
+
+test('audio visualization can be disabled without stopping playback', () => {
+  let analysersCreated = 0
+  let analysersDisconnected = 0
+  let attached = 0
+  let detached = 0
+  const meter = {
+    enabled: true,
+    attach: () => attached++,
+    detach: () => detached++,
+  }
+  const player = new AudioStreamPlayer()
+  player.binding = { meter }
+  player.context = {
+    createAnalyser: () => {
+      analysersCreated++
+      return {
+        connect() {},
+        disconnect: () => analysersDisconnected++,
+        fftSize: 0,
+        smoothingTimeConstant: 0,
+      }
+    },
+    destination: {},
+  }
+
+  player.setVisualizationEnabled(false)
+  assert.equal(analysersCreated, 0)
+  assert.equal(detached, 1)
+
+  player.setVisualizationEnabled(true)
+  assert.equal(analysersCreated, 1)
+  assert.equal(attached, 1)
+  assert.ok(player.analyser)
+
+  player.setVisualizationEnabled(false)
+  assert.equal(detached, 2)
+  assert.equal(analysersDisconnected, 1)
+  assert.equal(player.analyser, null)
+})
 
 test('WebSocket retries reset only after the caller marks valid data healthy', () => {
   const sockets = []

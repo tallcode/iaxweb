@@ -41,13 +41,7 @@ export class AudioStreamPlayer {
       throw error
     }
     this.binding = { button, key, labels, meter }
-
-    const analyser = context.createAnalyser()
-    analyser.fftSize = 256
-    analyser.smoothingTimeConstant = 0.7
-    analyser.connect(context.destination)
-    this.analyser = analyser
-    meter.attach(analyser)
+    this.setVisualizationEnabled()
 
     this.resetTimeline()
     this.setPlaying(true)
@@ -78,6 +72,29 @@ export class AudioStreamPlayer {
     this.resetTimeline()
     await context?.close()
     this.setBindingPlaying(binding, false)
+  }
+
+  setVisualizationEnabled(enabled = this.binding?.meter.enabled ?? false) {
+    const binding = this.binding
+    const context = this.context
+    if (!binding || !context)
+      return
+
+    if (!enabled || !binding.meter.enabled) {
+      binding.meter.detach()
+      this.analyser?.disconnect()
+      this.analyser = null
+      return
+    }
+    if (this.analyser)
+      return
+
+    const analyser = context.createAnalyser()
+    analyser.fftSize = 256
+    analyser.smoothingTimeConstant = 0.7
+    analyser.connect(context.destination)
+    this.analyser = analyser
+    binding.meter.attach(analyser)
   }
 
   handleMessage(event) {
@@ -160,20 +177,14 @@ export class AudioStreamPlayer {
 }
 
 export class SpectrumMeter {
-  constructor(root) {
+  constructor(root, options = {}) {
     this.root = root
+    this.shouldEnable = options.enabled ?? (() => true)
     this.spectrum = root.querySelector('.spectrum')
     this.levelFill = root.querySelector('.level-fill')
     this.levelPeak = root.querySelector('.level-peak')
 
     this.bars = []
-    for (let index = 0; index < SPECTRUM_BARS; index++) {
-      const bar = document.createElement('span')
-      bar.className = 'bar'
-      this.spectrum.append(bar)
-      this.bars.push(bar)
-    }
-
     this.analyser = null
     this.timeData = null
     this.freqData = null
@@ -183,7 +194,14 @@ export class SpectrumMeter {
     this.reset()
   }
 
+  get enabled() {
+    return this.shouldEnable()
+  }
+
   attach(analyser) {
+    if (!this.enabled)
+      return
+    this.ensureBars()
     this.analyser = analyser
     this.timeData = new Uint8Array(analyser.fftSize)
     this.freqData = new Uint8Array(analyser.frequencyBinCount)
@@ -193,6 +211,17 @@ export class SpectrumMeter {
 
   setPlaying(playing) {
     this.root.classList?.toggle('is-playing', playing)
+  }
+
+  ensureBars() {
+    if (this.bars.length > 0)
+      return
+    for (let index = 0; index < SPECTRUM_BARS; index++) {
+      const bar = document.createElement('span')
+      bar.className = 'bar'
+      this.spectrum.append(bar)
+      this.bars.push(bar)
+    }
   }
 
   detach() {
