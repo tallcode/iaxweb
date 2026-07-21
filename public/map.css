@@ -488,7 +488,8 @@ header p {
     display: none;
   }
 
-  .node-audio .spectrum {
+  .node-audio .spectrum,
+  .node-audio.is-playing .spectrum {
     display: none;
   }
 
