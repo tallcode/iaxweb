@@ -23,12 +23,15 @@ cp .env.example .env
 | `HOST` | `0.0.0.0` | HTTP 监听地址 |
 | `PORT` | `3000` | HTTP 监听端口 |
 | `NATS_SERVERS` | `nats://127.0.0.1:4222` | 逗号分隔的集群入口 |
-| `NATS_SUBJECT_PREFIX` | `iaxmon.nodes.1999` | 与 iaxmon 配置一致的 subject 根 |
+| `NATS_SUBJECT_ROOT` | `iaxmon.nodes` | 与 iaxmon `nats.subject_root` 一致 |
 | `NATS_USERNAME` / `NATS_PASSWORD` | 未设置 | 用户名密码认证，必须一起配置 |
 | `NATS_TOKEN` | 未设置 | Token 认证，不能与用户名密码共用 |
 | `ALLMON3_BASE_URL` | `http://172.16.211.199/allmon3/` | Allmon3 根地址，必须以 HTTP(S) 访问 |
 | `ALLMON3_REFRESH_INTERVAL_MS` | `30000` | 刷新节点列表、名称和端口的间隔 |
 | `ALLMON3_REQUEST_TIMEOUT_MS` | `10000` | Allmon3 HTTP 请求超时 |
+
+旧版 `NATS_SUBJECT_PREFIX` 是包含单个节点 ID 的完整前缀，无法无歧义地迁移为多节点根。
+升级时必须删除该变量并设置 `NATS_SUBJECT_ROOT`；服务检测到旧变量会直接报错，避免静默订阅错误 subject。
 
 ## 运行
 
@@ -37,7 +40,7 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:3000/audio.html`，点击“播放”后页面会连接同源的 `/audio` WebSocket；再次点击“停止”会关闭 WebSocket 和音频上下文。
+打开 `http://localhost:3000/audio.html?node=1900`，点击“播放”后页面会连接同源的 `/audio/1900` WebSocket；再次点击“停止”会关闭 WebSocket 和音频上下文。
 
 打开 `http://localhost:3000` 查看实时节点拓扑；`/map` 仍作为兼容入口。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
 
@@ -60,7 +63,7 @@ docker build -t iaxweb .
 
 docker run --rm -p 3000:3000 \
   -e NATS_SERVERS=nats://nats.example:4222 \
-  -e NATS_SUBJECT_PREFIX=iaxmon.nodes.1999 \
+  -e NATS_SUBJECT_ROOT=iaxmon.nodes \
   iaxweb
 ```
 
@@ -87,11 +90,15 @@ ghcr.io/tallcode/iaxweb:sha-<commit>
 
 ## WebSocket 数据
 
-### `/audio`
+### `/audio/<nodeId>`
 
-网关直接把 `<subject_prefix>.audio` 的 NATS 二进制 payload 转发为 WebSocket 二进制消息，把 `<subject_prefix>.events` 以及当前状态快照转发为文本 JSON。浏览器依据 iaxmon `NATS.md` 中的版本、类型、时间戳和 PCMU payload 解码播放。
+节点 ID 为必填路径参数，并且必须是 `nodes.json` 中设置了 `AUDIO: true` 的节点。比如 `/audio/1900` 转发 `iaxmon.nodes.1900.audio/events`，`/audio/1800` 转发 `iaxmon.nodes.1800.audio/events`。不同节点的 WebSocket、NATS 状态和监听人数完全隔离。未知或未开启音频的节点会拒绝升级。
+
+网关直接把该节点 `<subject_prefix>.audio` 的 NATS 二进制 payload 转发为 WebSocket 二进制消息，把 `<subject_prefix>.events` 以及当前状态快照转发为文本 JSON。浏览器依据 iaxmon `NATS.md` 中的版本、类型、时间戳和 PCMU payload 解码播放。
 
 每个网关进程各自订阅完整 NATS 流，不使用 queue group；同一进程内的所有浏览器共享该订阅。慢速浏览器的待发送数据超过 4 KiB 时，网关会丢弃新音频帧，避免积压陈旧实时音频。网关与 NATS 断开时会向浏览器发送离线状态，重连后重新请求状态快照。
+
+网关按节点统计处于 OPEN 状态的 `/audio` WebSocket 数量，并在人数变化时及每 15 秒向该节点 `<subject_prefix>.listeners` 上报。进程退出时主动上报 0；异常退出则由 iaxmon 的心跳租约自动剔除。浏览器只有点击播放后才建立 `/audio`，因此无人收听的节点不会建立 IAX 呼叫；一个节点的连接和断线不影响其他节点。具体消息格式、租约和一分钟断开防抖见 iaxmon 的 `NATS.md`。
 
 ### `/status`
 
@@ -108,6 +115,8 @@ ghcr.io/tallcode/iaxweb:sha-<commit>
   }
 }
 ```
+
+设置了 `AUDIO: true` 的节点还包含 `LISTENERS`，表示 iaxmon 汇总的当前有效 Gateway 播放会话数；地图在未播放时用 users 图标和数字展示该值。
 
 首次收齐全部节点详情后发送一次。之后只有收发状态、PTT、连接、名称或节点列表等实际状态发生变化时才向所有客户端发送完整 JSON；`UPTIME`、`RELOADTIME`、`CTIME`、`SSK`、`SSU` 等持续递增的计时字段不会单独触发消息。新连接的客户端会立即收到当前完整快照。每次广播同样会向服务端控制台输出一行 JSON。
 

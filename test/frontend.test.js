@@ -52,6 +52,7 @@ test('expired status keeps static node metadata and clears live fields', () => {
       CONNS: { 1901: { CSTATE: 'ESTABLISHED' } },
       DESC: 'Hub',
       LINK: ['1901'],
+      LISTENERS: 3,
       ONLINE: true,
       TXKEYED: true,
       TX_SOURCE: 'system',
@@ -63,6 +64,7 @@ test('expired status keeps static node metadata and clears live fields', () => {
   assert.deepEqual(expired['1900'].LINK, ['1901'])
   assert.equal(expired['1900'].AUDIO, true)
   assert.equal(expired['1900'].ONLINE, false)
+  assert.equal(expired['1900'].LISTENERS, 0)
   assert.equal(expired['1900'].TX_SOURCE, null)
   assert.deepEqual(expired['1900'].CONNS, {})
 })

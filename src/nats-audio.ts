@@ -1,15 +1,18 @@
 import type { NatsConnection, Subscription } from '@nats-io/transport-node'
 import type { Config } from './config.js'
+import { randomUUID } from 'node:crypto'
 import { connect, RequestError, TimeoutError } from '@nats-io/transport-node'
 
 export interface StateEvent {
   type: 'state'
   online: boolean
   speaking: boolean
+  listeners?: number
 }
 
 interface NatsAudioOptions {
   config: Config['nats']
+  nodeId: string
   onAudio: (data: Uint8Array) => void
   onEvent: (text: string) => void
   onState: (state: StateEvent) => void
@@ -17,6 +20,7 @@ interface NatsAudioOptions {
 }
 
 const offlineState: StateEvent = { type: 'state', online: false, speaking: false }
+const listenerHeartbeatMs = 15_000
 
 export class NatsAudioService {
   private readonly config: Config['nats']
@@ -24,15 +28,20 @@ export class NatsAudioService {
   private readonly onEvent: (text: string) => void
   private readonly onState: (state: StateEvent) => void
   private readonly retryIntervalMs: number
+  private readonly subjectPrefix: string
   private connection: NatsConnection | undefined
   private retryTimer: NodeJS.Timeout | undefined
+  private heartbeatTimer: NodeJS.Timeout | undefined
   private retryAttempt = 0
   private stopped = true
   private transportConnected = false
   private state: StateEvent = offlineState
+  private readonly gatewayId = randomUUID()
+  private listenerCount = 0
 
   constructor(options: NatsAudioOptions) {
     this.config = options.config
+    this.subjectPrefix = `${options.config.subjectRoot}.${options.nodeId}`
     this.onAudio = options.onAudio
     this.onEvent = options.onEvent
     this.onState = options.onState
@@ -51,6 +60,8 @@ export class NatsAudioService {
     if (!this.stopped)
       return
     this.stopped = false
+    this.heartbeatTimer = setInterval(() => this.publishListeners(), listenerHeartbeatMs)
+    this.heartbeatTimer.unref()
     void this.connectOnce()
   }
 
@@ -58,11 +69,27 @@ export class NatsAudioService {
     this.stopped = true
     if (this.retryTimer)
       clearTimeout(this.retryTimer)
+    if (this.heartbeatTimer)
+      clearInterval(this.heartbeatTimer)
     this.retryTimer = undefined
-    this.transportConnected = false
+    this.heartbeatTimer = undefined
     const connection = this.connection
     this.connection = undefined
+    this.listenerCount = 0
+    if (connection) {
+      this.publishListeners(connection)
+      await connection.flush()
+    }
+    this.transportConnected = false
     await connection?.drain()
+  }
+
+  setListenerCount(count: number): void {
+    const next = Math.max(0, Math.trunc(count))
+    if (next === this.listenerCount)
+      return
+    this.listenerCount = next
+    this.publishListeners()
   }
 
   private async connectOnce(): Promise<void> {
@@ -84,11 +111,12 @@ export class NatsAudioService {
       this.connection = connection
       this.retryAttempt = 0
       this.transportConnected = true
-      const prefix = this.config.subjectPrefix
+      const prefix = this.subjectPrefix
       void this.relayAudio(connection.subscribe(`${prefix}.audio`))
       void this.relayEvents(connection.subscribe(`${prefix}.events`))
       void this.watchConnection(connection)
       await connection.flush()
+      this.publishListeners(connection)
       await this.requestSnapshot(connection)
     }
     catch (error) {
@@ -119,8 +147,9 @@ export class NatsAudioService {
       try {
         const event = JSON.parse(text) as unknown
         if (isStateEvent(event))
-          this.state = event
-        this.onEvent(text)
+          this.setState(event)
+        else
+          this.onEvent(text)
       }
       catch (error) {
         console.warn('Ignoring invalid NATS event:', error)
@@ -129,7 +158,7 @@ export class NatsAudioService {
   }
 
   private async requestSnapshot(connection: NatsConnection): Promise<void> {
-    const subject = `${this.config.subjectPrefix}.snapshot`
+    const subject = `${this.subjectPrefix}.snapshot`
     try {
       const reply = await connection.request(subject, undefined, { timeout: 2_000 })
       const state = JSON.parse(new TextDecoder().decode(reply.data)) as unknown
@@ -155,6 +184,7 @@ export class NatsAudioService {
       }
       else if (status.type === 'reconnect') {
         this.transportConnected = true
+        this.publishListeners(connection)
         await this.requestSnapshot(connection)
       }
     }
@@ -172,6 +202,23 @@ export class NatsAudioService {
     this.state = state
     this.onState(state)
   }
+
+  private publishListeners(connection = this.connection): void {
+    if (!connection || !this.transportConnected)
+      return
+    const subject = `${this.subjectPrefix}.listeners`
+    const payload = JSON.stringify({
+      type: 'listeners',
+      gateway_id: this.gatewayId,
+      count: this.listenerCount,
+    })
+    try {
+      connection.publish(subject, new TextEncoder().encode(payload))
+    }
+    catch (error) {
+      console.warn('Failed to publish listener count:', error)
+    }
+  }
 }
 
 export function isStateEvent(value: unknown): value is StateEvent {
@@ -181,6 +228,7 @@ export function isStateEvent(value: unknown): value is StateEvent {
   return event.type === 'state'
     && typeof event.online === 'boolean'
     && typeof event.speaking === 'boolean'
+    && (event.listeners === undefined || (Number.isInteger(event.listeners) && (event.listeners as number) >= 0))
 }
 
 function errorMessage(error: unknown): string {

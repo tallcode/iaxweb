@@ -304,7 +304,7 @@ header p {
 }
 
 .node-audio .spectrum {
-  display: flex;
+  display: none;
   gap: 1px;
   align-items: flex-end;
   width: 3.8rem;
@@ -314,6 +314,33 @@ header p {
   border: 1px solid #3f777a;
   border-radius: 0.28rem;
   background: #0b1519;
+}
+
+.node-audio.is-playing .spectrum {
+  display: flex;
+}
+
+.listener-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.22rem;
+  min-width: 2.8rem;
+  color: #a5e0df;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+.listener-count[hidden],
+.node-audio.is-playing .listener-count {
+  display: none;
+}
+
+.listener-count svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: currentcolor;
 }
 
 .node-audio .spectrum .bar {
@@ -462,6 +489,10 @@ header p {
   }
 
   .node-audio .spectrum {
+    display: none;
+  }
+
+  .listener-count {
     display: none;
   }
 

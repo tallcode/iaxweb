@@ -118,9 +118,16 @@ function renderNode(nodeId, node) {
   time.textContent = node.LAST_TX_AT ? `上次 ${timeFormatter.format(new Date(node.LAST_TX_AT))}` : '暂无发射记录'
   time.dateTime = node.LAST_TX_AT || ''
 
+  const listeners = Number.isInteger(node.LISTENERS) && node.LISTENERS >= 0 ? node.LISTENERS : 0
+  const listenerCount = element.querySelector('.listener-count')
+  listenerCount.hidden = !hasAudio
+  listenerCount.querySelector('.listener-number').textContent = String(listeners)
+  listenerCount.title = `${listeners}人正在监听`
+  listenerCount.setAttribute('aria-label', `${listeners}人正在监听`)
+
   renderAudioControl(nodeId, element, hasAudio)
   element.setAttribute('aria-label', isHub
-    ? `${nodeId} ${displayName}，HUB，${online ? '在线' : '离线'}`
+    ? `${nodeId} ${displayName}，HUB，${online ? '在线' : '离线'}${hasAudio ? `，${listeners}人正在监听` : ''}`
     : `${nodeId} ${displayName}，${online ? '在线' : '离线'}${source ? `，${transmitLabel(source)}` : ''}`)
 }
 
@@ -144,6 +151,12 @@ function createNodeElement() {
         </div>
       </div>
       <div class="node-audio" hidden>
+        <span class="listener-count" title="0人正在监听" aria-label="0人正在监听">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M16 11a4 4 0 1 0-3.45-6A4 4 0 0 0 16 11ZM8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 1c-1.2 0-2.33.28-3.34.77A7.45 7.45 0 0 1 15.5 19v1H22v-1c0-3.31-2.69-6-6-6ZM8 14c-3.87 0-7 2.69-7 6h14c0-3.31-3.13-6-7-6Z"/>
+          </svg>
+          <span class="listener-number">0</span>
+        </span>
         <div class="spectrum" aria-hidden="true"></div>
         <button class="audio-toggle" type="button" aria-label="播放音频" aria-pressed="false">▶</button>
       </div>

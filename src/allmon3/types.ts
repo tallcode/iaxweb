@@ -46,6 +46,7 @@ export interface PublicNodeStatusFields {
   FREQ: string
   LAST_TX_AT: string | null
   LINK: string[]
+  LISTENERS: number
   NAME: string
   ONLINE: boolean
   TX_SOURCE: TransmitSource

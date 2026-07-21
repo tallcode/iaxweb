@@ -27,10 +27,13 @@ export function statusFingerprint(snapshot: StatusSnapshot): string {
   return JSON.stringify(normalizeForComparison(snapshot))
 }
 
-export function publicStatusSnapshot(snapshot: StatusSnapshot): PublicStatusSnapshot {
+export function publicStatusSnapshot(
+  snapshot: StatusSnapshot,
+  listeners: ReadonlyMap<string, number> = new Map(),
+): PublicStatusSnapshot {
   return Object.fromEntries(Object.entries(snapshot).map(([node, status]) => [
     node,
-    publicNodeStatus(status),
+    publicNodeStatus(status, listeners.get(node)),
   ]))
 }
 
@@ -49,7 +52,7 @@ function normalizeForComparison(value: unknown): JsonValue {
   return normalized
 }
 
-function publicNodeStatus(status: NodeStatus): PublicNodeStatus {
+function publicNodeStatus(status: NodeStatus, listeners?: number): PublicNodeStatus {
   const publicStatus: PublicNodeStatus = {}
   if (status.AUDIO !== undefined)
     publicStatus.AUDIO = status.AUDIO
@@ -63,6 +66,8 @@ function publicNodeStatus(status: NodeStatus): PublicNodeStatus {
     publicStatus.LAST_TX_AT = status.LAST_TX_AT
   if (status.LINK !== undefined)
     publicStatus.LINK = status.LINK
+  if (status.AUDIO === true)
+    publicStatus.LISTENERS = listeners ?? 0
   if (status.NAME !== undefined)
     publicStatus.NAME = status.NAME
   if (status.ONLINE !== undefined)

@@ -10,7 +10,7 @@ export interface Config {
   port: number
   nats: {
     servers: string[]
-    subjectPrefix: string
+    subjectRoot: string
     username?: string
     password?: string
     token?: string
@@ -37,9 +37,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (servers.length === 0)
     throw new Error('NATS_SERVERS must contain at least one server URL')
 
-  const subjectPrefix = optional(env, 'NATS_SUBJECT_PREFIX') ?? 'iaxmon.nodes.1999'
-  if (subjectPrefix.startsWith('.') || subjectPrefix.endsWith('.') || invalidSubjectToken.test(subjectPrefix))
-    throw new Error('NATS_SUBJECT_PREFIX is not a valid subject root')
+  const legacySubjectPrefix = optional(env, 'NATS_SUBJECT_PREFIX')
+  const configuredSubjectRoot = optional(env, 'NATS_SUBJECT_ROOT')
+  if (legacySubjectPrefix)
+    throw new Error('NATS_SUBJECT_PREFIX is no longer supported; set NATS_SUBJECT_ROOT and remove NATS_SUBJECT_PREFIX')
+
+  const subjectRoot = configuredSubjectRoot ?? 'iaxmon.nodes'
+  if (subjectRoot.startsWith('.') || subjectRoot.endsWith('.') || subjectRoot.includes('..') || invalidSubjectToken.test(subjectRoot))
+    throw new Error('NATS_SUBJECT_ROOT is not a valid subject root')
 
   const username = optional(env, 'NATS_USERNAME')
   const password = optional(env, 'NATS_PASSWORD')
@@ -76,7 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port,
     nats: {
       servers,
-      subjectPrefix,
+      subjectRoot,
       ...(username && password ? { username, password } : {}),
       ...(token ? { token } : {}),
     },

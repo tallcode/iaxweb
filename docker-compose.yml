@@ -11,7 +11,7 @@ services:
       # Point this at your NATS cluster. On Docker Desktop use
       # host.docker.internal to reach a NATS server running on the host.
       NATS_SERVERS: ${NATS_SERVERS:-nats://host.docker.internal:4222}
-      NATS_SUBJECT_PREFIX: ${NATS_SUBJECT_PREFIX:-iaxmon.nodes.1999}
+      NATS_SUBJECT_ROOT: ${NATS_SUBJECT_ROOT:-iaxmon.nodes}
       # Optional auth (leave unset to disable):
       NATS_USERNAME: ${NATS_USERNAME:-}
       NATS_PASSWORD: ${NATS_PASSWORD:-}

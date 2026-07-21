@@ -29,6 +29,8 @@ const mimeTypes: Record<string, string> = {
 const httpServer = createServer(serveHttp)
 const audioWebSockets = new WebSocketServer({ noServer: true })
 const statusWebSockets = new WebSocketServer({ noServer: true })
+const audioClientNodes = new WeakMap<WebSocket, string>()
+const audioListeners = new Map<string, number>()
 const stopWebSocketHeartbeat = startWebSocketHeartbeat([
   { name: 'Audio', server: audioWebSockets },
   { name: 'Status', server: statusWebSockets },
@@ -38,16 +40,24 @@ const allmon3 = new Allmon3StatusService({
   nodes: nodeDefinitions,
   onChange: publishAllmon3Status,
 })
-const natsAudio = new NatsAudioService({
-  config: config.nats,
-  onAudio: data => broadcastAudio(data, true),
-  onEvent: text => broadcastAudio(text, false),
-  onState: state => broadcastAudio(JSON.stringify(state), false),
-})
+const natsAudio = new Map<string, NatsAudioService>()
+for (const [nodeId, definition] of Object.entries(nodeDefinitions)) {
+  if (definition.AUDIO !== true)
+    continue
+  audioListeners.set(nodeId, 0)
+  natsAudio.set(nodeId, new NatsAudioService({
+    config: config.nats,
+    nodeId,
+    onAudio: data => broadcastAudio(nodeId, data, true),
+    onEvent: text => broadcastAudio(nodeId, text, false),
+    onState: state => publishAudioState(nodeId, state),
+  }))
+}
 
 httpServer.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url ?? '/', 'http://localhost')
-  const server = url.pathname === '/audio'
+  const audioNode = audioNodeFromPath(url.pathname)
+  const server = audioNode && natsAudio.has(audioNode)
     ? audioWebSockets
     : url.pathname === '/status'
       ? statusWebSockets
@@ -63,19 +73,35 @@ httpServer.on('upgrade', (request, socket, head) => {
   })
 })
 
-audioWebSockets.on('connection', (client) => {
-  client.send(JSON.stringify(natsAudio.currentState))
+audioWebSockets.on('connection', (client, request) => {
+  // The upgrade path validates this parameter before accepting the socket.
+  const nodeId = audioNodeFromPath(new URL(request.url ?? '/', 'http://localhost').pathname)
+  const service = nodeId ? natsAudio.get(nodeId) : undefined
+  if (!nodeId || !service) {
+    client.close(1008, 'Unknown audio node')
+    return
+  }
+  audioClientNodes.set(client, nodeId)
+  updateAudioListenerCount(nodeId)
+  client.send(JSON.stringify(service.currentState))
+  client.once('close', () => updateAudioListenerCount(nodeId))
 })
+
+function audioNodeFromPath(pathname: string): string | undefined {
+  const match = /^\/audio\/([^/]+)$/.exec(pathname)
+  return match?.[1]
+}
 
 statusWebSockets.on('connection', (client) => {
   const snapshot = allmon3.currentSnapshot
   if (snapshot)
-    client.send(JSON.stringify(publicStatusSnapshot(snapshot)))
+    client.send(JSON.stringify(publicStatusSnapshot(snapshot, audioListeners)))
 })
 
 function main(): void {
   allmon3.start()
-  natsAudio.start()
+  for (const service of natsAudio.values())
+    service.start()
 
   httpServer.listen(config.port, config.host, () => {
     console.log(`iaxweb listening on http://${config.host}:${config.port}`)
@@ -88,7 +114,7 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
     response.end(JSON.stringify({
       allmon3: Boolean(allmon3.currentSnapshot),
-      nats: natsAudio.connected,
+      nats: natsAudio.size > 0 && [...natsAudio.values()].every(service => service.connected),
       ok: true,
     }))
     return
@@ -127,9 +153,9 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
   }
 }
 
-function broadcastAudio(data: Uint8Array | string, binary: boolean): void {
+function broadcastAudio(nodeId: string, data: Uint8Array | string, binary: boolean): void {
   for (const client of audioWebSockets.clients) {
-    if (client.readyState !== client.OPEN)
+    if (client.readyState !== client.OPEN || audioClientNodes.get(client) !== nodeId)
       continue
 
     // Real-time audio is more useful dropped than delivered late.
@@ -140,8 +166,30 @@ function broadcastAudio(data: Uint8Array | string, binary: boolean): void {
   }
 }
 
+function updateAudioListenerCount(nodeId: string): void {
+  let count = 0
+  for (const client of audioWebSockets.clients) {
+    if (client.readyState === client.OPEN && audioClientNodes.get(client) === nodeId)
+      count++
+  }
+  natsAudio.get(nodeId)?.setListenerCount(count)
+}
+
+function publishAudioState(nodeId: string, state: { listeners?: number }): void {
+  broadcastAudio(nodeId, JSON.stringify(state), false)
+
+  const listeners = state.listeners ?? 0
+  if (audioListeners.get(nodeId) === listeners)
+    return
+  audioListeners.set(nodeId, listeners)
+
+  const snapshot = allmon3.currentSnapshot
+  if (snapshot)
+    publishAllmon3Status(snapshot)
+}
+
 function publishAllmon3Status(snapshot: StatusSnapshot): void {
-  const message = JSON.stringify(publicStatusSnapshot(snapshot))
+  const message = JSON.stringify(publicStatusSnapshot(snapshot, audioListeners))
   // console.log(message)
   for (const client of statusWebSockets.clients) {
     if (client.readyState === client.OPEN)
@@ -158,7 +206,7 @@ async function shutdown(signal: string): Promise<void> {
   audioWebSockets.close()
   statusWebSockets.close()
   await new Promise<void>(resolveClose => httpServer.close(() => resolveClose()))
-  await natsAudio.stop()
+  await Promise.all([...natsAudio.values()].map(service => service.stop()))
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

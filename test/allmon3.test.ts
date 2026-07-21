@@ -133,6 +133,20 @@ test('trims public status payloads without mutating full snapshots', () => {
   assert.equal(snapshot['1900']?.CONNS?.['1901']?.CTIME, '00:01:00')
 })
 
+test('adds listener counts to audio nodes in the public snapshot', () => {
+  const snapshot: StatusSnapshot = {
+    1800: { AUDIO: true, TYPE: 'HUB' },
+    1900: { AUDIO: true, TYPE: 'HUB' },
+    1901: { TYPE: 'REPEATER' },
+  }
+
+  assert.deepEqual(publicStatusSnapshot(snapshot, new Map([['1800', 3]])), {
+    1800: { AUDIO: true, LISTENERS: 3, TYPE: 'HUB' },
+    1900: { AUDIO: true, LISTENERS: 0, TYPE: 'HUB' },
+    1901: { TYPE: 'REPEATER' },
+  })
+})
+
 test('distinguishes local, remote, system and idle transmission', () => {
   assert.equal(transmitSource({ RXKEYED: true, TXKEYED: true }), 'local')
   assert.equal(transmitSource({ CONNKEYED: true, RXKEYED: false, TXKEYED: true }), 'remote')

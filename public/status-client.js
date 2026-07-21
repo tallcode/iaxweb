@@ -53,6 +53,7 @@ export function expireSnapshot(snapshot) {
       CONNKEYEDNODE: false,
       CONNS: {},
       ERROR: 'Status WebSocket disconnected',
+      LISTENERS: 0,
       ONLINE: false,
       RXKEYED: false,
       TXEKEYED: false,

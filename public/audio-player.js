@@ -51,7 +51,7 @@ export class AudioStreamPlayer {
 
     this.resetTimeline()
     this.setPlaying(true)
-    this.connection = new ReconnectingWebSocket('/audio', {
+    this.connection = new ReconnectingWebSocket(`/audio/${encodeURIComponent(key)}`, {
       binaryType: 'arraybuffer',
       delays: [1_000, 2_000, 8_000, 32_000],
       maxFailures: 4,
@@ -152,6 +152,7 @@ export class AudioStreamPlayer {
   setBindingPlaying(binding, playing) {
     if (!binding)
       return
+    binding.meter.setPlaying?.(playing)
     binding.button.textContent = playing ? binding.labels.stop : binding.labels.play
     binding.button.setAttribute('aria-label', playing ? '停止播放' : '播放音频')
     binding.button.setAttribute('aria-pressed', String(playing))
@@ -160,6 +161,7 @@ export class AudioStreamPlayer {
 
 export class SpectrumMeter {
   constructor(root) {
+    this.root = root
     this.spectrum = root.querySelector('.spectrum')
     this.levelFill = root.querySelector('.level-fill')
     this.levelPeak = root.querySelector('.level-peak')
@@ -187,6 +189,10 @@ export class SpectrumMeter {
     this.freqData = new Uint8Array(analyser.frequencyBinCount)
     if (!this.frame)
       this.frame = requestAnimationFrame(this.render)
+  }
+
+  setPlaying(playing) {
+    this.root.classList?.toggle('is-playing', playing)
   }
 
   detach() {
