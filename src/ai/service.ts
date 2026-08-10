@@ -195,28 +195,27 @@ export class AiService {
     }
   }
 
-  // Stage 2: normalize the transcript, extract the speaker callsign and flag
-  // risky content. Recent parsed turns are passed along for continuity.
-  // The parse result is the primary log line; on failure the raw recognition
-  // is printed instead.
+  // LLM 解析：将识别文本交给对话模型，完整版输出规范化文本、发言人呼号与
+  // 风控，简化版只输出呼号。最近解析过的轮次作为上下文传入以保持连续性。
+  // 解析结果打印为主日志行；解析失败时降级打印原始识别文本。
   private async parseTranscript(nodeId: string, runtime: NodeRuntime, record: SegmentRecord, text: string): Promise<void> {
     const shortId = record.id.slice(0, 8)
     const seconds = (record.durationMs / 1000).toFixed(1)
-    // Without stage 2 the raw recognition is the only output.
+    // 未启用 LLM 解析时，原始识别文本是唯一的输出。
     if (!this.llm) {
       console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s | ${text}`)
       return
     }
     try {
       const parsed = await this.llm.parse(text, runtime.store.llmHistory(undefined, record.id))
-      // Undefined means prompt/schema files are absent: stage 2 is off.
+      // 解析返回 undefined 说明提示词/schema 文件缺失：LLM 解析未生效。
       if (!parsed || this.stopped)
         return
       record.revise = parsed.message
       record.callsign = parsed.Callsign
       record.risk = parsed.risk
-      console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.Callsign ? ` 呼号=${parsed.Callsign}` : ''} | ${parsed.message}`)
-      if (parsed.Callsign) {
+      console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.Callsign ? ` 呼号=${parsed.Callsign}` : ''} | ${parsed.message ?? text}`)
+      if (parsed.Callsign && this.config.llmPublishSpot) {
         this.onSpot?.({
           at: new Date().toISOString(),
           callsign: parsed.Callsign,
@@ -224,8 +223,9 @@ export class AiService {
           segmentId: record.id,
         })
       }
-      if (parsed.risk.level >= 3)
-        console.warn(`${logTimestamp()} [${nodeId}]: 风控告警 ${shortId} L${parsed.risk.level}: ${parsed.risk.reason}`)
+      const risk = parsed.risk
+      if (risk && risk.level >= 3)
+        console.warn(`${logTimestamp()} [${nodeId}]: 风控告警 ${shortId} L${risk.level}: ${risk.reason}`)
     }
     catch {
       console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s | ${text}`)

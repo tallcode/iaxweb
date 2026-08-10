@@ -165,8 +165,36 @@ test('retries on server errors', async () => {
 
   const parsed = await parser.parse('x')
   assert.ok(parsed)
-  assert.equal(parsed.risk.level, 4)
+  assert.equal(parsed.risk?.level, 4)
   assert.equal(calls.length, 2)
+})
+
+test('parses a callsign-only response (simple example schema)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iaxweb-llm-'))
+  try {
+    const promptFile = join(dir, 'prompt-simple.example.txt')
+    const schemaFile = join(dir, 'schema-simple.example.json')
+    writeFileSync(promptFile, '只提取呼号')
+    writeFileSync(schemaFile, JSON.stringify({
+      additionalProperties: false,
+      properties: {
+        Callsign: { pattern: '^B[ADGHIY][0-9][A-Z]{2,3}$', type: 'string' },
+      },
+      required: [],
+      type: 'object',
+    }))
+    const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ message: undefined, risk: undefined }))), { promptFile, schemaFile })
+
+    const parsed = await parser.parse('这里是 BG5ATV')
+    assert.ok(parsed)
+    assert.equal(parsed.Callsign, 'BD5XXX')
+    assert.equal(parsed.message, undefined)
+    assert.equal(parsed.risk, undefined)
+    assert.equal(calls[0]?.body.messages[0]?.content.includes('只提取呼号'), true)
+  }
+  finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
 })
 
 test('skips parsing when prompt or schema files are missing', async () => {

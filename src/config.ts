@@ -38,6 +38,7 @@ export interface AiConfig {
   llmEnableThinking: boolean
   llmModel: string
   llmPromptFile: string
+  llmPublishSpot: boolean
   llmSchemaFile: string
   llmThinkingBudget?: number | undefined
   llmTimeoutMs: number
@@ -166,6 +167,10 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     throw new Error('AI_LLM_ENABLED must be "true" or "false"')
   const llmModel = optional(env, 'AI_LLM_MODEL') ?? 'qwen3.7-flash'
 
+  const llmPublishSpotText = optional(env, 'AI_LLM_PUBLISH_SPOT') ?? 'true'
+  if (llmPublishSpotText !== 'true' && llmPublishSpotText !== 'false')
+    throw new Error('AI_LLM_PUBLISH_SPOT must be "true" or "false"')
+
   const llmEnableThinkingText = optional(env, 'AI_LLM_ENABLE_THINKING') ?? 'false'
   if (llmEnableThinkingText !== 'true' && llmEnableThinkingText !== 'false')
     throw new Error('AI_LLM_ENABLE_THINKING must be "true" or "false"')
@@ -191,6 +196,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     llmEnableThinking: llmEnableThinkingText === 'true',
     llmModel,
     llmPromptFile: resolveProjectPath(optional(env, 'AI_LLM_PROMPT_FILE') ?? 'ai/prompt.txt'),
+    llmPublishSpot: llmPublishSpotText === 'true',
     llmSchemaFile: resolveProjectPath(optional(env, 'AI_LLM_SCHEMA_FILE') ?? 'ai/schema.json'),
     ...(llmThinkingBudget !== undefined ? { llmThinkingBudget } : {}),
     llmTimeoutMs,

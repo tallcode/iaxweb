@@ -18,6 +18,7 @@ test('loads AI defaults', () => {
   assert.equal(config.llmTimeoutMs, 30_000)
   assert.equal(config.llmThinkingBudget, undefined)
   assert.equal(config.llmModel, 'qwen3.7-flash')
+  assert.equal(config.llmPublishSpot, true)
   assert.ok(config.llmPromptFile.endsWith('ai/prompt.txt'))
   assert.ok(config.llmSchemaFile.endsWith('ai/schema.json'))
   assert.ok(config.hotwordsFile.endsWith('ai/hotwords.json'))
@@ -78,4 +79,22 @@ test('rejects an invalid AI_LLM_ENABLED', () => {
 test('can disable the LLM stage', () => {
   const config = loadAiConfig({ AI_LLM_ENABLED: 'false' })
   assert.equal(config.llmEnabled, false)
+})
+
+test('can disable spot publishing', () => {
+  const config = loadAiConfig({ AI_LLM_PUBLISH_SPOT: 'false' })
+  assert.equal(config.llmPublishSpot, false)
+})
+
+test('rejects an invalid AI_LLM_PUBLISH_SPOT', () => {
+  assert.throws(() => loadAiConfig({ AI_LLM_PUBLISH_SPOT: 'yes' }), /true.*false/)
+})
+
+test('explicit prompt and schema files override the defaults', () => {
+  const config = loadAiConfig({
+    AI_LLM_PROMPT_FILE: '/custom/prompt.txt',
+    AI_LLM_SCHEMA_FILE: '/custom/schema.json',
+  })
+  assert.ok(config.llmPromptFile.endsWith('custom/prompt.txt'))
+  assert.ok(config.llmSchemaFile.endsWith('custom/schema.json'))
 })

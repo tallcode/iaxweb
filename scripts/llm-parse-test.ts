@@ -1,4 +1,4 @@
-// Manual stage-2 smoke test: npm run llm-parse-test -- "语音识别文本"
+// 手动验证 LLM 解析：npm run llm-parse-test -- "语音识别文本"
 import process from 'node:process'
 import { config as loadEnv } from 'dotenv'
 import { LlmParser } from '../src/ai/llm-parser.js'
@@ -32,7 +32,7 @@ const parser = new LlmParser({
 try {
   const parsed = await parser.parse(text)
   if (!parsed) {
-    console.error('Stage 2 未生效：缺少 ai/prompt.txt 或 ai/schema.json')
+    console.error('LLM 解析未生效：缺少提示词或 schema 文件')
     process.exit(1)
   }
   console.log(JSON.stringify(parsed, null, 2))

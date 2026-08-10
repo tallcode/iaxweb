@@ -66,17 +66,33 @@ AI 按节点独立启用，与网关其余功能互不影响；未启用的节�
 - `ai/hotwords.json`：即时热词，格式 `{"词": 权重}`，权重 1~5（或 50 超热词）。适合放呼号、Q 简语、值机常用词；
 - `ai/background.txt`：背景文本（400 字以内），如网名称、NCS、流程说明。
 
-Stage 2（LLM 后处理）：每条识别结果再调用文本模型，规范化文本、提取发言人呼号到 `Callsign` 字段（识别不出或不一致时省略）、风控判断；调用时附带最近 `AI_CONTEXT_WINDOW_MS` 内的解析历史作为对话上下文。输出按 `ai/schema.json` 严格校验，不合规记警告。`AI_LLM_ENABLED=false` 可关闭：
+LLM 后处理：每条识别结果再调用文本模型，对识别文本做结构化解析。调用时附带最近 `AI_CONTEXT_WINDOW_MS` 内的解析历史作为对话上下文。输出按 schema 文件严格校验，不合规记警告。`AI_LLM_ENABLED=false` 可关闭：
 
-- `ai/prompt.txt`：提示词，每次调用前重新读取；
-- `ai/schema.json`：输出 JSON Schema，每次调用前重新读取。
+提示词与输出 schema 决定解析行为，有两套可选（每次调用前重新读取，保存后立即生效）：
 
-两个文件任一缺失时 Stage 2 不生效（等同 `AI_LLM_ENABLED=false`），此时输出原始识别文本。
+- 完整版：`ai/example/full/`，规范化文本到 `revise`、提取发言人呼号到 `Callsign`（识别不出或不一致时省略）、风控判断到 `risk`；
+- 简化版：`ai/example/simple/`，只提取发言人呼号到 `Callsign`，`revise` 和 `risk` 永远为空（控制台仍打印原始识别文本）。
+
+两套底层管线完全一致，切换模式只需把对应示例复制到默认位置（默认使用 `ai/prompt.txt` + `ai/schema.json`，当前为简化版）：
+
+```bash
+# 启用简化版
+cp ai/example/simple/prompt.txt ai/prompt.txt
+cp ai/example/simple/schema.json ai/schema.json
+# 切回完整版
+cp ai/example/full/prompt.txt ai/prompt.txt
+cp ai/example/full/schema.json ai/schema.json
+```
+
+也可用 `AI_LLM_PROMPT_FILE`/`AI_LLM_SCHEMA_FILE` 直接指定任意路径而不复制。两个默认文件任一缺失时 LLM 后处理不生效（等同 `AI_LLM_ENABLED=false`），此时输出原始识别文本。
+
+识别到呼号时默认发布到 AI Spot 面板（见下节）；`AI_LLM_PUBLISH_SPOT=false` 可关闭，此时只记日志、不发布呼号。
 
 ```
 [260809 21:40:12] [1900]: 9f2ab1c4 6.2s 呼号=BD5XXX | 呼叫 CQ，这里是 BD5XXX，杭州
 [260809 21:40:30] [1900]: 风控告警 9f2ab1c4 L5: 煽动非法集会与暴力行为
 [260809 21:41:00] [1900]: 3c8d90aa 4.1s | 抄收了，在仓前街道那边，这里是 BG5BJO   ← LLM 失败时降级输出原始识别
+[260809 21:42:00] [1900]: a1b2c3d4 3.5s 呼号=BG5BJO | 抄收了，在仓前街道那边，这里是 BG5BJO   ← 简化版：revise/risk 为空，呼号照常识别
 ```
 
 ### AI Spot 面板
@@ -104,13 +120,14 @@ Stage 2（LLM 后处理）：每条识别结果再调用文本模型，规范化
 | `AI_CONTEXT_WINDOW_MS` | `300000` | 识别结果上下文窗口 |
 | `AI_HOTWORDS_FILE` | `ai/hotwords.json` | 热词文件路径 |
 | `AI_BACKGROUND_FILE` | `ai/background.txt` | 背景文本文件路径 |
-| `AI_LLM_ENABLED` | `true` | Stage 2 LLM 后处理开关 |
-| `AI_LLM_MODEL` | `qwen3.7-flash` | Stage 2 模型 |
+| `AI_LLM_ENABLED` | `true` | LLM 后处理开关 |
+| `AI_LLM_PUBLISH_SPOT` | `true` | 识别到呼号时是否发布到 AI Spot 面板 |
+| `AI_LLM_MODEL` | `qwen3.7-flash` | LLM 后处理模型 |
 | `AI_LLM_ENABLE_THINKING` | `false` | 思考模式；默认关闭（任务简单，开启会显著变慢并可能超时） |
 | `AI_LLM_THINKING_BUDGET` | 未设置 | 思考 token 预算，开启思考时限制思考量 |
 | `AI_LLM_TIMEOUT_MS` | `30000` | 单次请求超时 |
-| `AI_LLM_PROMPT_FILE` | `ai/prompt.txt` | Stage 2 提示词文件路径 |
-| `AI_LLM_SCHEMA_FILE` | `ai/schema.json` | Stage 2 输出 JSON Schema 路径 |
+| `AI_LLM_PROMPT_FILE` | `ai/prompt.txt` | LLM 提示词文件路径（切换简化版：复制 `ai/example/simple/prompt.txt` 覆盖之） |
+| `AI_LLM_SCHEMA_FILE` | `ai/schema.json` | LLM 输出 JSON Schema 路径（切换简化版：复制 `ai/example/simple/schema.json` 覆盖之） |
 
 ## 运行
 

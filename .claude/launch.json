@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "iaxweb-preview",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["PORT=3999", "npm", "start"],
+      "port": 3999
+    }
+  ]
+}

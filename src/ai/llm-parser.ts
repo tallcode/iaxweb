@@ -8,8 +8,8 @@ export interface RiskRating {
 
 export interface ParsedTranscript {
   Callsign?: string | undefined
-  message: string
-  risk: RiskRating
+  message?: string | undefined
+  risk?: RiskRating | undefined
 }
 
 export interface LlmParserOptions {
@@ -29,10 +29,9 @@ const CHAT_PATH = '/compatible-mode/v1/chat/completions'
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_RETRY_DELAYS_MS = [1_000]
 
-// Stage 2: post-process ASR text with a chat model. The prompt and JSON
-// schema live in files and are re-read on every call (like hotwords); when
-// either file is missing the parse is skipped, which is equivalent to
-// AI_LLM_ENABLED=false.
+// LLM 后处理：用对话模型对语音识别文本做结构化解析（完整版含规范化、呼号
+// 提取与风控，简化版只提取呼号）。提示词与 JSON Schema 存在文件中，每次
+// 调用前重新读取（同热词）；任一文件缺失则跳过解析，等同 AI_LLM_ENABLED=false。
 export class LlmParser {
   private readonly options: LlmParserOptions
   private readonly url: string
@@ -142,7 +141,7 @@ export class LlmParser {
     }
     catch (error) {
       // Keep the last good schema so a typo while editing does not disable
-      // stage 2 entirely.
+      // LLM parsing entirely.
       console.warn(`${logTimestamp()} [AI]: schema 文件解析失败，沿用上次有效配置: ${errorMessage(error)}`)
     }
     return this.lastSchema
@@ -222,9 +221,9 @@ export class LlmError extends Error {
   }
 }
 
-// Validates the subset of JSON Schema the stage-2 output uses: object types
-// with properties/required/additionalProperties, and string/boolean/number/
-// integer leaves. Returns the first problem found, or undefined.
+// Validates the subset of JSON Schema the LLM parser output uses: object
+// types with properties/required/additionalProperties, and string/boolean/
+// number/integer leaves. Returns the first problem found, or undefined.
 export function validateAgainstSchema(value: unknown, schema: unknown, path = '$'): string | undefined {
   if (typeof schema !== 'object' || schema === null)
     return undefined
