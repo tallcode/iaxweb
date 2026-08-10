@@ -277,3 +277,14 @@ test('validateAgainstSchema accepts optional absent properties', () => {
   assert.ok(validateAgainstSchema('text', schema))
   assert.ok(validateAgainstSchema(null, schema))
 })
+
+test('validateAgainstSchema enforces string patterns', () => {
+  const schema = {
+    additionalProperties: false,
+    properties: { Callsign: { pattern: '^B[ADGHIY][0-9][A-Z]{2,3}$', type: 'string' } },
+    required: [],
+    type: 'object',
+  }
+  assert.equal(validateAgainstSchema({ Callsign: 'BG5ATV' }, schema), undefined)
+  assert.match(validateAgainstSchema({ Callsign: 'BG55ATV' }, schema) ?? '', /不匹配格式/)
+})

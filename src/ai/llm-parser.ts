@@ -232,6 +232,17 @@ export function validateAgainstSchema(value: unknown, schema: unknown, path = '$
   if (spec.type === 'string') {
     if (typeof value !== 'string')
       return `${path} 应为字符串`
+    if (typeof spec.pattern === 'string') {
+      let pattern: RegExp
+      try {
+        pattern = new RegExp(spec.pattern)
+      }
+      catch {
+        return `${path} 的 schema pattern 无效`
+      }
+      if (!pattern.test(value))
+        return `${path} 不匹配格式 ${spec.pattern}`
+    }
     return undefined
   }
   if (spec.type === 'boolean') {

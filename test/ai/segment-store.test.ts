@@ -35,7 +35,7 @@ test('accumulates stage fields on the same record', () => {
 
   assert.deepEqual(store.recent(), [record])
   assert.equal(store.asrContext(), '原始文本')
-  assert.equal(store.llmHistory(), 'BG5XXX: 规范化文本')
+  assert.equal(store.llmHistory(), '规范化文本')
 })
 
 test('llmHistory falls back to the raw recognition without a revise', () => {
@@ -50,7 +50,7 @@ test('llmHistory prefixes the risk level when set', () => {
   record.revise = '规范文本'
   record.risk = { level: 4, reason: '涉政' }
   store.add(record)
-  assert.equal(store.llmHistory(), '[风控4] BG5XXX: 规范文本')
+  assert.equal(store.llmHistory(), '[风控4] 规范文本')
 })
 
 test('asrContext uses raw recognitions and llmHistory revised messages', () => {

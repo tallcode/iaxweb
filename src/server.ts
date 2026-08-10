@@ -61,7 +61,12 @@ const aiService = aiNodeIds.length > 0
   ? new AiService({
       config: aiConfig,
       nodeIds: aiNodeIds,
-      onSpot: spot => void spotStore.record(spot),
+      onSpot: spot => void spotStore.record(spot).then((result) => {
+        // Published spots come back through the JetStream consumer. When the
+        // store is running in memory-only mode, broadcast the local event now.
+        if (result === 'stored')
+          broadcastSpot(spot)
+      }),
     })
   : undefined
 

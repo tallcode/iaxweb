@@ -209,8 +209,13 @@ export class AiService {
     try {
       const parsed = await this.llm.parse(text, runtime.store.llmHistory(undefined, record.id))
       // 解析返回 undefined 说明提示词/schema 文件缺失：LLM 解析未生效。
-      if (!parsed || this.stopped)
+      if (this.stopped)
         return
+      if (!parsed) {
+        console.warn(`${logTimestamp()} [${nodeId}]: LLM 未生效 ${shortId}：提示词或 schema 文件缺失`)
+        console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s | ${text}`)
+        return
+      }
       record.revise = parsed.message
       record.callsign = parsed.Callsign
       record.risk = parsed.risk
@@ -227,7 +232,8 @@ export class AiService {
       if (risk && risk.level >= 3)
         console.warn(`${logTimestamp()} [${nodeId}]: 风控告警 ${shortId} L${risk.level}: ${risk.reason}`)
     }
-    catch {
+    catch (error) {
+      console.warn(`${logTimestamp()} [${nodeId}]: LLM 解析失败 ${shortId}: ${errorMessage(error)}`)
       console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s | ${text}`)
     }
   }

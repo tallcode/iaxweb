@@ -8,6 +8,10 @@ export interface SpotEvent {
   at: string
 }
 
+export type SpotRecordResult = 'published' | 'rejected' | 'stored'
+
+const CALLSIGN_PATTERN = /^B[ADGHIY]\d[A-Z]{2,3}$/
+
 // Structural views of the JetStream API surface this store uses, so tests can
 // inject fakes without dragging in the real client types.
 export interface StreamsLike {
@@ -147,21 +151,25 @@ export class SpotStore {
   }
 
   // Records a spot for live display and (when JetStream is up) persists it.
-  async record(spot: SpotEvent): Promise<void> {
+  async record(spot: SpotEvent): Promise<SpotRecordResult> {
     await this.start()
+    if (!isValidCallsign(spot.callsign))
+      return 'rejected'
     this.prune()
     this.spots.set(spot.callsign, spot)
     if (!this.available)
-      return
+      return 'stored'
     try {
       const connection = this.connection
       const subject = this.spotSubject(spot)
       if (!connection || !subject)
-        return
+        return 'stored'
       await this.jsImpl(connection).publish(subject, JSON.stringify(spot))
+      return 'published'
     }
     catch (error) {
       console.warn(`[AI] spot 发布失败: ${errorMessage(error)}`)
+      return 'stored'
     }
   }
 
@@ -211,7 +219,7 @@ export class SpotStore {
 
   private spotSubject(spot: SpotEvent): string {
     // Only publish well-formed callsigns as subject tokens.
-    if (!/^[A-Z0-9]{2,15}$/.test(spot.callsign))
+    if (!isValidCallsign(spot.callsign))
       return ''
     return `${this.subjectPrefix}.${spot.node}.ai.spot.${spot.callsign}`
   }
@@ -232,7 +240,7 @@ function parseSpot(data: Uint8Array): SpotEvent | undefined {
     if (typeof parsed !== 'object' || parsed === null)
       return undefined
     const spot = parsed as Record<string, unknown>
-    if (typeof spot.callsign !== 'string' || typeof spot.node !== 'string'
+    if (typeof spot.callsign !== 'string' || !isValidCallsign(spot.callsign) || typeof spot.node !== 'string'
       || typeof spot.segmentId !== 'string' || typeof spot.at !== 'string') {
       return undefined
     }
@@ -241,6 +249,10 @@ function parseSpot(data: Uint8Array): SpotEvent | undefined {
   catch {
     return undefined
   }
+}
+
+export function isValidCallsign(value: string): boolean {
+  return CALLSIGN_PATTERN.test(value)
 }
 
 function errorMessage(error: unknown): string {

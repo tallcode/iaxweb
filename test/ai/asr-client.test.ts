@@ -123,6 +123,16 @@ test('does not retry client errors', async () => {
   assert.equal(calls.length, 1)
 })
 
+test('treats DashScope no-words responses as an empty transcription', async () => {
+  const { calls, client } = makeClient(() => Promise.resolve(new Response(JSON.stringify({
+    code: 'CLIENT_ERROR',
+    message: 'ASR_RESPONSE_HAVE_NO_WORDS',
+  }), { status: 400 })))
+
+  assert.equal(await client.transcribe(WAV_BYTES), '')
+  assert.equal(calls.length, 1)
+})
+
 test('throws when the response has no text', async () => {
   const { client } = makeClient(() => Promise.resolve(okResponse({ output: {} })))
   await assert.rejects(client.transcribe(WAV_BYTES), /没有识别文本/)

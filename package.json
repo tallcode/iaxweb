@@ -9,7 +9,7 @@
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "tsx --test test/**/*.test.ts test/**/*.test.js",
+    "test": "tsx --test test/*.test.ts test/**/*.test.ts test/**/*.test.js",
     "llm-parse-test": "tsx scripts/llm-parse-test.ts"
   },
   "dependencies": {

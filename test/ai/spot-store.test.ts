@@ -6,6 +6,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { SpotStore } from '../../src/ai/spot-store.js'
 
+const TEST_NOW = Date.parse('2026-08-09T13:00:00.000Z')
+
 interface FakeJsOptions {
   history: Uint8Array[]
   live?: Uint8Array[]
@@ -89,6 +91,7 @@ test('creates the stream when missing and loads history', async () => {
       },
     }),
     jetstreamImpl: () => fakeJs({ history: [new TextEncoder().encode(JSON.stringify(spot('BG5AAA', { node: '1900' })))], published }),
+    now: () => TEST_NOW,
   })
 
   await store.start()
@@ -115,6 +118,7 @@ test('reuses an existing stream and skips the add', async () => {
       },
     }),
     jetstreamImpl: () => fakeJs({ history: [new TextEncoder().encode(JSON.stringify(spot('BG5BBB')))], published }),
+    now: () => TEST_NOW,
   })
 
   await store.start()
@@ -130,6 +134,7 @@ test('keeps the newest spot per callsign', async () => {
     createConnection: async () => fakeConnection(),
     jetstreamManagerImpl: async () => fakeManager(),
     jetstreamImpl: () => fakeJs({ history: [], published }),
+    now: () => TEST_NOW,
   })
   await store.start()
 
@@ -151,10 +156,11 @@ test('publishes spots to the callsign subject', async () => {
     createConnection: async () => fakeConnection(),
     jetstreamManagerImpl: async () => fakeManager(),
     jetstreamImpl: () => fakeJs({ history: [], published }),
+    now: () => TEST_NOW,
   })
   await store.start()
 
-  await store.record(spot('BG5XXX', { node: '1900' }))
+  assert.equal(await store.record(spot('BG5XXX', { node: '1900' })), 'published')
   assert.equal(published.length, 1)
   assert.equal(published[0]?.subject, 'iaxmon.nodes.1900.ai.spot.BG5XXX')
   const data = published[0]?.data ?? new Uint8Array()
@@ -170,12 +176,13 @@ test('degrades gracefully without JetStream', async () => {
       throw new Error('no jetstream')
     },
     jetstreamImpl: () => fakeJs({ history: [], published: [] }),
+    now: () => TEST_NOW,
   })
 
   await store.start()
   assert.equal(store.isAvailable, false)
   // Session-only view still records and serves.
-  await store.record(spot('BG5XXX'))
+  assert.equal(await store.record(spot('BG5XXX')), 'stored')
   const recent = await store.recent()
   assert.equal(recent.length, 1)
   assert.equal(recent[0]?.callsign, 'BG5XXX')
@@ -188,19 +195,20 @@ test('consume forwards live spots and updates the view', async () => {
     jetstreamManagerImpl: async () => fakeManager(),
     jetstreamImpl: () => fakeJs({
       history: [],
-      live: [new TextEncoder().encode(JSON.stringify(spot('BG5LIVE')))],
+      live: [new TextEncoder().encode(JSON.stringify(spot('BG5LIV')))],
       published,
     }),
+    now: () => TEST_NOW,
   })
   await store.start()
 
   const received: SpotEvent[] = []
   await store.consume(s => received.push(s))
   assert.equal(received.length, 1)
-  assert.equal(received[0]?.callsign, 'BG5LIVE')
+  assert.equal(received[0]?.callsign, 'BG5LIV')
   // The live spot is also merged into the recent view.
   const recent = await store.recent()
-  assert.equal(recent[0]?.callsign, 'BG5LIVE')
+  assert.equal(recent[0]?.callsign, 'BG5LIV')
 })
 
 test('expires spots older than 24 hours', async () => {
@@ -221,4 +229,19 @@ test('expires spots older than 24 hours', async () => {
 
   const recent = await store.recent()
   assert.deepEqual(recent.map(r => r.callsign), ['BG5NEW'])
+})
+
+test('rejects malformed callsigns before storing or publishing', async () => {
+  const published: Array<{ subject: string, data: string | Uint8Array }> = []
+  const store = new SpotStore({
+    createConnection: async () => fakeConnection(),
+    jetstreamManagerImpl: async () => fakeManager(),
+    jetstreamImpl: () => fakeJs({ history: [], published }),
+    now: () => TEST_NOW,
+  })
+  await store.start()
+
+  assert.equal(await store.record(spot('BG55BAD')), 'rejected')
+  assert.deepEqual(await store.recent(), [])
+  assert.equal(published.length, 0)
 })

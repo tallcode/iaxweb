@@ -5,7 +5,14 @@ interface HeartbeatTarget {
   server: WebSocketServer
 }
 
-const expectedCloseCodes = new Set([1000, 1001])
+// Browsers commonly produce 1006 when a tab reloads/closes or the network
+// disappears before a close frame can be exchanged. Reconnect logic lives on
+// the client, so this is expected transport churn rather than a server error.
+const expectedCloseCodes = new Set([1000, 1001, 1006])
+
+export function isExpectedWebSocketClose(code: number): boolean {
+  return expectedCloseCodes.has(code)
+}
 
 export function startWebSocketHeartbeat(
   targets: HeartbeatTarget[],
@@ -18,7 +25,7 @@ export function startWebSocketHeartbeat(
       responsiveClients.add(client)
       client.on('pong', () => responsiveClients.add(client))
       client.on('close', (code, reason) => {
-        if (!expectedCloseCodes.has(code)) {
+        if (!isExpectedWebSocketClose(code)) {
           const address = request.socket.remoteAddress ?? 'unknown'
           const detail = reason.length > 0 ? `: ${reason.toString()}` : ''
           console.warn(`${target.name} WebSocket closed unexpectedly (${address}, code ${code}${detail})`)

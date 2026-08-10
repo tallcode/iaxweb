@@ -68,7 +68,9 @@ export class SegmentStore {
       if (text === undefined)
         continue
       const risk = record.risk
-      lines.push(`${risk && risk.level > 1 ? `[风控${risk.level}] ` : ''}${record.callsign ? `${record.callsign}: ` : ''}${text}`)
+      // Do not feed model-generated callsign labels back as evidence. The raw
+      // or revised transcript may still contain genuine phonetic spelling.
+      lines.push(`${risk && risk.level > 1 ? `[风控${risk.level}] ` : ''}${text}`)
     }
     return joinWithinBudget(lines, budget)
   }

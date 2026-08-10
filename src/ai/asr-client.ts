@@ -96,6 +96,8 @@ export class AsrClient {
       clearTimeout(timer)
     }
 
+    if (!response.ok && isNoWordsResponse(text))
+      return ''
     if (!response.ok)
       throw new AsrError(`HTTP ${response.status}: ${errorDetail(text)}`, response.status)
 
@@ -180,6 +182,20 @@ function errorDetail(text: string): string {
     // Fall through to the raw text.
   }
   return text.slice(0, 200)
+}
+
+// DashScope reports a valid silent/no-speech result as HTTP 400 instead of an
+// empty successful transcription. Treat only this specific response as empty;
+// all other client errors must remain visible.
+function isNoWordsResponse(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text) as { code?: unknown, message?: unknown }
+    return [parsed.code, parsed.message]
+      .some(value => typeof value === 'string' && value.toUpperCase().includes('ASR_RESPONSE_HAVE_NO_WORDS'))
+  }
+  catch {
+    return text.toUpperCase().includes('ASR_RESPONSE_HAVE_NO_WORDS')
+  }
 }
 
 function errorMessage(error: unknown): string {
