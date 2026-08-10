@@ -3,6 +3,7 @@ export type TransmitSource = 'local' | 'remote' | 'system' | null
 export type NodeType = 'HUB' | 'REPEATER'
 
 export interface NodeDefinition {
+  AI?: boolean
   AUDIO?: boolean
   FREQ?: string
   LINK?: string[]

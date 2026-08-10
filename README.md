@@ -33,6 +33,85 @@ cp .env.example .env
 旧版 `NATS_SUBJECT_PREFIX` 是包含单个节点 ID 的完整前缀，无法无歧义地迁移为多节点根。
 升级时必须删除该变量并设置 `NATS_SUBJECT_ROOT`；服务检测到旧变量会直接报错，避免静默订阅错误 subject。
 
+## AI 值机员
+
+AI 值机员监听节点音频，按发射分段（iaxmon 的 `start`/`stop` 事件），把语音段（冷启动 ≥5 秒、热启动 ≥2 秒，最长 2 分钟）送阿里云百炼语音识别（Qwen-Audio-3.0-ASR-Flash 同步接口），识别结果输出到控制台。
+
+在 `nodes.json` 中为节点添加 `"AI": true` 启用（该节点必须同时 `"AUDIO": true`），并在 `.env` 设置 `DASHSCOPE_API_KEY`：
+
+```json
+{
+  "1900": {
+    "NAME": "浙江HUB",
+    "TYPE": "HUB",
+    "AUDIO": true,
+    "AI": true
+  }
+}
+```
+
+AI 按节点独立启用，与网关其余功能互不影响；未启用的节点零开销。启用后 AI 计为 1 个 listener，即使没有浏览器收听，该节点的 IAX 呼叫也会保持。
+
+识别规则：
+
+- 冷启动（`AI_ACTIVITY_WINDOW_MS` 内没有过语音，通常是首次呼叫）：时长不足 `AI_COLD_MIN_SEGMENT_MS`（默认 5 秒）的段丢弃；
+- 热启动（窗口内有过语音，连续对话中）：时长不足 `AI_HOT_MIN_SEGMENT_MS`（默认 2 秒）的段丢弃；
+- "有过语音" 指达到冷启动阈值（默认 5 秒）的发射；被丢弃的短段不算活动，不会触发热启动；
+- 时长以 iaxmon `stop` 事件的 `duration_ms` 为准；
+- 超过 `AI_MAX_SEGMENT_MS`（默认 2 分钟）的段在低能量点切分为不超过 2 分钟的块依次识别；
+- 最近 `AI_CONTEXT_WINDOW_MS`（默认 5 分钟）内的识别结果作为下一次识别的上下文（每轮按接口限制截断到 400 字以内）；长时间无语音后的第一段不带上下文。
+
+配置文件每次识别前重新读取，保存后立即生效，无需重启：
+
+- `ai/hotwords.json`：即时热词，格式 `{"词": 权重}`，权重 1~5（或 50 超热词）。适合放呼号、Q 简语、值机常用词；
+- `ai/background.txt`：背景文本（400 字以内），如网名称、NCS、流程说明。
+
+Stage 2（LLM 后处理）：每条识别结果再调用文本模型，规范化文本、提取发言人呼号到 `Callsign` 字段（识别不出或不一致时省略）、风控判断；调用时附带最近 `AI_CONTEXT_WINDOW_MS` 内的解析历史作为对话上下文。输出按 `ai/schema.json` 严格校验，不合规记警告。`AI_LLM_ENABLED=false` 可关闭：
+
+- `ai/prompt.txt`：提示词，每次调用前重新读取；
+- `ai/schema.json`：输出 JSON Schema，每次调用前重新读取。
+
+两个文件任一缺失时 Stage 2 不生效（等同 `AI_LLM_ENABLED=false`），此时输出原始识别文本。
+
+```
+[260809 21:40:12] [1900]: 9f2ab1c4 6.2s 呼号=BD5XXX | 呼叫 CQ，这里是 BD5XXX，杭州
+[260809 21:40:30] [1900]: 风控告警 9f2ab1c4 L5: 煽动非法集会与暴力行为
+[260809 21:41:00] [1900]: 3c8d90aa 4.1s | 抄收了，在仓前街道那边，这里是 BG5BJO   ← LLM 失败时降级输出原始识别
+```
+
+### AI Spot 面板
+
+识别到呼号时，地图页右侧面板（AI Spot）展示最近呼号，相同呼号只保留最新一条，点击页面加载时先从 `/api/spots` 拉取历史，再通过 `/status` WebSocket 的 `{type:'spot'}` 消息实时更新。
+
+呼号写入 JetStream 流 `AI_SPOT`（subject `iaxmon.nodes.<节点>.ai.spot.<呼号>`，保留 24 小时，每个呼号只留最新）。需要 NATS 服务器开启 JetStream（配置 `jetstream { store_dir: ... }` 并重启）；未开启时网关降级为进程内会话级记录，不持久化，页面面板仍可实时工作。
+
+控制台输出按节点区分：
+
+```
+[260809 21:05:12] [1900]: 丢弃段 2.1s（冷启动，时长不足 5s）
+[260809 21:05:40] [1900]: 丢弃段 1.2s（热启动，时长不足 2s）
+```
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `DASHSCOPE_API_KEY` | 未设置 | 百炼 API Key，任一节点启用 AI 时必填 |
+| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com` | DashScope 端点 |
+| `AI_ASR_MODEL` | `qwen-audio-3.0-asr-flash` | 识别模型（也可用 `fun-asr-flash`） |
+| `AI_COLD_MIN_SEGMENT_MS` | `5000` | 冷启动时长阈值，不足丢弃 |
+| `AI_HOT_MIN_SEGMENT_MS` | `2000` | 热启动时长阈值，不足丢弃 |
+| `AI_ACTIVITY_WINDOW_MS` | `30000` | 冷/热启动判定的活动窗口 |
+| `AI_MAX_SEGMENT_MS` | `120000` | 超过该值的段切分，最大 290000 |
+| `AI_CONTEXT_WINDOW_MS` | `300000` | 识别结果上下文窗口 |
+| `AI_HOTWORDS_FILE` | `ai/hotwords.json` | 热词文件路径 |
+| `AI_BACKGROUND_FILE` | `ai/background.txt` | 背景文本文件路径 |
+| `AI_LLM_ENABLED` | `true` | Stage 2 LLM 后处理开关 |
+| `AI_LLM_MODEL` | `qwen3.7-flash` | Stage 2 模型 |
+| `AI_LLM_ENABLE_THINKING` | `false` | 思考模式；默认关闭（任务简单，开启会显著变慢并可能超时） |
+| `AI_LLM_THINKING_BUDGET` | 未设置 | 思考 token 预算，开启思考时限制思考量 |
+| `AI_LLM_TIMEOUT_MS` | `30000` | 单次请求超时 |
+| `AI_LLM_PROMPT_FILE` | `ai/prompt.txt` | Stage 2 提示词文件路径 |
+| `AI_LLM_SCHEMA_FILE` | `ai/schema.json` | Stage 2 输出 JSON Schema 路径 |
+
 ## 运行
 
 ```bash

@@ -1,7 +1,17 @@
-import type { NatsConnection, Subscription } from '@nats-io/transport-node'
+import type { ConnectionOptions, NatsConnection, Subscription } from '@nats-io/transport-node'
 import type { Config } from './config.js'
 import { randomUUID } from 'node:crypto'
 import { connect, RequestError, TimeoutError } from '@nats-io/transport-node'
+
+export function createConnectionOptions(config: Config['nats']): ConnectionOptions {
+  return {
+    servers: config.servers,
+    ...(config.username ? { user: config.username, pass: config.password } : {}),
+    ...(config.token ? { token: config.token } : {}),
+    name: 'iaxweb',
+    maxReconnectAttempts: -1,
+  }
+}
 
 export interface StateEvent {
   type: 'state'
@@ -94,15 +104,7 @@ export class NatsAudioService {
 
   private async connectOnce(): Promise<void> {
     try {
-      const connection = await connect({
-        servers: this.config.servers,
-        ...(this.config.username
-          ? { user: this.config.username, pass: this.config.password }
-          : {}),
-        ...(this.config.token ? { token: this.config.token } : {}),
-        name: 'iaxweb',
-        maxReconnectAttempts: -1,
-      })
+      const connection = await connect(createConnectionOptions(this.config))
       if (this.stopped) {
         await connection.close()
         return
@@ -176,7 +178,9 @@ export class NatsAudioService {
 
   private async watchConnection(connection: NatsConnection): Promise<void> {
     for await (const status of connection.status()) {
-      console.log(`NATS ${status.type}`, status)
+      // Ping statuses arrive continuously and carry no information here.
+      if (status.type !== 'ping')
+        console.log(`NATS ${status.type}`, status)
 
       if (status.type === 'disconnect') {
         this.transportConnected = false

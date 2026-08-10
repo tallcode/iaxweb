@@ -20,6 +20,7 @@ RUN apk add --no-cache tini
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY nodes.json ./
+COPY ai ./ai
 COPY src ./src
 COPY public ./public
 

@@ -1,4 +1,5 @@
 import { AudioStreamPlayer, SpectrumMeter } from './audio-player.js'
+import { SpotPanel } from './spot-panel.js'
 import { expireSnapshot, StatusStreamClient } from './status-client.js'
 import { TopologyLayout } from './topology-layout.js'
 import { collectEdges, graphSignature } from './topology-model.js'
@@ -11,6 +12,7 @@ const summary = document.querySelector('#summary')
 const elements = new Map()
 const audioMeters = new Map()
 const audioPlayer = new AudioStreamPlayer()
+const spotPanel = new SpotPanel(document.querySelector('#spot-panel'))
 const mobileViewport = matchMedia('(max-width: 680px)')
 
 let viewportHeight = 0
@@ -213,5 +215,7 @@ const statusClient = new StatusStreamClient({
     summary.textContent = '已连接，等待完整节点状态…'
   },
   onSnapshot: renderSnapshot,
+  onSpot: spot => spotPanel.apply(spot),
 })
 statusClient.start()
+spotPanel.start()

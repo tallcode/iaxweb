@@ -19,7 +19,12 @@
 
 body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) 12.5rem;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "header header"
+    "topology spot"
+    "footer footer";
   height: var(--app-height);
   min-height: 0;
   margin: 0;
@@ -31,6 +36,7 @@ body {
 }
 
 .site-footer {
+  grid-area: footer;
   z-index: 2;
   padding: 0.2rem 0.7rem 0.28rem;
   text-align: center;
@@ -49,6 +55,7 @@ body {
 }
 
 header {
+  grid-area: header;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -111,6 +118,7 @@ header p {
 }
 
 #topology {
+  grid-area: topology;
   position: relative;
   min-height: 0;
   overflow: hidden;
@@ -520,5 +528,169 @@ header p {
 @media (prefers-reduced-motion: reduce) {
   .node {
     transition: none;
+  }
+}
+
+/* ---- AI Spot panel ---- */
+.spot-panel {
+  grid-area: spot;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+  margin: 0.75rem 0.75rem 0.75rem 0;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid rgb(89 101 117 / 28%);
+  border-radius: 0.6rem;
+  background: rgb(11 16 23 / 82%);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 35%);
+  overflow: hidden;
+}
+
+.spot-panel-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #7dd3a8;
+  text-transform: uppercase;
+}
+
+.spot-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.spot-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  height: 42px;
+  padding: 0 0.55rem;
+  border-radius: 0.4rem;
+  background: rgb(255 255 255 / 4%);
+  transition: background 0.15s ease;
+}
+
+/* Desktop shows up to 30 of the most recent spots (render() sorts newest
+   first); mobile keeps only 3 via its own media query rule. */
+.spot-list .spot-item:nth-child(n+31) {
+  display: none;
+}
+
+.spot-item:hover {
+  background: rgb(255 255 255 / 9%);
+}
+
+.spot-callsign {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #e6edf3;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spot-time {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  color: #8b98a6;
+  white-space: nowrap;
+}
+
+.spot-item.is-new {
+  background: rgb(125 211 168 / 12%);
+}
+
+.spot-empty {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #596575;
+  text-align: center;
+}
+
+@media (max-width: 680px) {
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "header"
+      "topology"
+      "spot"
+      "footer";
+  }
+
+  /* Bottom spot area: small buttons, three per row. */
+  .spot-panel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+    min-height: 0;
+    margin: 0;
+    padding: 0.45rem 0.6rem;
+    border: none;
+    border-top: 1px solid rgb(89 101 117 / 28%);
+    border-radius: 0;
+    background: rgb(11 16 23 / 92%);
+    box-shadow: none;
+    overflow: hidden;
+  }
+
+  .spot-panel-title {
+    display: none;
+  }
+
+  .spot-list {
+    flex: none;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .spot-item {
+    flex: 1 1 calc(33.333% - 0.3rem);
+    min-width: 0;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.3rem;
+    padding: 0 0.4rem;
+    border-radius: 0.4rem;
+    background: rgb(255 255 255 / 5%);
+  }
+
+  /* Only the three most recent spots (render() sorts newest first). */
+  .spot-list .spot-item:nth-child(n+4) {
+    display: none;
+  }
+
+  .spot-callsign {
+    font-size: clamp(0.62rem, 3.6vw, 0.8rem);
+  }
+
+  .spot-time {
+    font-size: clamp(0.5rem, 3vw, 0.62rem);
+  }
+
+  .spot-empty {
+    margin: 0;
+    text-align: left;
+  }
+
+  .site-footer {
+    display: none;
   }
 }

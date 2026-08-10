@@ -1,4 +1,6 @@
+import { dirname, isAbsolute, resolve } from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 
 export interface Config {
   allmon3: {
@@ -18,6 +20,30 @@ export interface Config {
 }
 
 const invalidSubjectToken = /[\s*>]/
+
+// The DashScope synchronous ASR endpoint accepts at most 5 minutes of audio per
+// request; keep segments safely below that ceiling.
+const maxAllowedSegmentMs = 290_000
+
+export interface AiConfig {
+  activityWindowMs: number
+  apiKey?: string
+  backgroundFile: string
+  baseUrl: string
+  coldMinSegmentMs: number
+  contextWindowMs: number
+  hotMinSegmentMs: number
+  hotwordsFile: string
+  llmEnabled: boolean
+  llmEnableThinking: boolean
+  llmModel: string
+  llmPromptFile: string
+  llmSchemaFile: string
+  llmThinkingBudget?: number | undefined
+  llmTimeoutMs: number
+  maxSegmentMs: number
+  model: string
+}
 
 function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const value = env[name]?.trim()
@@ -93,4 +119,88 @@ function parsePositiveInteger(value: string, name: string): number {
   if (!Number.isInteger(parsed) || parsed < 1)
     throw new Error(`${name} must be a positive integer, got: ${value}`)
   return parsed
+}
+
+// AI settings are always parsed so invalid values fail fast even when no node
+// enables AI; the API key requirement is enforced where node definitions are
+// known (see server.ts).
+export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
+  const apiKey = optional(env, 'DASHSCOPE_API_KEY')
+
+  const baseUrlText = optional(env, 'DASHSCOPE_BASE_URL') ?? 'https://dashscope.aliyuncs.com'
+  const baseUrl = new URL(baseUrlText)
+  if (!['http:', 'https:'].includes(baseUrl.protocol))
+    throw new Error('DASHSCOPE_BASE_URL must use http or https')
+
+  const model = optional(env, 'AI_ASR_MODEL') ?? 'qwen-audio-3.0-asr-flash'
+
+  const coldMinSegmentMs = parsePositiveInteger(
+    optional(env, 'AI_COLD_MIN_SEGMENT_MS') ?? '5000',
+    'AI_COLD_MIN_SEGMENT_MS',
+  )
+  const hotMinSegmentMs = parsePositiveInteger(
+    optional(env, 'AI_HOT_MIN_SEGMENT_MS') ?? '2000',
+    'AI_HOT_MIN_SEGMENT_MS',
+  )
+  const maxSegmentMs = parsePositiveInteger(
+    optional(env, 'AI_MAX_SEGMENT_MS') ?? '120000',
+    'AI_MAX_SEGMENT_MS',
+  )
+  if (maxSegmentMs <= Math.min(coldMinSegmentMs, hotMinSegmentMs))
+    throw new Error('AI_MAX_SEGMENT_MS must be greater than the minimum segment lengths')
+  if (maxSegmentMs > maxAllowedSegmentMs)
+    throw new Error(`AI_MAX_SEGMENT_MS must not exceed ${maxAllowedSegmentMs} (DashScope 5 minute limit)`)
+
+  const activityWindowMs = parsePositiveInteger(
+    optional(env, 'AI_ACTIVITY_WINDOW_MS') ?? '30000',
+    'AI_ACTIVITY_WINDOW_MS',
+  )
+
+  const contextWindowMs = parsePositiveInteger(
+    optional(env, 'AI_CONTEXT_WINDOW_MS') ?? '300000',
+    'AI_CONTEXT_WINDOW_MS',
+  )
+
+  const llmEnabledText = optional(env, 'AI_LLM_ENABLED') ?? 'true'
+  if (llmEnabledText !== 'true' && llmEnabledText !== 'false')
+    throw new Error('AI_LLM_ENABLED must be "true" or "false"')
+  const llmModel = optional(env, 'AI_LLM_MODEL') ?? 'qwen3.7-flash'
+
+  const llmEnableThinkingText = optional(env, 'AI_LLM_ENABLE_THINKING') ?? 'false'
+  if (llmEnableThinkingText !== 'true' && llmEnableThinkingText !== 'false')
+    throw new Error('AI_LLM_ENABLE_THINKING must be "true" or "false"')
+  const llmThinkingBudgetText = optional(env, 'AI_LLM_THINKING_BUDGET')
+  const llmThinkingBudget = llmThinkingBudgetText !== undefined
+    ? parsePositiveInteger(llmThinkingBudgetText, 'AI_LLM_THINKING_BUDGET')
+    : undefined
+  const llmTimeoutMs = parsePositiveInteger(
+    optional(env, 'AI_LLM_TIMEOUT_MS') ?? '30000',
+    'AI_LLM_TIMEOUT_MS',
+  )
+
+  return {
+    ...(apiKey ? { apiKey } : {}),
+    activityWindowMs,
+    backgroundFile: resolveProjectPath(optional(env, 'AI_BACKGROUND_FILE') ?? 'ai/background.txt'),
+    baseUrl: baseUrl.toString().replace(/\/+$/, ''),
+    coldMinSegmentMs,
+    contextWindowMs,
+    hotMinSegmentMs,
+    hotwordsFile: resolveProjectPath(optional(env, 'AI_HOTWORDS_FILE') ?? 'ai/hotwords.json'),
+    llmEnabled: llmEnabledText === 'true',
+    llmEnableThinking: llmEnableThinkingText === 'true',
+    llmModel,
+    llmPromptFile: resolveProjectPath(optional(env, 'AI_LLM_PROMPT_FILE') ?? 'ai/prompt.txt'),
+    llmSchemaFile: resolveProjectPath(optional(env, 'AI_LLM_SCHEMA_FILE') ?? 'ai/schema.json'),
+    ...(llmThinkingBudget !== undefined ? { llmThinkingBudget } : {}),
+    llmTimeoutMs,
+    maxSegmentMs,
+    model,
+  }
+}
+
+function resolveProjectPath(value: string): string {
+  if (isAbsolute(value))
+    return value
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', value)
 }

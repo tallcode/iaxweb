@@ -6,6 +6,7 @@ export class StatusStreamClient {
     this.onConnecting = options.onConnecting
     this.onInvalidMessage = options.onInvalidMessage
     this.onExpired = options.onExpired
+    this.onSpot = options.onSpot
     this.expired = false
     this.connection = new ReconnectingWebSocket('/status', {
       delays: [1_000, 2_000, 4_000, 8_000, 16_000, 30_000],
@@ -30,17 +31,30 @@ export class StatusStreamClient {
   }
 
   handleMessage(event) {
+    let parsed
     try {
-      const snapshot = JSON.parse(event.data)
-      if (!isSnapshot(snapshot))
-        throw new Error('status payload is not an object')
-      this.connection.markHealthy()
-      this.expired = false
-      this.onSnapshot(snapshot)
+      parsed = JSON.parse(event.data)
     }
     catch {
       this.onInvalidMessage()
+      return
     }
+
+    if (parsed && parsed.type === 'spot') {
+      // AI spot messages share the status channel but are handled separately.
+      this.connection.markHealthy()
+      this.expired = false
+      this.onSpot?.(parsed)
+      return
+    }
+
+    if (isSnapshot(parsed)) {
+      this.connection.markHealthy()
+      this.expired = false
+      this.onSnapshot(parsed)
+      return
+    }
+    this.onInvalidMessage()
   }
 }
 

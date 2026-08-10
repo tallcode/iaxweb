@@ -1,0 +1,40 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "Callsign": {
+      "description": "提取发言人呼号，要符合规范，常见的呼号格式是 /B[ADGHIY][0-9][A-Z]{2,3}/",
+      "type": "string",
+      "pattern": "^B[ADGHIY][0-9][A-Z]{2,3}$"
+    },
+    "message": {
+      "description": "规范化后的信息文本",
+      "type": "string"
+    },
+    "risk": {
+      "additionalProperties": false,
+      "description": "风控评级",
+      "properties": {
+        "level": {
+          "description": "风控等级 1~5，5 最严重",
+          "maximum": 5,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "风控原因，中文 20 字以内",
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "message",
+    "risk"
+  ],
+  "type": "object"
+}

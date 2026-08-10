@@ -23,9 +23,15 @@ export function parseNodeDefinitions(value: unknown): NodeDefinitions {
     const audio = rawDefinition.AUDIO
     if (audio !== undefined && typeof audio !== 'boolean')
       throw new Error(`nodes.json node ${node} has an invalid AUDIO`)
+    const ai = rawDefinition.AI
+    if (ai !== undefined && typeof ai !== 'boolean')
+      throw new Error(`nodes.json node ${node} has an invalid AI`)
+    if (ai === true && audio !== true)
+      throw new Error(`nodes.json node ${node} must have AUDIO true to enable AI`)
 
     definitions[node] = {
       TYPE: type,
+      ...(ai !== undefined ? { AI: ai } : {}),
       ...(audio !== undefined ? { AUDIO: audio } : {}),
       ...(link ? { LINK: [...link] } : {}),
       ...(freq ? { FREQ: freq } : {}),
