@@ -241,9 +241,7 @@ export class AiService {
   private logDiscard(nodeId: string, reason: DiscardReason, durationMs: number, minMs?: number): void {
     const seconds = (durationMs / 1000).toFixed(1)
     if (reason === 'short') {
-      const mode = minMs !== undefined && minMs <= this.config.hotMinSegmentMs ? '热启动' : '冷启动'
-      const minSeconds = (minMs ?? this.config.coldMinSegmentMs) / 1000
-      console.log(`${logTimestamp()} [${nodeId}]: 丢弃段 ${seconds}s（${mode}，时长不足 ${minSeconds}s）`)
+      console.log(`${logTimestamp()} [${nodeId}]: 丢弃段 ${seconds}s`)
     }
     else if (reason === 'offline') {
       console.log(`${logTimestamp()} [${nodeId}]: 节点离线，丢弃未完成段 ${seconds}s`)
