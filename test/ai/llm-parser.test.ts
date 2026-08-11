@@ -110,7 +110,7 @@ test('parses a schema-valid model response', async () => {
   assert.equal(call.url, 'https://dashscope.example/compatible-mode/v1/chat/completions')
   assert.equal(call.body.messages[0]?.role, 'system')
   assert.equal(call.body.messages[1]?.role, 'user')
-  assert.equal(call.body.messages[1]?.content, '原始文本')
+  assert.ok(call.body.messages[1]?.content.startsWith('原始文本'))
   assert.equal(call.body.response_format?.type, 'json_schema')
   assert.equal(call.body.enable_thinking, false)
 })
@@ -145,7 +145,7 @@ test('passes guarded common callsign similarity hints to the model', async () =>
   assert.ok(user?.includes('BG5FBT（距离 1）'))
 })
 
-test('uses corrected text for hints and the save gate but sends raw ASR text to the model', async () => {
+test('sends a changed Bravo correction beside the raw ASR text', async () => {
   const { calls, parser } = makeParser(
     () => Promise.resolve(completion(okResult())),
     {},
@@ -156,7 +156,16 @@ test('uses corrected text for hints and the save gate but sends raw ASR text to 
   const user = calls[0]?.body.messages[1]?.content
   assert.ok(user?.includes('补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈'))
   assert.equal(user?.split('\n\n')[0], '补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈')
+  assert.ok(user?.includes('音素纠错辅助文本（仅供判断）：\nBravo Golf Five Foxtrot Victor Tango'))
   assert.ok(user?.includes('BG5FBT（距离 1）'))
+})
+
+test('does not send corrected text unless it changes the transcript to include Bravo', async () => {
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())))
+
+  await parser.parse('B 原始文本', undefined, 'B 修正文本')
+  const user = calls[0]?.body.messages[1]?.content
+  assert.equal(user, 'B 原始文本')
 })
 
 test('sends thinking parameters when enabled', async () => {

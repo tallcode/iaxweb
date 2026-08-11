@@ -76,6 +76,11 @@ export class LlmParser {
     let userContent = history
       ? `最近对话历史（按时间顺序）：\n${history}\n\n当前语音识别文本：\n${transcript}`
       : transcript
+    // Only spend tokens on a second transcript when phonetic correction has
+    // actually changed the text and surfaced a possible Chinese callsign's B
+    // prefix. The raw ASR transcript remains the primary evidence.
+    if (shouldIncludeCorrected(transcript, corrected))
+      userContent += `\n\n音素纠错辅助文本（仅供判断）：\n${corrected}`
     const callsignHints = formatCallsignHints(this.callsignHints?.match(corrected) ?? [])
     if (callsignHints)
       userContent += `\n\n${callsignHints}`
@@ -305,6 +310,10 @@ function isRetryable(error: unknown): boolean {
   if (error.status === undefined)
     return true
   return error.status === 429 || error.status >= 500
+}
+
+function shouldIncludeCorrected(transcript: string, corrected: string): boolean {
+  return transcript !== corrected && /\bbravo\b/i.test(corrected)
 }
 
 function isMissingFile(error: unknown): boolean {
