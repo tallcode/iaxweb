@@ -1,4 +1,5 @@
 import { AudioStreamPlayer, SpectrumMeter } from './audio-player.js'
+import { TransmissionFavicon } from './favicon.js'
 import { SpotPanel } from './spot-panel.js'
 import { expireSnapshot, StatusStreamClient } from './status-client.js'
 import { TopologyLayout } from './topology-layout.js'
@@ -12,6 +13,7 @@ const summary = document.querySelector('#summary')
 const elements = new Map()
 const audioMeters = new Map()
 const audioPlayer = new AudioStreamPlayer()
+const favicon = new TransmissionFavicon()
 const spotPanel = new SpotPanel(document.querySelector('#spot-panel'))
 const mobileViewport = matchMedia('(max-width: 680px)')
 
@@ -69,6 +71,7 @@ function renderSnapshot(nextSnapshot) {
   }
 
   const edges = collectEdges(snapshot)
+  favicon.setTransmitting(nodeIds.some(nodeId => snapshot[nodeId].TYPE !== 'HUB' && snapshot[nodeId].TX_SOURCE))
   empty.hidden = nodeIds.length > 0
   renderSummary(nodeIds)
   layout.updateGraph(

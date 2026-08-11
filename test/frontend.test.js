@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { AudioStreamPlayer, SpectrumMeter } from '../public/audio-player.js'
+import { TransmissionFavicon } from '../public/favicon.js'
 import { ReconnectingWebSocket } from '../public/reconnecting-websocket.js'
 import { expireSnapshot } from '../public/status-client.js'
 import { collectEdges, graphSignature } from '../public/topology-model.js'
@@ -168,4 +169,76 @@ test('topology only draws configured links and does not relayout for connection 
     graphSignature(['1900', '1901', '1902'], disconnected, elements, false),
     graphSignature(['1900', '1901', '1902'], connected, elements, false),
   )
+})
+
+function createFavicon() {
+  let href
+  const canvas = {
+    width: 0,
+    height: 0,
+    getContext: () => ({
+      arc() {},
+      beginPath() {},
+      clearRect() {},
+      fill() {},
+      stroke() {},
+      strokeStyle: '',
+      globalAlpha: 1,
+      lineWidth: 0,
+    }),
+    toDataURL: () => 'data:image/png;base64,favicon',
+  }
+  const favicon = new TransmissionFavicon({
+    canvas,
+    setHref: (nextHref) => { href = nextHref },
+    now: () => 1_000,
+    requestFrame: () => 1,
+    cancelFrame: () => {},
+  })
+  return { favicon, getHref: () => href }
+}
+
+test('favicon renders a green dot at rest and publishes the canvas', () => {
+  const { favicon, getHref } = createFavicon()
+
+  assert.equal(favicon.transmitting, false)
+  assert.equal(getHref(), 'data:image/png;base64,favicon')
+})
+
+test('favicon starts a ping animation while transmitting and stops on release', () => {
+  const { favicon, getHref } = createFavicon()
+  const frames = []
+  let nextId = 0
+  let cancelled = 0
+  favicon.requestFrame = (callback) => {
+    nextId++
+    frames.push(callback)
+    return nextId
+  }
+  favicon.cancelFrame = () => {
+    cancelled++
+  }
+
+  favicon.setTransmitting(true)
+  assert.equal(favicon.transmitting, true)
+  assert.equal(frames.length, 1)
+  assert.equal(getHref(), 'data:image/png;base64,favicon')
+
+  frames.shift()()
+  assert.equal(frames.length, 1, 'animation keeps scheduling frames while transmitting')
+
+  favicon.setTransmitting(false)
+  assert.equal(favicon.transmitting, false)
+  assert.equal(cancelled, 1)
+  assert.equal(frames.length, 1, 'no further frames are scheduled after release')
+})
+
+test('favicon ignores repeated state changes', () => {
+  const { favicon } = createFavicon()
+
+  favicon.setTransmitting(false)
+  favicon.setTransmitting(false)
+  favicon.setTransmitting(true)
+  favicon.setTransmitting(true)
+  assert.equal(favicon.transmitting, true)
 })
