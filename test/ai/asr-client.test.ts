@@ -41,7 +41,7 @@ test('builds the request body with context turns and hotwords', () => {
   assert.equal(messages.length, 3)
   assert.equal(messages[0]?.role, 'user')
   assert.deepEqual(messages[0]?.content, [{ text: '背景' }])
-  assert.equal(messages[1]?.role, 'assistant')
+  assert.equal(messages[1]?.role, 'user')
   assert.deepEqual(messages[1]?.content, [{ text: '上次结果' }])
   // The audio message must be last.
   assert.equal(messages[2]?.role, 'user')
@@ -52,6 +52,39 @@ test('builds the request body with context turns and hotwords', () => {
   assert.equal(parameters.format, 'wav')
   assert.equal(parameters.sample_rate, '8000')
   assert.deepEqual(parameters.vocabulary, { CQ: 5 })
+})
+
+test('shares the 400-character budget between background and prior ASR text', () => {
+  const body = buildRequestBody('model-x', WAV_BYTES, {
+    background: '背'.repeat(150),
+    previous: '旧'.repeat(100) + '新'.repeat(200),
+  })
+  const messages = (body.input as { messages: Array<Record<string, unknown>> }).messages
+  const background = ((messages[0]?.content as Array<{ text: string }>)[0]?.text)
+  const previous = ((messages[1]?.content as Array<{ text: string }>)[0]?.text)
+
+  assert.equal(messages[0]?.role, 'user')
+  assert.equal(messages[1]?.role, 'user')
+  assert.ok(background)
+  assert.ok(previous)
+  assert.equal(background.length, 150)
+  assert.equal(previous.length, 250)
+  assert.equal(background.length + previous.length, 400)
+  assert.equal(previous, '旧'.repeat(50) + '新'.repeat(200))
+})
+
+test('omits prior ASR text when the background consumes the context budget', () => {
+  const body = buildRequestBody('model-x', WAV_BYTES, {
+    background: '背'.repeat(450),
+    previous: '上次结果',
+  })
+  const messages = (body.input as { messages: Array<Record<string, unknown>> }).messages
+  const background = ((messages[0]?.content as Array<{ text: string }>)[0]?.text)
+
+  assert.equal(messages.length, 2)
+  assert.ok(background)
+  assert.equal(background.length, 400)
+  assert.equal(messages[1]?.role, 'user') // audio
 })
 
 test('omits empty context turns and hotwords', () => {

@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { CONTEXT_CHAR_LIMIT } from './context-store.js'
 import { SAMPLE_RATE } from './mulaw.js'
 
 export interface AsrClientOptions {
@@ -119,10 +120,18 @@ export class AsrClient {
 export function buildRequestBody(model: string, wav: Uint8Array, context: TranscriptionContext): Record<string, unknown> {
   const audioUrl = `data:audio/wav;base64,${Buffer.from(wav).toString('base64')}`
   const messages: Array<Record<string, unknown>> = []
-  if (context.background)
-    messages.push({ content: [{ text: context.background }], role: 'user' })
-  if (context.previous)
-    messages.push({ content: [{ text: context.previous }], role: 'assistant' })
+  const background = context.background?.slice(0, CONTEXT_CHAR_LIMIT)
+  if (background)
+    messages.push({ content: [{ text: background }], role: 'user' })
+
+  // DashScope counts all context text in the turn against one 400-character
+  // budget. Keep the static background intact and use the remaining space for
+  // the newest end of the rolling transcript. A prior ASR transcript is user
+  // input, not an assistant response.
+  const previousBudget = CONTEXT_CHAR_LIMIT - (background?.length ?? 0)
+  const previous = previousBudget > 0 ? context.previous?.slice(-previousBudget) : undefined
+  if (previous)
+    messages.push({ content: [{ text: previous }], role: 'user' })
   // The audio message must be the last one.
   messages.push({ content: [{ audio: audioUrl }], role: 'user' })
 
