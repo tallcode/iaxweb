@@ -57,7 +57,7 @@ export class LlmParser {
 
   async parse(transcript: string, history?: string): Promise<ParsedTranscript | undefined> {
     // 跑测试前注释掉下面这一行（极端省钱开关，测试输入通常不含 B/布）
-    if (!/B|布/.test(transcript)) return {}
+    if (!/B|F|布/i.test(transcript)) return {}
     const prompt = this.loadPrompt()
     const schema = this.loadSchema()
     if (!prompt || !schema)
