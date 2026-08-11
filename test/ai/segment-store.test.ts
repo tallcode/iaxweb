@@ -29,12 +29,14 @@ test('accumulates stage fields on the same record', () => {
 
   // Later stages mutate the record; the store reflects it.
   record.recognition = '原始文本'
+  record.corrected = '纠错文本'
   record.revise = '规范化文本'
   record.callsign = 'BG5XXX'
   record.risk = { level: 1, reason: '正常' }
 
   assert.deepEqual(store.recent(), [record])
   assert.equal(store.asrContext(), '原始文本')
+  assert.equal(store.recent()[0]?.corrected, '纠错文本')
   assert.equal(store.llmHistory(), '规范化文本')
 })
 

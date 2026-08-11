@@ -88,6 +88,11 @@ function makeParser(
     schemaFile: files.schemaFile ?? fixtureSchema,
     ...(extra.thinkingBudget !== undefined ? { thinkingBudget: extra.thinkingBudget } : {}),
   })
+  // Most parser tests exercise schema/request behaviour rather than the
+  // production save gate. Give them a corrected transcript that passes it;
+  // the dedicated test below verifies gate behaviour explicitly.
+  const parse = parser.parse.bind(parser)
+  parser.parse = (transcript, history, corrected) => parse(transcript, history, corrected ?? 'Bravo')
   return { calls, parser }
 }
 
@@ -128,7 +133,7 @@ test('passes guarded common callsign similarity hints to the model', async () =>
     { callsignHintsEnabled: true, callsignsFile: fixtureCallsigns },
   )
 
-  await parser.parse('这里是 BG5FVT')
+  await parser.parse('这里是 BG5FVT', undefined, '这里是 BG5FVT')
   const system = calls[0]?.body.messages[0]?.content
   const user = calls[0]?.body.messages[1]?.content
   assert.ok(system?.includes('候选列表不是白名单'))
@@ -137,6 +142,20 @@ test('passes guarded common callsign similarity hints to the model', async () =>
   assert.ok(user?.includes('常见呼号相似度候选'))
   assert.ok(user?.includes('原文片段“BG5FVT”'))
   assert.ok(user?.includes('BG5FAT（距离 1）'))
+  assert.ok(user?.includes('BG5FBT（距离 1）'))
+})
+
+test('uses corrected text for hints and the save gate but sends raw ASR text to the model', async () => {
+  const { calls, parser } = makeParser(
+    () => Promise.resolve(completion(okResult())),
+    {},
+    { callsignHintsEnabled: true, callsignsFile: fixtureCallsigns },
+  )
+
+  await parser.parse('补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈', undefined, 'Bravo Golf Five Foxtrot Victor Tango')
+  const user = calls[0]?.body.messages[1]?.content
+  assert.ok(user?.includes('补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈'))
+  assert.equal(user?.split('\n\n')[0], '补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈')
   assert.ok(user?.includes('BG5FBT（距离 1）'))
 })
 

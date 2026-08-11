@@ -1,6 +1,6 @@
 // Unified per-segment record accumulating every pipeline stage:
-// segmentation fills the audio fields, ASR fills recognition, the LLM stage
-// fills revise/callsign/risk. Optional fields stay absent while the
+// segmentation fills the audio fields, ASR fills recognition and corrected,
+// the LLM stage fills revise/callsign/risk. Optional fields stay absent while the
 // corresponding stage has not run or failed.
 export interface SegmentRecord {
   id: string
@@ -9,6 +9,7 @@ export interface SegmentRecord {
   payloads: Uint8Array[]
   voicedMs: number
   recognition?: string | undefined
+  corrected?: string | undefined
   revise?: string | undefined
   callsign?: string | undefined
   risk?: RiskRating | undefined

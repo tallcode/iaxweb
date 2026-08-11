@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { correctExplanationText, correctExplanationWord } from './phonetic-corrector.js'
 import { isValidCallsign } from './spot-store.js'
 
 export interface CallsignHintCandidate {
@@ -25,59 +26,17 @@ const DIGIT_WORDS: Record<string, string> = {
   zero: '0',
 }
 
-// NATO plus the alternate words already used by this project's hotword list.
-const LETTER_WORDS: Record<string, string> = {
-  'alpha': 'A',
-  'american': 'A',
-  'boston': 'B',
-  'bravo': 'B',
-  'canada': 'C',
-  'charlie': 'C',
-  'delta': 'D',
-  'denmark': 'D',
-  'echo': 'E',
-  'england': 'E',
-  'florida': 'F',
-  'foxtrot': 'F',
-  'germany': 'G',
-  'golf': 'G',
-  'hotel': 'H',
-  'honolulu': 'H',
-  'india': 'I',
-  'italy': 'I',
-  'japan': 'J',
-  'juliet': 'J',
-  'kentucky': 'K',
-  'kilo': 'K',
-  'lima': 'L',
-  'london': 'L',
-  'mexico': 'M',
-  'mike': 'M',
-  'norway': 'N',
-  'november': 'N',
-  'ontario': 'O',
-  'oscar': 'O',
-  'papa': 'P',
-  'paris': 'P',
-  'quebec': 'Q',
-  'romeo': 'R',
-  'rome': 'R',
-  'santiago': 'S',
-  'sierra': 'S',
-  'tango': 'T',
-  'tokyo': 'T',
-  'uniform': 'U',
-  'united': 'U',
-  'victor': 'V',
-  'victoria': 'V',
-  'washington': 'W',
-  'whiskey': 'W',
-  'x-ray': 'X',
-  'xray': 'X',
-  'yankee': 'Y',
-  'yokohama': 'Y',
-  'zanzibar': 'Z',
-  'zulu': 'Z',
+// These are legitimate English words, so they must never be converted in the
+// displayable corrected transcript.  They are accepted only while parsing a
+// callsign, immediately after a valid Chinese callsign prefix (for example
+// "Bravo Golf for ..." -> BG4...).
+const CONTEXTUAL_DIGIT_WORDS: Record<string, string> = {
+  ate: '8',
+  for: '4',
+  oh: '0',
+  to: '2',
+  too: '2',
+  won: '1',
 }
 
 const CHINESE_DIGITS: Record<string, string> = {
@@ -159,7 +118,10 @@ export function extractCallsignFragments(transcript: string): CallsignFragment[]
         const normalized = [...source]
           .map(character => CHINESE_DIGITS[character] ?? character.toUpperCase())
           .join('')
-        if (isCallsignLike(normalized))
+        // A long compact run can contain adjacent callsigns. Its sliding
+        // windows must end in a complete 2–3 letter suffix; otherwise short
+        // prefixes such as BG5FV become noisy near-matches to the database.
+        if (isCallsignLike(normalized) && (run.length <= 8 || isLongRunWindowLike(normalized)))
           fragments.set(normalized, { normalized, source })
       }
     }
@@ -167,7 +129,8 @@ export function extractCallsignFragments(transcript: string): CallsignFragment[]
 
   // Convert consecutive phonetic/digit tokens into character sequences. This
   // also handles spaced compact forms such as "B G 两 G J J".
-  const tokens = transcript.match(/[A-Za-z]+(?:-[A-Za-z]+)?|[0-9幺两拐洞勾零一二三四五六七八九，,。；;:：]|\p{Script=Han}+/gu) ?? []
+  const correctedTranscript = correctExplanationText(transcript).text
+  const tokens = correctedTranscript.match(/[A-Za-z]+(?:-[A-Za-z]+)?|[0-9幺两拐洞勾零一二三四五六七八九，,。；;:：]|\p{Script=Han}+/gu) ?? []
   let run: Array<{ normalized: string, source: string }> = []
   const flush = (): void => {
     const lengths = run.length <= 8 ? [run.length] : [8, 7, 6, 5]
@@ -184,7 +147,7 @@ export function extractCallsignFragments(transcript: string): CallsignFragment[]
   }
 
   for (const token of tokens) {
-    const normalized = normalizeToken(token)
+    const normalized = normalizeToken(token, run)
     if (!normalized) {
       flush()
       continue
@@ -196,7 +159,7 @@ export function extractCallsignFragments(transcript: string): CallsignFragment[]
   return [...fragments.values()]
 }
 
-function normalizeToken(token: string): string | undefined {
+function normalizeToken(token: string, precedingRun: Array<{ normalized: string }>): string | undefined {
   if (/^[A-Z]$/i.test(token))
     return token.toUpperCase()
   if (/^\d$/.test(token))
@@ -205,7 +168,20 @@ function normalizeToken(token: string): string | undefined {
   if (chineseDigit)
     return chineseDigit
   const lower = token.toLowerCase()
-  return LETTER_WORDS[lower] ?? DIGIT_WORDS[lower]
+  const digit = DIGIT_WORDS[lower]
+  if (digit)
+    return digit
+
+  const contextualDigit = CONTEXTUAL_DIGIT_WORDS[lower]
+  if (contextualDigit && hasChineseCallsignPrefix(precedingRun))
+    return contextualDigit
+
+  return correctExplanationWord(token)?.symbol
+}
+
+function hasChineseCallsignPrefix(run: Array<{ normalized: string }>): boolean {
+  const prefix = run.slice(-2).map(token => token.normalized).join('')
+  return /^B[ADGHIY]$/.test(prefix)
 }
 
 function isCallsignLike(value: string): boolean {
@@ -214,6 +190,16 @@ function isCallsignLike(value: string): boolean {
   return value.startsWith('B')
     || /^[A-Z][ADGHIY]\d/.test(value)
     || /^[A-Z]\d[A-Z0-9]{3,6}$/.test(value)
+}
+
+function isLongRunWindowLike(value: string): boolean {
+  const suffix = value.match(/[A-Z]+$/)?.[0]
+  return value.length >= 6
+    && value.length <= 8
+    && /\d/.test(value)
+    && suffix !== undefined
+    && suffix.length >= 2
+    && suffix.length <= 3
 }
 
 function rankCandidates(fragment: string, callsigns: string[]): CallsignHintCandidate[] {
@@ -277,7 +263,12 @@ export function levenshteinDistance(left: string, right: string): number {
 export function formatCallsignHints(groups: CallsignHintGroup[]): string | undefined {
   const candidatesByCallsign = new Map<string, { candidate: CallsignHintCandidate, source: string }>()
   for (const group of groups) {
-    for (const candidate of group.candidates) {
+    const minimumDistance = Math.min(...group.candidates.map(candidate => candidate.distance))
+    // Exact library matches add no evidence beyond the original ASR text;
+    // retain only one-character corrections for the LLM to assess.
+    if (minimumDistance !== 1)
+      continue
+    for (const candidate of group.candidates.filter(candidate => candidate.distance === minimumDistance)) {
       const previous = candidatesByCallsign.get(candidate.callsign)
       if (!previous || candidate.distance < previous.candidate.distance
         || (candidate.distance === previous.candidate.distance && candidate.score > previous.candidate.score)) {
@@ -287,12 +278,10 @@ export function formatCallsignHints(groups: CallsignHintGroup[]): string | undef
   }
 
   const merged = [...candidatesByCallsign.values()]
-  const minimumDistance = Math.min(...merged.map(item => item.candidate.distance))
-  if (!Number.isFinite(minimumDistance) || minimumDistance > 1)
+  if (merged.length === 0)
     return undefined
 
   const lines = merged
-    .filter(item => item.candidate.distance === minimumDistance)
     .sort((left, right) => left.candidate.callsign.localeCompare(right.candidate.callsign))
     .map(item => `- 原文片段“${item.source}”：${item.candidate.callsign}（距离 ${item.candidate.distance}）`)
   return `常见呼号相似度候选：\n${lines.join('\n')}`

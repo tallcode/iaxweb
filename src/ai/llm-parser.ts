@@ -63,9 +63,10 @@ export class LlmParser {
       : undefined
   }
 
-  async parse(transcript: string, history?: string): Promise<ParsedTranscript | undefined> {
-    // 跑测试前注释掉下面这一行（极端省钱开关，测试输入通常不含 B/布）
-    if (!/B|F|布/i.test(transcript)) return {}
+  async parse(transcript: string, history?: string, corrected: string = transcript): Promise<ParsedTranscript | undefined> {
+    // 跑测试前注释掉下面这一行（极端省钱开关，测试输入通常不含 B）
+    if (!/B/i.test(corrected))
+      return {}
     const prompt = this.loadPrompt()
     const schema = this.loadSchema()
     if (!prompt || !schema)
@@ -75,7 +76,7 @@ export class LlmParser {
     let userContent = history
       ? `最近对话历史（按时间顺序）：\n${history}\n\n当前语音识别文本：\n${transcript}`
       : transcript
-    const callsignHints = formatCallsignHints(this.callsignHints?.match(transcript) ?? [])
+    const callsignHints = formatCallsignHints(this.callsignHints?.match(corrected) ?? [])
     if (callsignHints)
       userContent += `\n\n${callsignHints}`
     const body = {

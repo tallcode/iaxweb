@@ -21,6 +21,56 @@ test('extracts compact, mixed-digit, spaced and phonetic callsign fragments', ()
   assert.ok(!fragments.some(fragment => fragment.normalized === 'BRAVO'))
 })
 
+test('normalizes closed-set ASR confusions before callsign matching', () => {
+  const flower = extractCallsignFragments('Bravo Golf Five Foxtrot flower Tango')
+  const chinese = extractCallsignFragments('Bravo Golf Five Foxtrot 布拉沃 Tango')
+  const pinyin = extractCallsignFragments('Bravo Golf Five Foxtrot 补拉窝 Tango')
+  const cmudict = extractCallsignFragments('alfa Golf Five Foxtrot Bravo Tango')
+
+  assert.ok(flower.some(fragment => fragment.normalized === 'BG5FBT'))
+  assert.ok(chinese.some(fragment => fragment.normalized === 'BG5FBT'))
+  assert.ok(pinyin.some(fragment => fragment.normalized === 'BG5FBT'))
+  assert.ok(cmudict.some(fragment => fragment.normalized === 'AG5FBT'))
+})
+
+test('normalizes English digit homophones only after a callsign prefix', () => {
+  const forDigit = extractCallsignFragments('Bravo Golf for Foxtrot Bravo Tango')
+  const toDigit = extractCallsignFragments('Bravo Golf to Foxtrot Bravo Tango')
+  const wonDigit = extractCallsignFragments('Bravo Golf won Foxtrot Bravo Tango')
+
+  assert.ok(forDigit.some(fragment => fragment.normalized === 'BG4FBT'))
+  assert.ok(toDigit.some(fragment => fragment.normalized === 'BG2FBT'))
+  assert.ok(wonDigit.some(fragment => fragment.normalized === 'BG1FBT'))
+  assert.deepEqual(extractCallsignFragments('thank you for your help'), [])
+  assert.deepEqual(extractCallsignFragments('please turn to four'), [])
+})
+
+test('uses normalized explanation words for known-callsign matching', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iaxweb-callsigns-'))
+  try {
+    const path = join(dir, 'callsigns.txt')
+    writeFileSync(path, 'BG5FBT\n')
+    const matcher = new CallsignHintMatcher(path)
+
+    for (const transcript of [
+      'Bravo Golf Five Foxtrot flower Tango',
+      'Bravo Golf Five Foxtrot 布拉沃 Tango',
+    ]) {
+      const exact = matcher.match(transcript)
+        .flatMap(group => group.candidates)
+        .find(candidate => candidate.callsign === 'BG5FBT' && candidate.distance === 0)
+      assert.ok(exact, transcript)
+    }
+  }
+  finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test('does not fuzzy-normalize unrelated prose into callsign fragments', () => {
+  assert.deepEqual(extractCallsignFragments('please bring the flowers over here'), [])
+})
+
 test('keeps call-like fragments with one missing or inserted character', () => {
   const fragments = extractCallsignFragments('BG5BJ，BG35BJV')
   assert.ok(fragments.some(fragment => fragment.normalized === 'BG5BJ'))
@@ -45,6 +95,15 @@ test('slides across adjacent compact callsigns without separators', () => {
   }
 })
 
+test('does not produce partial callsign windows from long compact runs', () => {
+  const fragments = extractCallsignFragments('BG5FVT59BG5ATV')
+  assert.ok(fragments.some(fragment => fragment.normalized === 'BG5FVT'))
+  assert.ok(fragments.some(fragment => fragment.normalized === 'BG5ATV'))
+  assert.ok(!fragments.some(fragment => fragment.normalized === 'BG5FV'))
+  assert.ok(!fragments.some(fragment => fragment.normalized === 'BG5AT'))
+  assert.ok(!fragments.some(fragment => fragment.normalized === 'G5ATV'))
+})
+
 test('keeps all nearby common callsigns per source fragment', (t) => {
   t.mock.method(console, 'warn', () => {})
   const dir = mkdtempSync(join(tmpdir(), 'iaxweb-callsigns-'))
@@ -62,8 +121,9 @@ test('keeps all nearby common callsigns per source fragment', (t) => {
     assert.ok(groups.flatMap(group => group.candidates).every(candidate => candidate.callsign !== 'INVALID'))
 
     const formatted = formatCallsignHints(groups)
-    assert.ok(formatted?.includes('原文片段'))
-    assert.ok(formatted?.includes('BG5FBT（距离 0）'))
+    assert.ok(formatted?.includes('原文片段“BG5FVT”'))
+    assert.ok(formatted?.includes('BG5FBT（距离 1）'))
+    assert.ok(!formatted?.includes('BG5FBT（距离 0）'))
   }
   finally {
     rmSync(dir, { force: true, recursive: true })
@@ -115,7 +175,7 @@ test('returns no hints when the transcript has no nearby callsign fragment', () 
   }
 })
 
-test('formats all candidates at the global minimum distance for the LLM', () => {
+test('formats each source fragment at its own minimum correction distance', () => {
   const hints = formatCallsignHints([
     {
       candidates: [
@@ -138,7 +198,7 @@ test('formats all candidates at the global minimum distance for the LLM', () => 
   ].join('\n'))
 })
 
-test('gives the LLM only exact matches when distance zero exists', () => {
+test('does not give exact library matches to the LLM', () => {
   const hints = formatCallsignHints([
     {
       candidates: [
@@ -153,9 +213,19 @@ test('gives the LLM only exact matches when distance zero exists', () => {
     },
   ])
 
-  assert.ok(hints?.includes('BG5AAA（距离 0）'))
-  assert.ok(hints?.includes('BG5BBB（距离 0）'))
-  assert.ok(!hints?.includes('BG5AAB'))
+  assert.equal(hints, undefined)
+})
+
+test('does not let an exact callee hide a one-character caller correction', () => {
+  const hints = formatCallsignHints([
+    { candidates: [{ callsign: 'BG5ATV', distance: 0, score: 1 }], source: 'BG5ATV' },
+    { candidates: [{ callsign: 'BG5FBT', distance: 1, score: 0.833 }], source: 'BG5FVT' },
+  ])
+
+  assert.equal(hints, [
+    '常见呼号相似度候选：',
+    '- 原文片段“BG5FVT”：BG5FBT（距离 1）',
+  ].join('\n'))
 })
 
 test('does not give the LLM candidates when the minimum distance is greater than one', () => {

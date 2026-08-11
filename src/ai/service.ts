@@ -8,6 +8,7 @@ import { AsrClient } from './asr-client.js'
 import { AiConfigFiles, logTimestamp } from './context-store.js'
 import { LlmParser } from './llm-parser.js'
 import { decodeMuLaw } from './mulaw.js'
+import { correctExplanationText } from './phonetic-corrector.js'
 import { SerialQueue } from './queue.js'
 import { SegmentStore } from './segment-store.js'
 import { NodeSegmenter } from './segmenter.js'
@@ -187,8 +188,10 @@ export class AiService {
 
       if (this.stopped)
         return
-      if (text)
+      if (text) {
         record.recognition = text
+        record.corrected = correctExplanationText(text).text
+      }
       runtime.store.add(record)
       if (text)
         await this.parseTranscript(nodeId, runtime, record, text)
@@ -210,7 +213,7 @@ export class AiService {
       return
     }
     try {
-      const parsed = await this.llm.parse(text, runtime.store.llmHistory(undefined, record.id))
+      const parsed = await this.llm.parse(text, runtime.store.llmHistory(undefined, record.id), record.corrected ?? text)
       // 解析返回 undefined 说明提示词/schema 文件缺失：LLM 解析未生效。
       if (this.stopped)
         return
