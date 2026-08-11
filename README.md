@@ -88,6 +88,16 @@ cp ai/example/full/schema.json ai/schema.json
 
 识别到呼号时默认发布到 AI Spot 面板（见下节）；`AI_LLM_PUBLISH_SPOT=false` 可关闭，此时只记日志、不发布呼号。
 
+可选的常见呼号相似度提示默认关闭。设置 `AI_CALLSIGN_HINTS_ENABLED=true` 后，系统从 `ai/callsigns.txt` 读取常见呼号（每行一个，支持 `#` 注释），从当前 ASR 文本提取紧凑形式、逐字拼读或字母解释法片段，以位置敏感的 Levenshtein 距离选出候选供 LLM 纠错。系统只把全局最小距离的候选传给 LLM，且最小距离必须是 0 或 1；最小距离大于 1 时不提供候选，避免干扰新呼号判断。允许多识别或漏识别一个字符，但不会给字符换位优惠；相同长度的候选还要求最多只有一个位置不同。候选只是历史数据库检索结果；LLM 必须以原文字母解释法、紧凑呼号和通联语义为最高依据，不能用候选覆盖原文证据。呼号表在每次 LLM 调用前重读，保存后无需重启。
+
+不调用 LLM 即可手动检查片段提取和相似度候选：
+
+```bash
+npm run callsign-match-test -- "这里是 BG5FVT，Bravo Golf Five Foxtrot Bravo Tango"
+```
+
+输出仅包含 `source`（提取的疑似呼号片段列表）和 `candidates`（合并后距离小于等于 1 的全部候选，不限制数量）。`candidates` 的 `distance` 是编辑距离，越小越相似；`score` 是 0–1 的相似度得分，越高越相似。
+
 ```
 [260809 21:40:12] [1900]: 9f2ab1c4 6.2s 呼号=BD5XXX | 呼叫 CQ，这里是 BD5XXX，杭州
 [260809 21:40:30] [1900]: 风控告警 9f2ab1c4 L5: 煽动非法集会与暴力行为
@@ -128,6 +138,8 @@ cp ai/example/full/schema.json ai/schema.json
 | `AI_LLM_TIMEOUT_MS` | `30000` | 单次请求超时 |
 | `AI_LLM_PROMPT_FILE` | `ai/prompt.txt` | LLM 提示词文件路径（切换简化版：复制 `ai/example/simple/prompt.txt` 覆盖之） |
 | `AI_LLM_SCHEMA_FILE` | `ai/schema.json` | LLM 输出 JSON Schema 路径（切换简化版：复制 `ai/example/simple/schema.json` 覆盖之） |
+| `AI_CALLSIGN_HINTS_ENABLED` | `false` | 是否向 LLM 提供常见呼号相似度候选 |
+| `AI_CALLSIGNS_FILE` | `ai/callsigns.txt` | 常见呼号表路径，每行一个呼号 |
 
 ## 运行
 

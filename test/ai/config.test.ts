@@ -19,6 +19,8 @@ test('loads AI defaults', () => {
   assert.equal(config.llmThinkingBudget, undefined)
   assert.equal(config.llmModel, 'qwen3.7-flash')
   assert.equal(config.llmPublishSpot, true)
+  assert.equal(config.callsignHintsEnabled, false)
+  assert.ok(config.callsignsFile.endsWith('ai/callsigns.txt'))
   assert.ok(config.llmPromptFile.endsWith('ai/prompt.txt'))
   assert.ok(config.llmSchemaFile.endsWith('ai/schema.json'))
   assert.ok(config.hotwordsFile.endsWith('ai/hotwords.json'))
@@ -84,6 +86,19 @@ test('can disable the LLM stage', () => {
 test('can disable spot publishing', () => {
   const config = loadAiConfig({ AI_LLM_PUBLISH_SPOT: 'false' })
   assert.equal(config.llmPublishSpot, false)
+})
+
+test('can enable common callsign hints and override the list path', () => {
+  const config = loadAiConfig({
+    AI_CALLSIGN_HINTS_ENABLED: 'true',
+    AI_CALLSIGNS_FILE: '/custom/callsigns.txt',
+  })
+  assert.equal(config.callsignHintsEnabled, true)
+  assert.equal(config.callsignsFile, '/custom/callsigns.txt')
+})
+
+test('rejects an invalid AI_CALLSIGN_HINTS_ENABLED', () => {
+  assert.throws(() => loadAiConfig({ AI_CALLSIGN_HINTS_ENABLED: 'yes' }), /true.*false/)
 })
 
 test('rejects an invalid AI_LLM_PUBLISH_SPOT', () => {

@@ -10,7 +10,9 @@ import { LlmParser, validateAgainstSchema } from '../../src/ai/llm-parser.js'
 const fixtureDir = mkdtempSync(join(tmpdir(), 'iaxweb-llm-'))
 const fixturePrompt = join(fixtureDir, 'prompt.txt')
 const fixtureSchema = join(fixtureDir, 'schema.json')
+const fixtureCallsigns = join(fixtureDir, 'callsigns.txt')
 writeFileSync(fixturePrompt, '测试提示词')
+writeFileSync(fixtureCallsigns, 'BG5FBT\nBG5FAT\n')
 writeFileSync(fixtureSchema, JSON.stringify({
   additionalProperties: false,
   properties: {
@@ -62,12 +64,19 @@ interface CapturedCall {
 function makeParser(
   fetchImpl: typeof fetch,
   files: { promptFile?: string, schemaFile?: string } = {},
-  extra: { enableThinking?: boolean, thinkingBudget?: number } = {},
+  extra: {
+    callsignHintsEnabled?: boolean
+    callsignsFile?: string
+    enableThinking?: boolean
+    thinkingBudget?: number
+  } = {},
 ): { calls: CapturedCall[], parser: LlmParser } {
   const calls: CapturedCall[] = []
   const parser = new LlmParser({
     apiKey: 'test-key',
     baseUrl: 'https://dashscope.example',
+    ...(extra.callsignHintsEnabled !== undefined ? { callsignHintsEnabled: extra.callsignHintsEnabled } : {}),
+    ...(extra.callsignsFile !== undefined ? { callsignsFile: extra.callsignsFile } : {}),
     ...(extra.enableThinking !== undefined ? { enableThinking: extra.enableThinking } : {}),
     fetchImpl: (url, init) => {
       calls.push({ body: JSON.parse(String(init?.body)), url: String(url) })
@@ -110,6 +119,25 @@ test('passes conversation history to the model', async () => {
   assert.ok(user.includes('最近对话历史'))
   assert.ok(user.includes('BG5XXX: 上一条消息'))
   assert.ok(user.includes('当前语音识别文本：\n当前文本'))
+})
+
+test('passes guarded common callsign similarity hints to the model', async () => {
+  const { calls, parser } = makeParser(
+    () => Promise.resolve(completion(okResult())),
+    {},
+    { callsignHintsEnabled: true, callsignsFile: fixtureCallsigns },
+  )
+
+  await parser.parse('这里是 BG5FVT')
+  const system = calls[0]?.body.messages[0]?.content
+  const user = calls[0]?.body.messages[1]?.content
+  assert.ok(system?.includes('候选列表不是白名单'))
+  assert.ok(system?.includes('字母解释法、紧凑呼号原文及通联语义为最高依据'))
+  assert.ok(system?.includes('历史数据库的检索结果'))
+  assert.ok(user?.includes('常见呼号相似度候选'))
+  assert.ok(user?.includes('原文片段“BG5FVT”'))
+  assert.ok(user?.includes('BG5FAT（距离 1）'))
+  assert.ok(user?.includes('BG5FBT（距离 1）'))
 })
 
 test('sends thinking parameters when enabled', async () => {

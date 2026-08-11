@@ -52,6 +52,9 @@ export class AiService {
       ? new LlmParser({
           apiKey: config.apiKey ?? '',
           baseUrl: config.baseUrl,
+          ...(config.callsignHintsEnabled
+            ? { callsignHintsEnabled: true, callsignsFile: config.callsignsFile }
+            : {}),
           ...(config.llmEnableThinking ? { enableThinking: true } : {}),
           model: config.llmModel,
           promptFile: config.llmPromptFile,
@@ -238,7 +241,7 @@ export class AiService {
     }
   }
 
-  private logDiscard(nodeId: string, reason: DiscardReason, durationMs: number, minMs?: number): void {
+  private logDiscard(nodeId: string, reason: DiscardReason, durationMs: number, _minMs?: number): void {
     const seconds = (durationMs / 1000).toFixed(1)
     if (reason === 'short') {
       console.log(`${logTimestamp()} [${nodeId}]: 丢弃段 ${seconds}s`)

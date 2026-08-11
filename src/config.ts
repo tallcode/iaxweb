@@ -30,6 +30,8 @@ export interface AiConfig {
   apiKey?: string
   backgroundFile: string
   baseUrl: string
+  callsignHintsEnabled: boolean
+  callsignsFile: string
   coldMinSegmentMs: number
   contextWindowMs: number
   hotMinSegmentMs: number
@@ -167,6 +169,10 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     throw new Error('AI_LLM_ENABLED must be "true" or "false"')
   const llmModel = optional(env, 'AI_LLM_MODEL') ?? 'qwen3.7-flash'
 
+  const callsignHintsEnabledText = optional(env, 'AI_CALLSIGN_HINTS_ENABLED') ?? 'false'
+  if (callsignHintsEnabledText !== 'true' && callsignHintsEnabledText !== 'false')
+    throw new Error('AI_CALLSIGN_HINTS_ENABLED must be "true" or "false"')
+
   const llmPublishSpotText = optional(env, 'AI_LLM_PUBLISH_SPOT') ?? 'true'
   if (llmPublishSpotText !== 'true' && llmPublishSpotText !== 'false')
     throw new Error('AI_LLM_PUBLISH_SPOT must be "true" or "false"')
@@ -188,6 +194,8 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     activityWindowMs,
     backgroundFile: resolveProjectPath(optional(env, 'AI_BACKGROUND_FILE') ?? 'ai/background.txt'),
     baseUrl: baseUrl.toString().replace(/\/+$/, ''),
+    callsignHintsEnabled: callsignHintsEnabledText === 'true',
+    callsignsFile: resolveProjectPath(optional(env, 'AI_CALLSIGNS_FILE') ?? 'ai/callsigns.txt'),
     coldMinSegmentMs,
     contextWindowMs,
     hotMinSegmentMs,

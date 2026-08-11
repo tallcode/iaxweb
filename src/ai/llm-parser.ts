@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { CallsignHintMatcher, formatCallsignHints } from './callsign-hints.js'
 import { logTimestamp } from './context-store.js'
 
 export interface RiskRating {
@@ -15,6 +16,8 @@ export interface ParsedTranscript {
 export interface LlmParserOptions {
   apiKey: string
   baseUrl: string
+  callsignHintsEnabled?: boolean
+  callsignsFile?: string
   model: string
   promptFile: string
   schemaFile: string
@@ -28,6 +31,7 @@ export interface LlmParserOptions {
 const CHAT_PATH = '/compatible-mode/v1/chat/completions'
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_RETRY_DELAYS_MS = [1_000]
+const CALLSIGN_HINT_POLICY = `呼号判断以当前文本或历史中的字母解释法、紧凑呼号原文及通联语义为最高依据。常见呼号相似度候选只是对历史数据库的检索结果，仅供发现可能的字符识别错误；它不代表候选实际出现在语音中，不能证明其属于当前发言人，也不能覆盖或改写原文的字母解释法。候选列表不是白名单，原文证据明确时可以输出列表外的合法呼号；证据不足时不得仅凭候选输出呼号。`
 
 // LLM 后处理：用对话模型对语音识别文本做结构化解析（完整版含规范化、呼号
 // 提取与风控，简化版只提取呼号）。提示词与 JSON Schema 存在文件中，每次
@@ -40,6 +44,7 @@ export class LlmParser {
   private readonly timeoutMs: number
   private readonly enableThinking: boolean
   private readonly thinkingBudget: number | undefined
+  private readonly callsignHints: CallsignHintMatcher | undefined
   private lastPrompt: string | undefined
   private lastSchema: { object: Record<string, unknown>, raw: string } | undefined
 
@@ -53,6 +58,9 @@ export class LlmParser {
     // need it and thinking regularly blew the non-streaming timeout.
     this.enableThinking = options.enableThinking ?? false
     this.thinkingBudget = options.thinkingBudget
+    this.callsignHints = options.callsignHintsEnabled && options.callsignsFile
+      ? new CallsignHintMatcher(options.callsignsFile)
+      : undefined
   }
 
   async parse(transcript: string, history?: string): Promise<ParsedTranscript | undefined> {
@@ -64,14 +72,17 @@ export class LlmParser {
       return undefined
     // Recent turns (if any) give the model conversation continuity; the
     // current transcript is clearly delimited so it is not confused with them.
-    const userContent = history
+    let userContent = history
       ? `最近对话历史（按时间顺序）：\n${history}\n\n当前语音识别文本：\n${transcript}`
       : transcript
+    const callsignHints = formatCallsignHints(this.callsignHints?.match(transcript) ?? [])
+    if (callsignHints)
+      userContent += `\n\n${callsignHints}`
     const body = {
       enable_thinking: this.enableThinking,
       ...(this.thinkingBudget !== undefined ? { thinking_budget: this.thinkingBudget } : {}),
       messages: [
-        { content: `${prompt}\n\n严格按以下 JSON Schema 输出：\n${schema.raw}`, role: 'system' },
+        { content: `${prompt}${callsignHints ? `\n\n${CALLSIGN_HINT_POLICY}` : ''}\n\n严格按以下 JSON Schema 输出：\n${schema.raw}`, role: 'system' },
         { content: userContent, role: 'user' },
       ],
       model: this.options.model,

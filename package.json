@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "tsx --test test/*.test.ts test/**/*.test.ts test/**/*.test.js",
-    "llm-parse-test": "tsx scripts/llm-parse-test.ts"
+    "llm-parse-test": "tsx scripts/llm-parse-test.ts",
+    "callsign-match-test": "tsx scripts/callsign-match-test.ts"
   },
   "dependencies": {
     "@nats-io/jetstream": "^3.4.0",
