@@ -36,6 +36,13 @@ export interface PersistedSegment {
   voicedMs: number
 }
 
+export interface SegmentPage {
+  items: PersistedSegment[]
+  page: number
+  pageSize: number
+  total: number
+}
+
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS ai_segments (
     id                TEXT PRIMARY KEY,
@@ -174,6 +181,24 @@ export class SegmentRepository {
   find(id: string): PersistedSegment | undefined {
     const row = this.database.prepare(SELECT_EFFECTIVE).get(id)
     return row ? mapRow(row) : undefined
+  }
+
+  list(page: number, pageSize: number): SegmentPage {
+    if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
+      throw new Error('Invalid segment page')
+    const totalRow = this.database.prepare('SELECT COUNT(*) AS total FROM ai_segments').get()
+    const total = requiredNumber(totalRow?.total)
+    const rows = this.database.prepare(`
+      SELECT
+        id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected,
+        revise, callsign, risk_level, risk_reason, manual_callsign,
+        manual_risk_level, manual_note, created_at, effective_callsign,
+        effective_risk_level
+      FROM ai_segments_effective
+      ORDER BY captured_at DESC, id DESC
+      LIMIT ? OFFSET ?
+    `).all(pageSize, (page - 1) * pageSize)
+    return { items: rows.map(mapRow), page, pageSize, total }
   }
 
   recentSpots(limit: number = 100): StoredSpot[] {

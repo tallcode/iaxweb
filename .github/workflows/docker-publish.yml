@@ -1,8 +1,9 @@
 name: Publish Docker image
 
-# Manually triggered from the Actions tab.
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 env:
   REGISTRY: ghcr.io

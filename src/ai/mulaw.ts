@@ -2,7 +2,7 @@
 export const SAMPLE_RATE = 8_000
 
 // Decodes G.711 μ-law bytes into signed 16-bit PCM, mirroring the browser
-// decoder in public/audio-player.js.
+// decoder in public/index/audio-player.js.
 export function decodeMuLaw(encoded: Uint8Array): Int16Array {
   const samples = new Int16Array(encoded.length)
   for (let index = 0; index < encoded.length; index++) {

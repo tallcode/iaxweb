@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebSocket } from 'ws'
 import type { SpotEvent } from './ai/spot-store.js'
 import type { StatusSnapshot } from './allmon3.js'
+import { Buffer } from 'node:buffer'
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
@@ -12,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { connect } from '@nats-io/transport-node'
 import { config as loadEnv } from 'dotenv'
 import { WebSocketServer } from 'ws'
+import { AdminAuth } from './admin/auth.js'
 import { SegmentRepository } from './ai/segment-repository.js'
 import { AiService } from './ai/service.js'
 import { SpotStore } from './ai/spot-store.js'
@@ -52,6 +54,7 @@ const aiNodeIds = Object.entries(nodeDefinitions)
 if (aiNodeIds.length > 0 && !aiConfig.apiKey)
   throw new Error(`DASHSCOPE_API_KEY is required to enable AI for nodes: ${aiNodeIds.join(', ')}`)
 const segmentRepository = aiConfig.persistenceEnabled ? new SegmentRepository(aiConfig.databaseFile) : undefined
+const adminAuth = segmentRepository ? new AdminAuth(aiConfig.adminFile) : undefined
 const spotStore = new SpotStore({
   createConnection: () => connect({
     ...createConnectionOptions(config.nats),
@@ -169,10 +172,15 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
     return
   }
 
+  if (url.pathname.startsWith('/api/admin/')) {
+    await serveAdminApi(request, response, url)
+    return
+  }
+
   const pathname = url.pathname === '/'
-    ? '/index.html'
+    ? '/index/'
     : ['/map', '/map/'].includes(url.pathname)
-        ? '/index.html'
+        ? '/index/'
         : url.pathname
   let decodedPath: string
   try {
@@ -183,7 +191,8 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
     return
   }
 
-  const filePath = resolve(publicRoot, `.${decodedPath}`)
+  const requested = decodedPath.endsWith('/') ? `${decodedPath}index.html` : decodedPath
+  const filePath = resolve(publicRoot, `.${requested}`)
   if (!filePath.startsWith(`${publicRoot}${sep}`)) {
     response.writeHead(404).end('Not Found')
     return
@@ -200,6 +209,130 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
   catch {
     response.writeHead(404).end('Not Found')
   }
+}
+
+async function serveAdminApi(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
+  if (!adminAuth || !segmentRepository) {
+    response.writeHead(503).end('Persistence is disabled')
+    return
+  }
+  const token = cookies(request).admin_token
+  if (url.pathname === '/api/admin/login' && request.method === 'POST') {
+    const body = await jsonBody(request)
+    if (!body || typeof body.username !== 'string' || typeof body.password !== 'string') {
+      response.writeHead(400).end('Invalid login request')
+      return
+    }
+    const issued = adminAuth.login(body.username, body.password)
+    if (!issued) {
+      response.writeHead(401).end('Invalid username or password')
+      return
+    }
+    response.writeHead(204, { 'set-cookie': `admin_token=${issued}; HttpOnly; Path=/; SameSite=Strict` }).end()
+    return
+  }
+  if (url.pathname === '/api/admin/logout' && request.method === 'POST') {
+    adminAuth.logout(token)
+    response.writeHead(204, { 'set-cookie': 'admin_token=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0' }).end()
+    return
+  }
+  if (!adminAuth.isAuthenticated(token)) {
+    response.writeHead(401).end('Unauthorized')
+    return
+  }
+  if (url.pathname === '/api/admin/segments' && request.method === 'GET') {
+    const page = parsePage(url.searchParams.get('page'), 1)
+    const pageSize = parsePage(url.searchParams.get('pageSize'), 50)
+    try {
+      json(response, 200, segmentRepository.list(page, pageSize))
+    }
+    catch {
+      response.writeHead(400).end('Invalid pagination')
+    }
+    return
+  }
+  const match = /^\/api\/admin\/segments\/([0-9a-f-]+)\/(audio|manual-callsign)$/i.exec(url.pathname)
+  if (!match) {
+    response.writeHead(404).end('Not Found')
+    return
+  }
+  const id = match[1]
+  const action = match[2]
+  if (!id || !action) {
+    response.writeHead(404).end('Not Found')
+    return
+  }
+  if (action === 'manual-callsign' && request.method === 'PATCH') {
+    const body = await jsonBody(request)
+    if (!body || !('callsign' in body) || (body.callsign !== null && typeof body.callsign !== 'string')) {
+      response.writeHead(400).end('Invalid callsign')
+      return
+    }
+    const callsign = typeof body.callsign === 'string' ? body.callsign.trim().toUpperCase() : null
+    if (callsign !== null && !/^(?:B[ADGHIY]\d[A-Z]{2,3}|N0CALL)$/.test(callsign)) {
+      response.writeHead(400).end('Invalid callsign')
+      return
+    }
+    if (!segmentRepository.updateManualReview(id, { callsign })) {
+      response.writeHead(404).end('Not Found')
+      return
+    }
+    json(response, 200, segmentRepository.find(id))
+    return
+  }
+  if (action === 'audio' && request.method === 'GET') {
+    const segment = segmentRepository.find(id)
+    if (!segment) {
+      response.writeHead(404).end('Not Found')
+      return
+    }
+    const day = segment.capturedAt.slice(0, 10).replaceAll('-', '')
+    const file = resolve(aiConfig.recordingsDirectory, day, `${id}.wav`)
+    if (!file.startsWith(`${resolve(aiConfig.recordingsDirectory)}${sep}`)) {
+      response.writeHead(400).end('Bad Request')
+      return
+    }
+    try {
+      const wav = await readFile(file)
+      response.writeHead(200, { 'cache-control': 'private, no-store', 'content-type': 'audio/wav' }).end(wav)
+    }
+    catch {
+      response.writeHead(404).end('Recording not found')
+    }
+    return
+  }
+  response.writeHead(405).end('Method Not Allowed')
+}
+
+function cookies(request: IncomingMessage): Record<string, string> {
+  return Object.fromEntries((request.headers.cookie ?? '').split(';').map(value => value.trim().split('=').map(decodeURIComponent)).filter(parts => parts.length === 2) as Array<[string, string]>)
+}
+
+async function jsonBody(request: IncomingMessage): Promise<Record<string, unknown> | undefined> {
+  const parts: Buffer[] = []
+  for await (const part of request) {
+    parts.push(Buffer.from(part))
+    if (Buffer.concat(parts).length > 16_384)
+      return undefined
+  }
+  try {
+    const parsed = JSON.parse(Buffer.concat(parts).toString()) as unknown
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined
+  }
+  catch {
+    return undefined
+  }
+}
+
+function json(response: ServerResponse, status: number, value: unknown): void {
+  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(value))
+}
+
+function parsePage(value: string | null, fallback: number): number {
+  if (value === null)
+    return fallback
+  const parsed = Number(value)
+  return Number.isInteger(parsed) ? parsed : NaN
 }
 
 function broadcastAudio(nodeId: string, data: Uint8Array | string, binary: boolean): void {

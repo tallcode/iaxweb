@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101723">
+    <title>IAX Monitor 管理</title>
+    <link rel="stylesheet" href="/admin/admin.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section id="login-view" class="card login-card">
+        <h1>管理登录</h1>
+        <form id="login-form">
+          <label>用户名<input name="username" autocomplete="username" required></label>
+          <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+          <p id="login-error" class="error" hidden></p>
+          <button>登录</button>
+        </form>
+      </section>
+      <section id="segments-view" hidden>
+        <header><h1>AI 识别记录</h1><button id="logout" class="secondary">退出</button></header>
+        <p id="status" class="status"></p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>时间</th><th>时长</th><th>识别文本</th><th>AI 呼号</th><th>人工复核呼号</th><th>播放</th></tr></thead>
+          <tbody id="segments"></tbody>
+        </table></div>
+        <nav class="pager"><button id="previous" class="secondary">上一页</button><span id="page"></span><button id="next" class="secondary">下一页</button></nav>
+      </section>
+    </main>
+    <script type="module" src="/admin/admin.js"></script>
+  </body>
+</html>

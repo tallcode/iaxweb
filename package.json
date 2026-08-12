@@ -12,7 +12,8 @@
     "test": "tsx --test test/*.test.ts test/**/*.test.ts test/**/*.test.js",
     "phonetic-corrector-test": "tsx scripts/phonetic-corrector-test.ts",
     "llm-parse-test": "tsx scripts/llm-parse-test.ts",
-    "callsign-match-test": "tsx scripts/callsign-match-test.ts"
+    "callsign-match-test": "tsx scripts/callsign-match-test.ts",
+    "hash-admin-password": "tsx scripts/hash-admin-password.ts"
   },
   "dependencies": {
     "@lunarisapp/cmudict": "^1.0.2",

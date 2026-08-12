@@ -1,4 +1,4 @@
-// Simulate an AI-spot publish for BG5ATV through the real SpotStore.
+// Publish a simulated AI spot for BG5ATV through the real Core NATS relay.
 import { connect } from '@nats-io/transport-node'
 import { config as loadEnv } from 'dotenv'
 import { SpotStore } from '../src/ai/spot-store.js'
@@ -12,13 +12,12 @@ const store = new SpotStore({
   createConnection: () => connect(createConnectionOptions(config.nats)),
 })
 
-await store.record({
+await store.start(spot => console.log('received spot:', JSON.stringify(spot, null, 2)))
+store.publish({
   at: new Date().toISOString(),
   callsign: 'BG5ATV',
   node: '1900',
   segmentId: 'simulated-segment',
 })
-
-const recent = await store.recent()
-console.log('recent after record:', JSON.stringify(recent, null, 2))
+await new Promise(resolve => setTimeout(resolve, 100))
 await store.close()

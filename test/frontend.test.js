@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { AudioStreamPlayer, SpectrumMeter } from '../public/audio-player.js'
-import { TransmissionFavicon } from '../public/favicon.js'
-import { ReconnectingWebSocket } from '../public/reconnecting-websocket.js'
-import { expireSnapshot } from '../public/status-client.js'
-import { collectEdges, graphSignature } from '../public/topology-model.js'
+import { AudioStreamPlayer, SpectrumMeter } from '../public/index/audio-player.js'
+import { TransmissionFavicon } from '../public/index/favicon.js'
+import { ReconnectingWebSocket } from '../public/index/reconnecting-websocket.js'
+import { expireSnapshot } from '../public/index/status-client.js'
+import { collectEdges, graphSignature } from '../public/index/topology-model.js'
 
 class FakeSocket extends EventTarget {
   close() {

@@ -148,3 +148,18 @@ test('returns the newest effective spot per callsign and excludes N0CALL', () =>
   }])
   repository.close()
 })
+
+test('lists segments newest first with pagination', () => {
+  const repository = new SegmentRepository(':memory:')
+  const old = record({ id: 'old', timestamp: '2026-08-10T12:00:00.000Z' })
+  const latest = record({ id: 'latest', timestamp: '2026-08-12T12:00:00.000Z' })
+  repository.insert('1900', old)
+  repository.insert('1901', latest)
+
+  const result = repository.list(1, 1)
+  assert.equal(result.total, 2)
+  assert.equal(result.items[0]?.id, 'latest')
+  assert.deepEqual(repository.list(2, 1).items.map(item => item.id), ['old'])
+  assert.throws(() => repository.list(0, 50), /Invalid segment page/)
+  repository.close()
+})

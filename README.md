@@ -132,6 +132,7 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 | `AI_PERSISTENCE_ENABLED` | `false` | 是否持久化 SQLite 结果及 WAV 录音 |
 | `AI_DATABASE_FILE` | `data/ai.sqlite` | AI 识别与人工复核结果的 SQLite 文件路径 |
 | `AI_RECORDINGS_DIR` | 与数据库同级的 `rec` | 成功识别语音的 WAV 存储目录 |
+| `AI_ADMIN_FILE` | 与数据库同级的 `admin.json` | 管理页面账号配置文件路径 |
 | `AI_HOTWORDS_FILE` | `ai/hotwords.json` | 热词文件路径 |
 | `AI_BACKGROUND_FILE` | `ai/background.txt` | 背景文本文件路径 |
 | `AI_LLM_ENABLED` | `true` | LLM 后处理开关 |
@@ -152,8 +153,6 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:3000/audio.html?node=1900`，点击“播放”后页面会连接同源的 `/audio/1900` WebSocket；再次点击“停止”会关闭 WebSocket 和音频上下文。
-
 打开 `http://localhost:3000` 查看实时节点拓扑；`/map` 仍作为兼容入口。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
 
 根目录的 `nodes.json` 是地图的静态节点与链路配置。服务启动时会立即根据该文件生成默认离线状态，无需等待 Allmon3 返回；后续实时数据逐项覆盖默认值。`TYPE` 支持 `HUB` 和 `REPEATER`，`NAME` 保存节点短名称，`LINK` 声明允许显示的拓扑边，`FREQ` 保存中继频率信息；HUB 配置 `AUDIO: true` 时，地图节点会显示音频播放控件。
@@ -165,6 +164,31 @@ npm start
 ```
 
 反向代理需要允许 `/audio` 和 `/status` 的 WebSocket Upgrade。`GET /healthz` 可用于存活检查。
+
+### 管理页面
+
+启用 `AI_PERSISTENCE_ENABLED=true` 后，访问 `/admin/` 查看已持久化的识别记录。页面按时间倒序分页展示中国时区的记录，可播放录音，并可编辑人工复核呼号；留空会撤销人工覆盖，`N0CALL` 表示人工确认无呼号。
+
+管理账号文件默认是 `data/admin.json`，不提交到 Git。先生成密码哈希：
+
+```bash
+npm run hash-admin-password -- '替换为强密码'
+```
+
+再创建 `data/admin.json`：
+
+```json
+{
+  "users": [
+    {
+      "username": "admin",
+      "passwordHash": "粘贴上一步输出的 scrypt$..."
+    }
+  ]
+}
+```
+
+登录会话仅保存在进程内存，服务重启后所有管理端登录都会失效。持久化启用时 `admin.json` 必须存在且格式正确；Compose 部署时它位于已挂载的 `./data/admin.json`。
 
 ## Docker
 
@@ -191,7 +215,7 @@ docker compose up -d
 
 ## 镜像发布（GitHub Actions）
 
-`.github/workflows/docker-publish.yml` 为**手动触发**（Actions 页面点击 “Run workflow”），构建镜像并推送到 GitHub Packages：
+`.github/workflows/docker-publish.yml` 会在推送到 `main` 时自动构建镜像并推送到 GitHub Packages：
 
 ```
 ghcr.io/tallcode/iaxweb:latest

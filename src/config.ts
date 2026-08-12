@@ -26,6 +26,7 @@ const invalidSubjectToken = /[\s*>]/
 const maxAllowedSegmentMs = 290_000
 
 export interface AiConfig {
+  adminFile: string
   activityWindowMs: number
   apiKey?: string
   backgroundFile: string
@@ -200,6 +201,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
 
   return {
     ...(apiKey ? { apiKey } : {}),
+    adminFile: resolveProjectPath(optional(env, 'AI_ADMIN_FILE') ?? `${dirname(databaseFile)}/admin.json`),
     activityWindowMs,
     backgroundFile: resolveProjectPath(optional(env, 'AI_BACKGROUND_FILE') ?? 'ai/background.txt'),
     baseUrl: baseUrl.toString().replace(/\/+$/, ''),

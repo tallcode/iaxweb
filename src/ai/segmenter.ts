@@ -27,7 +27,7 @@ export const VOICE_DBFS_THRESHOLD = -50
 // audio is kept.
 const TRIM_DBFS_THRESHOLD = -60
 
-// Audio frame layout published by iaxmon (see public/audio-player.js):
+// Audio frame layout published by iaxmon (see public/index/audio-player.js):
 // 10-byte header (byte 0 version, byte 1 type, bytes 6..9 big-endian uint32
 // media timestamp in ms) followed by PCMU payload.
 const FRAME_HEADER_LENGTH = 10

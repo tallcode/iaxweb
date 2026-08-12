@@ -15,6 +15,7 @@ test('loads AI defaults', () => {
   assert.equal(config.contextWindowMs, 300_000)
   assert.ok(config.databaseFile.endsWith('data/ai.sqlite'))
   assert.ok(config.recordingsDirectory.endsWith('data/rec'))
+  assert.ok(config.adminFile.endsWith('data/admin.json'))
   assert.equal(config.llmEnabled, true)
   assert.equal(config.persistenceEnabled, false)
   assert.equal(config.llmEnableThinking, false)
@@ -36,6 +37,7 @@ test('loads custom AI settings', () => {
     AI_COLD_MIN_SEGMENT_MS: '4000',
     AI_CONTEXT_WINDOW_MS: '60000',
     AI_DATABASE_FILE: '/var/lib/iaxweb/ai.sqlite',
+    AI_ADMIN_FILE: '/var/lib/iaxweb/admin.json',
     AI_RECORDINGS_DIR: '/var/lib/iaxweb/rec',
     AI_HOT_MIN_SEGMENT_MS: '1500',
     AI_MAX_SEGMENT_MS: '90000',
@@ -48,6 +50,7 @@ test('loads custom AI settings', () => {
   assert.equal(config.maxSegmentMs, 90_000)
   assert.equal(config.contextWindowMs, 60_000)
   assert.equal(config.databaseFile, '/var/lib/iaxweb/ai.sqlite')
+  assert.equal(config.adminFile, '/var/lib/iaxweb/admin.json')
   assert.equal(config.recordingsDirectory, '/var/lib/iaxweb/rec')
 })
 
