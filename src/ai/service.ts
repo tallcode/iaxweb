@@ -28,6 +28,7 @@ export interface AiServiceOptions {
   config: AiConfig
   nodeIds: string[]
   onSpot?: (spot: SpotEvent) => void
+  repository?: SegmentRepository
 }
 
 // AI 值机员：监听节点音频，按发射分段送百炼识别，输出到控制台。
@@ -47,7 +48,7 @@ export class AiService {
     const { config, nodeIds } = options
     this.config = config
     this.configFiles = new AiConfigFiles(config.hotwordsFile, config.backgroundFile)
-    this.repository = config.persistenceEnabled ? new SegmentRepository(config.databaseFile) : undefined
+    this.repository = options.repository ?? (config.persistenceEnabled ? new SegmentRepository(config.databaseFile) : undefined)
     this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
     this.onSpot = options.onSpot
     this.asr = new AsrClient({

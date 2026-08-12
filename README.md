@@ -110,9 +110,7 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 
 ### AI Spot 面板
 
-识别到呼号时，地图页右侧面板（AI Spot）展示最近呼号，相同呼号只保留最新一条，点击页面加载时先从 `/api/spots` 拉取历史，再通过 `/status` WebSocket 的 `{type:'spot'}` 消息实时更新。
-
-呼号写入 JetStream 流 `AI_SPOT`（subject `iaxmon.nodes.<节点>.ai.spot.<呼号>`，保留 24 小时，每个呼号只留最新）。需要 NATS 服务器开启 JetStream（配置 `jetstream { store_dir: ... }` 并重启）；未开启时网关降级为进程内会话级记录，不持久化，页面面板仍可实时工作。
+识别到呼号时，地图页右侧面板（AI Spot）展示最近呼号，相同呼号只保留最新一条。首次加载从 SQLite 的 `ai_segments_effective` 读取历史，人工复核呼号优先；实时更新经 Core NATS subject `iaxmon.nodes.<节点>.ai.spot.<呼号>` 和 `/status` WebSocket 推送。无需启用 JetStream。人工确认无呼号时可设 `manual_callsign = 'N0CALL'`，它会覆盖 AI 结果但不会显示为 Spot。
 
 控制台输出按节点区分：
 

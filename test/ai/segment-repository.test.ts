@@ -126,3 +126,25 @@ test('enforces risk levels and rejects empty manual patches', () => {
   assert.equal(repository.updateManualReview('missing', { note: '不存在' }), false)
   repository.close()
 })
+
+test('returns the newest effective spot per callsign and excludes N0CALL', () => {
+  const repository = new SegmentRepository(':memory:')
+  const first = record({ callsign: 'BG5AAA', id: 'one', timestamp: '2026-08-10T12:00:00.000Z' })
+  const second = record({ callsign: 'BG5AAA', id: 'two', timestamp: '2026-08-11T12:00:00.000Z' })
+  const reviewed = record({ callsign: 'BG5BBB', id: 'three', timestamp: '2026-08-12T12:00:00.000Z' })
+  repository.insert('1900', first)
+  repository.insert('1901', second)
+  repository.insert('1902', reviewed)
+  repository.updateAnalysis(first)
+  repository.updateAnalysis(second)
+  repository.updateAnalysis(reviewed)
+  repository.updateManualReview(reviewed.id, { callsign: 'N0CALL' })
+
+  assert.deepEqual(repository.recentSpots(), [{
+    at: second.timestamp,
+    callsign: 'BG5AAA',
+    node: '1901',
+    segmentId: second.id,
+  }])
+  repository.close()
+})

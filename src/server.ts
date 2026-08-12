@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { connect } from '@nats-io/transport-node'
 import { config as loadEnv } from 'dotenv'
 import { WebSocketServer } from 'ws'
+import { SegmentRepository } from './ai/segment-repository.js'
 import { AiService } from './ai/service.js'
 import { SpotStore } from './ai/spot-store.js'
 import { Allmon3StatusService, parseNodeDefinitions, publicStatusSnapshot } from './allmon3.js'
@@ -50,6 +51,7 @@ const aiNodeIds = Object.entries(nodeDefinitions)
   .map(([nodeId]) => nodeId)
 if (aiNodeIds.length > 0 && !aiConfig.apiKey)
   throw new Error(`DASHSCOPE_API_KEY is required to enable AI for nodes: ${aiNodeIds.join(', ')}`)
+const segmentRepository = aiConfig.persistenceEnabled ? new SegmentRepository(aiConfig.databaseFile) : undefined
 const spotStore = new SpotStore({
   createConnection: () => connect({
     ...createConnectionOptions(config.nats),
@@ -61,12 +63,8 @@ const aiService = aiNodeIds.length > 0
   ? new AiService({
       config: aiConfig,
       nodeIds: aiNodeIds,
-      onSpot: spot => void spotStore.record(spot).then((result) => {
-        // Published spots come back through the JetStream consumer. When the
-        // store is running in memory-only mode, broadcast the local event now.
-        if (result === 'stored')
-          broadcastSpot(spot)
-      }),
+      onSpot: spot => spotStore.publish(spot),
+      ...(segmentRepository ? { repository: segmentRepository } : {}),
     })
   : undefined
 
@@ -138,12 +136,7 @@ statusWebSockets.on('connection', (client) => {
 })
 
 function main(): void {
-  void spotStore.start().then(() => {
-    // JetStream is the single source of truth for spots: every new message
-    // (from this gateway or any external publisher) is broadcast live.
-    if (spotStore.isAvailable)
-      void spotStore.consume(broadcastSpot)
-  })
+  void spotStore.start(broadcastSpot)
   allmon3.start()
   for (const [nodeId, service] of natsAudio.entries()) {
     // The AI listener counts as a listener so iaxmon keeps the IAX call up
@@ -172,7 +165,7 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
 
   if (url.pathname === '/api/spots') {
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
-    response.end(JSON.stringify(await spotStore.recent()))
+    response.end(JSON.stringify(segmentRepository?.recentSpots() ?? []))
     return
   }
 
@@ -273,6 +266,8 @@ async function shutdown(signal: string): Promise<void> {
   await new Promise<void>(resolveClose => httpServer.close(() => resolveClose()))
   await Promise.all([...natsAudio.values()].map(service => service.stop()))
   await spotStore.close()
+  if (!aiService)
+    segmentRepository?.close()
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
