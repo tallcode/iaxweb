@@ -34,6 +34,7 @@ export interface AiConfig {
   callsignsFile: string
   coldMinSegmentMs: number
   contextWindowMs: number
+  databaseFile: string
   hotMinSegmentMs: number
   hotwordsFile: string
   llmEnabled: boolean
@@ -46,6 +47,8 @@ export interface AiConfig {
   llmTimeoutMs: number
   maxSegmentMs: number
   model: string
+  persistenceEnabled: boolean
+  recordingsDirectory: string
 }
 
 function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -177,6 +180,10 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   if (llmPublishSpotText !== 'true' && llmPublishSpotText !== 'false')
     throw new Error('AI_LLM_PUBLISH_SPOT must be "true" or "false"')
 
+  const persistenceEnabledText = optional(env, 'AI_PERSISTENCE_ENABLED') ?? 'false'
+  if (persistenceEnabledText !== 'true' && persistenceEnabledText !== 'false')
+    throw new Error('AI_PERSISTENCE_ENABLED must be "true" or "false"')
+
   const llmEnableThinkingText = optional(env, 'AI_LLM_ENABLE_THINKING') ?? 'false'
   if (llmEnableThinkingText !== 'true' && llmEnableThinkingText !== 'false')
     throw new Error('AI_LLM_ENABLE_THINKING must be "true" or "false"')
@@ -188,6 +195,8 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     optional(env, 'AI_LLM_TIMEOUT_MS') ?? '30000',
     'AI_LLM_TIMEOUT_MS',
   )
+  const databaseFile = resolveProjectPath(optional(env, 'AI_DATABASE_FILE') ?? 'data/ai.sqlite')
+  const recordingsDirectory = resolveProjectPath(optional(env, 'AI_RECORDINGS_DIR') ?? `${dirname(databaseFile)}/rec`)
 
   return {
     ...(apiKey ? { apiKey } : {}),
@@ -198,6 +207,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     callsignsFile: resolveProjectPath(optional(env, 'AI_CALLSIGNS_FILE') ?? 'ai/callsigns.txt'),
     coldMinSegmentMs,
     contextWindowMs,
+    databaseFile,
     hotMinSegmentMs,
     hotwordsFile: resolveProjectPath(optional(env, 'AI_HOTWORDS_FILE') ?? 'ai/hotwords.json'),
     llmEnabled: llmEnabledText === 'true',
@@ -210,6 +220,8 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     llmTimeoutMs,
     maxSegmentMs,
     model,
+    persistenceEnabled: persistenceEnabledText === 'true',
+    recordingsDirectory,
   }
 }
 

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { CallsignHintMatcher, formatCallsignHints } from './callsign-hints.js'
 import { logTimestamp } from './context-store.js'
+import { shouldIncludeCallsignCorrection } from './phonetic-corrector.js'
 
 export interface RiskRating {
   level: number
@@ -79,7 +80,7 @@ export class LlmParser {
     // Only spend tokens on a second transcript when phonetic correction has
     // actually changed the text and surfaced a possible Chinese callsign's B
     // prefix. The raw ASR transcript remains the primary evidence.
-    if (shouldIncludeCorrected(transcript, corrected))
+    if (shouldIncludeCallsignCorrection(transcript, corrected))
       userContent += `\n\n音素纠错辅助文本（仅供判断）：\n${corrected}`
     const callsignHints = formatCallsignHints(this.callsignHints?.match(corrected) ?? [])
     if (callsignHints)
@@ -310,10 +311,6 @@ function isRetryable(error: unknown): boolean {
   if (error.status === undefined)
     return true
   return error.status === 429 || error.status >= 500
-}
-
-function shouldIncludeCorrected(transcript: string, corrected: string): boolean {
-  return transcript !== corrected && /\bbravo\b/i.test(corrected)
 }
 
 function isMissingFile(error: unknown): boolean {

@@ -55,6 +55,22 @@ test('llmHistory prefixes the risk level when set', () => {
   assert.equal(store.llmHistory(), '[风控4] 规范文本')
 })
 
+test('llmHistory keeps raw ASR plus changed Bravo or Boston corrections', () => {
+  const store = new SegmentStore(300_000)
+  const record = makeRecord({
+    recognition: '补拉窝 高尔夫 五',
+    corrected: 'Bravo Golf Five',
+    revise: '规范化文本',
+  })
+  store.add(record)
+
+  assert.equal(store.llmHistory(), [
+    '补拉窝 高尔夫 五',
+    '音素纠错辅助文本（仅供判断）：',
+    'Bravo Golf Five',
+  ].join('\n'))
+})
+
 test('asrContext uses raw recognitions and llmHistory revised messages', () => {
   const store = new SegmentStore(300_000)
   const first = makeRecord({ id: 'a', recognition: '第一条原始' })

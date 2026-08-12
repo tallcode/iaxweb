@@ -1,3 +1,5 @@
+import { shouldIncludeCallsignCorrection } from './phonetic-corrector.js'
+
 // Unified per-segment record accumulating every pipeline stage:
 // segmentation fills the audio fields, ASR fills recognition and corrected,
 // the LLM stage fills revise/callsign/risk. Optional fields stay absent while the
@@ -58,14 +60,19 @@ export class SegmentStore {
   }
 
   // Revised messages (falling back to the raw recognition) for the LLM
-  // history block. The segment being parsed is excluded so its text appears
-  // only as the "current" turn.
+  // history block. Changed Bravo/Boston corrections preserve both ASR
+  // evidence and the auxiliary text, just as the current turn does. The
+  // segment being parsed is excluded so its text appears only as current.
   llmHistory(budget: number = LLM_HISTORY_BUDGET, excludeId?: string): string | undefined {
     const lines: string[] = []
     for (const record of this.recent()) {
       if (excludeId !== undefined && record.id === excludeId)
         continue
-      const text = record.revise ?? record.recognition
+      const text = record.recognition !== undefined
+        && record.corrected !== undefined
+        && shouldIncludeCallsignCorrection(record.recognition, record.corrected)
+        ? `${record.recognition}\n音素纠错辅助文本（仅供判断）：\n${record.corrected}`
+        : record.revise ?? record.recognition
       if (text === undefined)
         continue
       const risk = record.risk

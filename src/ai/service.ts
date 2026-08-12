@@ -10,6 +10,8 @@ import { LlmParser } from './llm-parser.js'
 import { decodeMuLaw } from './mulaw.js'
 import { correctExplanationText } from './phonetic-corrector.js'
 import { SerialQueue } from './queue.js'
+import { RecordingStore } from './recording-store.js'
+import { SegmentRepository } from './segment-repository.js'
 import { SegmentStore } from './segment-store.js'
 import { NodeSegmenter } from './segmenter.js'
 import { encodeWav } from './wav.js'
@@ -36,6 +38,8 @@ export class AiService {
   private readonly asr: AsrClient
   private readonly llm: LlmParser | undefined
   private readonly onSpot: ((spot: SpotEvent) => void) | undefined
+  private readonly repository: SegmentRepository | undefined
+  private readonly recordings: RecordingStore | undefined
   private readonly nodes = new Map<string, NodeRuntime>()
   private stopped = false
 
@@ -43,6 +47,8 @@ export class AiService {
     const { config, nodeIds } = options
     this.config = config
     this.configFiles = new AiConfigFiles(config.hotwordsFile, config.backgroundFile)
+    this.repository = config.persistenceEnabled ? new SegmentRepository(config.databaseFile) : undefined
+    this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
     this.onSpot = options.onSpot
     this.asr = new AsrClient({
       apiKey: config.apiKey ?? '',
@@ -157,9 +163,12 @@ export class AiService {
   }
 
   stop(): void {
+    if (this.stopped)
+      return
     this.stopped = true
     for (const runtime of this.nodes.values())
       runtime.queue.clear()
+    this.repository?.close()
   }
 
   private enqueue(nodeId: string, segment: ClosedSegment): void {
@@ -193,8 +202,23 @@ export class AiService {
         record.corrected = correctExplanationText(text).text
       }
       runtime.store.add(record)
-      if (text)
+      if (text) {
+        if (this.repository && this.recordings) {
+          try {
+            this.repository.insert(nodeId, record)
+          }
+          catch (error) {
+            console.warn(`${logTimestamp()} [${nodeId}]: SQLite 写入失败 ${shortId}: ${errorMessage(error)}`)
+          }
+          try {
+            this.recordings.save(record.id, record.timestamp, wav)
+          }
+          catch (error) {
+            console.warn(`${logTimestamp()} [${nodeId}]: 录音保存失败 ${shortId}: ${errorMessage(error)}`)
+          }
+        }
         await this.parseTranscript(nodeId, runtime, record, text)
+      }
     }
     catch (error) {
       console.warn(`${logTimestamp()} [${nodeId}]: ASR 失败 ${shortId}: ${errorMessage(error)}`)
@@ -225,6 +249,15 @@ export class AiService {
       record.revise = parsed.message
       record.callsign = parsed.Callsign
       record.risk = parsed.risk
+      if (this.repository) {
+        try {
+          if (!this.repository.updateAnalysis(record))
+            console.warn(`${logTimestamp()} [${nodeId}]: SQLite 更新失败 ${shortId}: 记录不存在`)
+        }
+        catch (error) {
+          console.warn(`${logTimestamp()} [${nodeId}]: SQLite 更新失败 ${shortId}: ${errorMessage(error)}`)
+        }
+      }
       console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.Callsign ? ` 呼号=${parsed.Callsign}` : ''} | ${parsed.message ?? text}`)
       if (parsed.Callsign && this.config.llmPublishSpot) {
         this.onSpot?.({

@@ -68,6 +68,8 @@ AI 按节点独立启用，与网关其余功能互不影响；未启用的节�
 
 LLM 后处理：每条识别结果再调用文本模型，对识别文本做结构化解析。调用时附带最近 `AI_CONTEXT_WINDOW_MS` 内的解析历史作为对话上下文。输出按 schema 文件严格校验，不合规记警告。`AI_LLM_ENABLED=false` 可关闭：
 
+默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中同时预留 `manual_callsign`、`manual_risk_level`、`manual_note` 三个人工复核字段。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。使用随附 Compose 部署时，宿主机 `./data` 已挂载为容器内 `/app/data`；请先以部署用户创建该目录，并把其 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保可写。
+
 提示词与输出 schema 决定解析行为，有两套可选（每次调用前重新读取，保存后立即生效）：
 
 - 完整版：`ai/example/full/`，规范化文本到 `revise`、提取发言人呼号到 `Callsign`（识别不出或不一致时省略）、风控判断到 `risk`；
@@ -88,7 +90,7 @@ cp ai/example/full/schema.json ai/schema.json
 
 识别到呼号时默认发布到 AI Spot 面板（见下节）；`AI_LLM_PUBLISH_SPOT=false` 可关闭，此时只记日志、不发布呼号。
 
-可选的常见呼号相似度提示默认关闭。设置 `AI_CALLSIGN_HINTS_ENABLED=true` 后，系统从 `ai/callsigns.txt` 读取常见呼号（每行一个，支持 `#` 注释），从当前 ASR 文本提取紧凑形式、逐字拼读或字母解释法片段。ASR 原文会保存为 `recognition`，独立的闭集音素纠错结果保存为 `corrected`；ASR 上下文始终使用原文，呼号候选及省钱短路则使用 `corrected`。LLM 始终收到原始 ASR；仅当 `corrected` 与原文不同且含有 `Bravo` 时，才额外附带一段简短标注的音素纠错辅助文本，避免无意义的 token 消耗。英文通过 CMUdict 取无重音 ARPABET 音素（例如 `alfa` → `alpha`），中文通过 `pinyin-pro` 取无声调拼音（例如“补拉窝” →“布拉沃” → `Bravo`），然后将音素/音节 token 编码后使用 `fastest-levenshtein` 比较。中文仅在无声调拼音序列完全一致时纠正；英文只有最佳候选距离不大于 1 且没有同分字母时才纠正。对字母解释语境中连续的 2–3 个英文词，系统还会以清浊/元音/鼻音等音素类别做滑动窗口比对；因此 `thank you` 在这类语境中可纠正为 `Tango`，但普通致谢不会被改写。`flower` → `Bravo` 仍作为 ASR 专属混淆表保留。归一化后再以位置敏感的 Levenshtein 距离选出已知呼号候选供 LLM 纠错。每个原文片段独立保留自己的最小距离候选，只有距离恰为 1 的候选会进入 LLM hint；距离 0 的库内命中不会提示，避免把紧凑形式误当成拼读证据。长粘连串只保留具有完整字母后缀的窗口，避免半截呼号污染候选。候选只是历史数据库检索结果；LLM 必须以原文字母解释法、紧凑呼号和通联语义为最高依据，不能用候选覆盖原文证据。呼号表在每次 LLM 调用前重读，保存后无需重启。
+可选的常见呼号相似度提示默认关闭。设置 `AI_CALLSIGN_HINTS_ENABLED=true` 后，系统从 `ai/callsigns.txt` 读取常见呼号（每行一个，支持 `#` 注释），从当前 ASR 文本提取紧凑形式、逐字拼读或字母解释法片段。ASR 原文会保存为 `recognition`，独立的闭集音素纠错结果保存为 `corrected`；ASR 上下文始终使用原文，呼号候选及省钱短路则使用 `corrected`。LLM 的当前文本和历史都遵循同一规则：始终保留 ASR 原文；仅当 `corrected` 与原文不同且含有 `Bravo` 或 `Boston` 时，才紧随其后附带一段简短标注的音素纠错辅助文本，避免无意义的 token 消耗。英文通过 CMUdict 取无重音 ARPABET 音素（例如 `alfa` → `alpha`），中文通过 `pinyin-pro` 取无声调拼音（例如“补拉窝” →“布拉沃” → `Bravo`），然后将音素/音节 token 编码后使用 `fastest-levenshtein` 比较。中文仅在无声调拼音序列完全一致时纠正；英文只有最佳候选距离不大于 1 且没有同分字母时才纠正。对字母解释语境中连续的 2–3 个英文词，系统还会以清浊/元音/鼻音等音素类别做滑动窗口比对；因此 `thank you` 在这类语境中可纠正为 `Tango`，但普通致谢不会被改写。`flower` → `Bravo` 仍作为 ASR 专属混淆表保留。归一化后再以位置敏感的 Levenshtein 距离选出已知呼号候选供 LLM 纠错。每个原文片段独立保留自己的最小距离候选，只有距离恰为 1 的候选会进入 LLM hint；距离 0 的库内命中不会提示，避免把紧凑形式误当成拼读证据。长粘连串只保留具有完整字母后缀的窗口，避免半截呼号污染候选。候选只是历史数据库检索结果；LLM 必须以原文字母解释法、紧凑呼号和通联语义为最高依据，不能用候选覆盖原文证据。呼号表在每次 LLM 调用前重读，保存后无需重启。
 
 不调用 LLM 即可手动检查片段提取和相似度候选：
 
@@ -129,6 +131,9 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 | `AI_ACTIVITY_WINDOW_MS` | `30000` | 冷/热启动判定的活动窗口 |
 | `AI_MAX_SEGMENT_MS` | `120000` | 超过该值的段切分，最大 290000 |
 | `AI_CONTEXT_WINDOW_MS` | `300000` | 识别结果上下文窗口 |
+| `AI_PERSISTENCE_ENABLED` | `false` | 是否持久化 SQLite 结果及 WAV 录音 |
+| `AI_DATABASE_FILE` | `data/ai.sqlite` | AI 识别与人工复核结果的 SQLite 文件路径 |
+| `AI_RECORDINGS_DIR` | 与数据库同级的 `rec` | 成功识别语音的 WAV 存储目录 |
 | `AI_HOTWORDS_FILE` | `ai/hotwords.json` | 热词文件路径 |
 | `AI_BACKGROUND_FILE` | `ai/background.txt` | 背景文本文件路径 |
 | `AI_LLM_ENABLED` | `true` | LLM 后处理开关 |

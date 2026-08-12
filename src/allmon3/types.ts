@@ -41,6 +41,7 @@ export interface PublicConnectionStatus {
 }
 
 export interface PublicNodeStatusFields {
+  AI: boolean
   AUDIO: boolean
   CONNS: Record<string, PublicConnectionStatus>
   DESC: string

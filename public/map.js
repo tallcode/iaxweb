@@ -52,6 +52,9 @@ const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
 function renderSnapshot(nextSnapshot) {
   snapshot = nextSnapshot
   const nodeIds = Object.keys(snapshot)
+  const aiSpotEnabled = nodeIds.some(nodeId => snapshot[nodeId].AI === true)
+  spotPanel.setEnabled(aiSpotEnabled)
+  document.body.classList.toggle('ai-spot-disabled', !aiSpotEnabled)
   const activeIds = new Set(nodeIds)
 
   for (const [nodeId, element] of elements) {
@@ -221,4 +224,3 @@ const statusClient = new StatusStreamClient({
   onSpot: spot => spotPanel.apply(spot),
 })
 statusClient.start()
-spotPanel.start()

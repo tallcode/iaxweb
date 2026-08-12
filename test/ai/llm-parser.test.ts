@@ -160,7 +160,16 @@ test('sends a changed Bravo correction beside the raw ASR text', async () => {
   assert.ok(user?.includes('BG5FBT（距离 1）'))
 })
 
-test('does not send corrected text unless it changes the transcript to include Bravo', async () => {
+test('sends a changed Boston correction beside the raw ASR text', async () => {
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())))
+
+  await parser.parse('Bosten Golf Five', undefined, 'Boston Golf Five')
+  const user = calls[0]?.body.messages[1]?.content
+  assert.ok(user?.includes('Bosten Golf Five'))
+  assert.ok(user?.includes('音素纠错辅助文本（仅供判断）：\nBoston Golf Five'))
+})
+
+test('does not send corrected text unless it changes the transcript to include Bravo or Boston', async () => {
   const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())))
 
   await parser.parse('B 原始文本', undefined, 'B 修正文本')

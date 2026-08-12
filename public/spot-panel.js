@@ -8,9 +8,21 @@ export class SpotPanel {
     this.list = root.querySelector('.spot-list')
     this.empty = root.querySelector('.spot-empty')
     this.spots = new Map() // callsign → spot
+    this.enabled = false
+    this.started = false
+  }
+
+  setEnabled(enabled) {
+    if (this.enabled === enabled)
+      return
+    this.enabled = enabled
+    this.root.hidden = !enabled
+    if (enabled && !this.started)
+      this.start()
   }
 
   start() {
+    this.started = true
     void this.loadHistory()
     // Keep relative timestamps live.
     setInterval(() => this.render(), 15_000)
@@ -18,6 +30,8 @@ export class SpotPanel {
 
   // Applies a live spot or merges loaded history (same callsign → newest wins).
   apply(spot) {
+    if (!this.enabled)
+      return
     const previous = this.spots.get(spot.callsign)
     if (!previous || spot.at >= previous.at) {
       this.spots.set(spot.callsign, spot)

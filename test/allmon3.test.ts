@@ -133,6 +133,18 @@ test('trims public status payloads without mutating full snapshots', () => {
   assert.equal(snapshot['1900']?.CONNS?.['1901']?.CTIME, '00:01:00')
 })
 
+test('includes the static AI flag in public snapshots', () => {
+  const snapshot: StatusSnapshot = {
+    1900: { AI: true, AUDIO: true, TYPE: 'HUB' },
+    1901: { AI: false, TYPE: 'REPEATER' },
+  }
+
+  assert.deepEqual(publicStatusSnapshot(snapshot), {
+    1900: { AI: true, AUDIO: true, LISTENERS: 0, TYPE: 'HUB' },
+    1901: { AI: false, TYPE: 'REPEATER' },
+  })
+})
+
 test('adds listener counts to audio nodes in the public snapshot', () => {
   const snapshot: StatusSnapshot = {
     1800: { AUDIO: true, TYPE: 'HUB' },

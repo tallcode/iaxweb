@@ -35,6 +35,14 @@ body {
     #0b1017;
 }
 
+body.ai-spot-disabled {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "header"
+    "topology"
+    "footer";
+}
+
 .site-footer {
   grid-area: footer;
   z-index: 2;
@@ -546,6 +554,10 @@ header p {
   backdrop-filter: blur(6px);
   box-shadow: 0 4px 18px rgb(0 0 0 / 35%);
   overflow: hidden;
+}
+
+.spot-panel[hidden] {
+  display: none;
 }
 
 .spot-panel-title {

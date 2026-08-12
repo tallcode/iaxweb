@@ -15,7 +15,9 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # tini gives us a real init so SIGTERM reaches Node and triggers graceful shutdown.
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini \
+  && mkdir -p /app/data \
+  && chown node:node /app/data
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./

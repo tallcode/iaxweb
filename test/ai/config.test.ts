@@ -13,7 +13,10 @@ test('loads AI defaults', () => {
   assert.equal(config.activityWindowMs, 30_000)
   assert.equal(config.maxSegmentMs, 120_000)
   assert.equal(config.contextWindowMs, 300_000)
+  assert.ok(config.databaseFile.endsWith('data/ai.sqlite'))
+  assert.ok(config.recordingsDirectory.endsWith('data/rec'))
   assert.equal(config.llmEnabled, true)
+  assert.equal(config.persistenceEnabled, false)
   assert.equal(config.llmEnableThinking, false)
   assert.equal(config.llmTimeoutMs, 30_000)
   assert.equal(config.llmThinkingBudget, undefined)
@@ -32,6 +35,8 @@ test('loads custom AI settings', () => {
     AI_ASR_MODEL: 'fun-asr-flash',
     AI_COLD_MIN_SEGMENT_MS: '4000',
     AI_CONTEXT_WINDOW_MS: '60000',
+    AI_DATABASE_FILE: '/var/lib/iaxweb/ai.sqlite',
+    AI_RECORDINGS_DIR: '/var/lib/iaxweb/rec',
     AI_HOT_MIN_SEGMENT_MS: '1500',
     AI_MAX_SEGMENT_MS: '90000',
     DASHSCOPE_API_KEY: 'sk-test',
@@ -42,6 +47,8 @@ test('loads custom AI settings', () => {
   assert.equal(config.hotMinSegmentMs, 1_500)
   assert.equal(config.maxSegmentMs, 90_000)
   assert.equal(config.contextWindowMs, 60_000)
+  assert.equal(config.databaseFile, '/var/lib/iaxweb/ai.sqlite')
+  assert.equal(config.recordingsDirectory, '/var/lib/iaxweb/rec')
 })
 
 test('normalizes the DashScope base URL', () => {
@@ -83,6 +90,11 @@ test('can disable the LLM stage', () => {
   assert.equal(config.llmEnabled, false)
 })
 
+test('can disable SQLite and recording persistence', () => {
+  const config = loadAiConfig({ AI_PERSISTENCE_ENABLED: 'false' })
+  assert.equal(config.persistenceEnabled, false)
+})
+
 test('can disable spot publishing', () => {
   const config = loadAiConfig({ AI_LLM_PUBLISH_SPOT: 'false' })
   assert.equal(config.llmPublishSpot, false)
@@ -103,6 +115,10 @@ test('rejects an invalid AI_CALLSIGN_HINTS_ENABLED', () => {
 
 test('rejects an invalid AI_LLM_PUBLISH_SPOT', () => {
   assert.throws(() => loadAiConfig({ AI_LLM_PUBLISH_SPOT: 'yes' }), /true.*false/)
+})
+
+test('rejects an invalid AI_PERSISTENCE_ENABLED', () => {
+  assert.throws(() => loadAiConfig({ AI_PERSISTENCE_ENABLED: 'yes' }), /true.*false/)
 })
 
 test('explicit prompt and schema files override the defaults', () => {

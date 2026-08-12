@@ -211,6 +211,12 @@ export function correctExplanationText(input: string): CorrectedExplanationText 
   return { corrections, text }
 }
 
+// The LLM sees this auxiliary transcript only for a changed B-prefix
+// explanation word. Both Bravo and the common alternate Boston represent B.
+export function shouldIncludeCallsignCorrection(original: string, corrected: string): boolean {
+  return original !== corrected && /\b(?:bravo|boston)\b/i.test(corrected)
+}
+
 export function correctEnglishWord(input: string): PhoneticCorrection | undefined {
   const lower = input.toLowerCase()
   const cached = englishCorrectionCache.get(lower)

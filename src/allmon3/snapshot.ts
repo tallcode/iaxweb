@@ -54,6 +54,8 @@ function normalizeForComparison(value: unknown): JsonValue {
 
 function publicNodeStatus(status: NodeStatus, listeners?: number): PublicNodeStatus {
   const publicStatus: PublicNodeStatus = {}
+  if (typeof status.AI === 'boolean')
+    publicStatus.AI = status.AI
   if (status.AUDIO !== undefined)
     publicStatus.AUDIO = status.AUDIO
   if (status.CONNS !== undefined)
@@ -106,6 +108,7 @@ function defaultNodeStatus(node: string, definition?: NodeDefinition): NodeStatu
 
 function definitionFields(definition?: NodeDefinition): NodeStatus {
   return {
+    ...(definition?.AI !== undefined ? { AI: definition.AI } : {}),
     ...(definition?.AUDIO !== undefined ? { AUDIO: definition.AUDIO } : {}),
     LINK: definition?.LINK ?? [],
     TYPE: definition?.TYPE ?? 'REPEATER',

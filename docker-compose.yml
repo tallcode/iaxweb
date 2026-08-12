@@ -3,10 +3,15 @@ services:
     # Built and published by .github/workflows/docker-publish.yml
     image: ghcr.io/tallcode/iaxweb:latest
     container_name: iaxweb
+    # Match the bind-mounted ./data directory's host ownership. Set PUID/PGID
+    # in .env when they differ from the usual 1000:1000 Linux account.
+    user: '${PUID:-1000}:${PGID:-1000}'
     restart: unless-stopped
     ports:
       # host 8059 -> container 3000
       - '8059:3000'
+    volumes:
+      - ./data:/app/data
     environment:
       # Point this at your NATS cluster. On Docker Desktop use
       # host.docker.internal to reach a NATS server running on the host.
@@ -19,3 +24,6 @@ services:
       ALLMON3_BASE_URL: ${ALLMON3_BASE_URL:-http://172.16.211.199/allmon3/}
       ALLMON3_REFRESH_INTERVAL_MS: ${ALLMON3_REFRESH_INTERVAL_MS:-30000}
       ALLMON3_REQUEST_TIMEOUT_MS: ${ALLMON3_REQUEST_TIMEOUT_MS:-10000}
+      AI_DATABASE_FILE: /app/data/ai.sqlite
+      AI_RECORDINGS_DIR: /app/data/rec
+      AI_PERSISTENCE_ENABLED: ${AI_PERSISTENCE_ENABLED:-false}
