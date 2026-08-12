@@ -179,9 +179,11 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
 
   const pathname = url.pathname === '/'
     ? '/index/'
-    : ['/map', '/map/'].includes(url.pathname)
-        ? '/index/'
-        : url.pathname
+    : ['/admin', '/admin/'].includes(url.pathname)
+        ? '/admin/'
+        : ['/map', '/map/'].includes(url.pathname)
+            ? '/index/'
+            : url.pathname
   let decodedPath: string
   try {
     decodedPath = decodeURIComponent(pathname)

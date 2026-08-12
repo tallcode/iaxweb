@@ -6,10 +6,10 @@ body { margin: 0; }
 .login-card { max-width: 22rem; margin: 15vh auto; padding: 1.5rem; }
 h1 { font-size: 1.25rem; margin: 0; } header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 form, label { display: grid; gap: .45rem; } form { gap: 1rem; margin-top: 1.5rem; }
-input { min-width: 10rem; padding: .55rem .65rem; border: 1px solid #405065; border-radius: .35rem; background: #0b1017; color: inherit; }
+input { min-width: 10rem; padding: .55rem .65rem; border: 1px solid #405065; border-radius: .35rem; background: #0b1017; color: inherit; }.manual-callsign { min-width: 7rem; width: 7rem; }
 button { padding: .55rem .8rem; border: 0; border-radius: .35rem; background: #4bc88b; color: #07150d; font-weight: 600; cursor: pointer; }
 button.secondary { background: #273241; color: #e9eef6; } button:disabled { opacity: .45; cursor: default; }
 .error { color: #ff8a8a; }.status { color: #96a4b7; }.table-wrap { overflow: auto; }
 table { width: 100%; min-width: 900px; border-collapse: collapse; } th, td { padding: .7rem; border-bottom: 1px solid #273241; text-align: left; vertical-align: top; font-size: .85rem; } th { color: #96a4b7; white-space: nowrap; }
 .recognition { min-width: 20rem; white-space: pre-wrap; }.pager { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1rem; }
-audio { width: 12rem; height: 2rem; } @media (max-width: 680px) { .shell { padding: 1rem; } }
+.play { min-width: 4.5rem; } @media (max-width: 680px) { .shell { padding: 1rem; } }

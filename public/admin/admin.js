@@ -8,8 +8,16 @@ const body = document.querySelector('#segments')
 const pageLabel = document.querySelector('#page')
 const previous = document.querySelector('#previous')
 const next = document.querySelector('#next')
+const player = new Audio()
 let page = 1
 let total = 0
+let playingButton
+
+player.addEventListener('ended', stopPlayback)
+player.addEventListener('error', () => {
+  stopPlayback()
+  status.textContent = '播放失败：录音可能已被清理'
+})
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault()
@@ -35,6 +43,7 @@ loginForm.addEventListener('submit', async (event) => {
 
 document.querySelector('#logout').addEventListener('click', async () => {
   await fetch('/api/admin/logout', { method: 'POST' })
+  stopPlayback()
   body.replaceChildren()
   segmentsView.hidden = true
   loginView.hidden = false
@@ -73,23 +82,70 @@ async function load() {
 }
 
 function render(items) {
+  stopPlayback()
   body.replaceChildren()
   for (const segment of items) {
     const row = document.createElement('tr')
     row.innerHTML = `<td>${formatTime(segment.capturedAt)}</td><td>${formatDuration(segment.durationMs)}</td><td class="recognition"></td><td>${escapeHtml(segment.callsign ?? '')}</td><td></td><td></td>`
     row.querySelector('.recognition').textContent = segment.recognition
     const manual = document.createElement('input')
+    manual.className = 'manual-callsign'
     manual.value = segment.manualCallsign ?? ''
-    manual.placeholder = '留空则使用 AI 呼号'
-    manual.addEventListener('change', () => saveCallsign(segment.id, manual))
+    manual.dataset.savedValue = manual.value
+    manual.addEventListener('blur', () => {
+      manual.value = manual.dataset.savedValue ?? ''
+    })
+    manual.addEventListener('keydown', async (event) => {
+      if (event.key !== 'Enter')
+        return
+      event.preventDefault()
+      await saveCallsign(segment.id, manual)
+    })
     row.children[4].append(manual)
-    const play = document.createElement('audio')
-    play.controls = true
-    play.preload = 'none'
-    play.src = `/api/admin/segments/${encodeURIComponent(segment.id)}/audio`
-    row.children[5].append(play)
+    if (canPlay(segment.capturedAt)) {
+      const play = document.createElement('button')
+      play.className = 'secondary play'
+      play.textContent = '播放'
+      play.addEventListener('click', () => togglePlayback(segment.id, play))
+      row.children[5].append(play)
+    }
+    else {
+      row.children[5].textContent = '已过期'
+    }
     body.append(row)
   }
+}
+
+async function togglePlayback(id, button) {
+  if (playingButton === button) {
+    stopPlayback()
+    return
+  }
+  stopPlayback()
+  playingButton = button
+  button.textContent = '停止'
+  player.src = `/api/admin/segments/${encodeURIComponent(id)}/audio`
+  try {
+    await player.play()
+  }
+  catch {
+    stopPlayback()
+    status.textContent = '播放失败：录音可能已被清理'
+  }
+}
+
+function stopPlayback() {
+  player.pause()
+  player.removeAttribute('src')
+  player.load()
+  if (playingButton)
+    playingButton.textContent = '播放'
+  playingButton = undefined
+}
+
+function canPlay(capturedAt) {
+  const ageMs = Date.now() - new Date(capturedAt).getTime()
+  return ageMs >= 0 && ageMs < 30 * 24 * 60 * 60 * 1000
 }
 
 async function saveCallsign(id, input) {
@@ -105,6 +161,7 @@ async function saveCallsign(id, input) {
     return
   }
   input.value = callsign
+  input.dataset.savedValue = callsign
   status.textContent = '已保存'
 }
 
