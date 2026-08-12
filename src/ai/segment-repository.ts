@@ -6,8 +6,8 @@ import { DatabaseSync } from 'node:sqlite'
 export interface StoredSpot {
   at: string
   callsign: string
+  id: string
   node: string
-  segmentId: string
 }
 
 export interface ManualReviewPatch {
@@ -228,8 +228,8 @@ export class SegmentRepository {
     return rows.map(row => ({
       at: requiredString(row.captured_at),
       callsign: requiredString(row.effective_callsign),
+      id: requiredString(row.id),
       node: requiredString(row.node_id),
-      segmentId: requiredString(row.id),
     }))
   }
 }

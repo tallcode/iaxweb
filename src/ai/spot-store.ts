@@ -3,8 +3,8 @@ import type { NatsConnection, Subscription } from '@nats-io/transport-node'
 export interface SpotEvent {
   at: string
   callsign: string
+  id: string
   node: string
-  segmentId: string
 }
 
 export interface SpotStoreOptions {
@@ -42,6 +42,17 @@ export class SpotStore {
   publish(spot: SpotEvent): void {
     if (!isDisplayableCallsign(spot.callsign))
       return
+    this.send(spot)
+  }
+
+  // Review events may set N0CALL to remove this record's live spot.
+  publishReview(spot: SpotEvent): void {
+    if (!isDisplayableCallsign(spot.callsign) && spot.callsign !== NO_CALLSIGN)
+      return
+    this.send(spot)
+  }
+
+  private send(spot: SpotEvent): void {
     try {
       this.connection?.publish(this.subject(spot), JSON.stringify(spot))
     }
@@ -82,11 +93,16 @@ export const isValidCallsign = isDisplayableCallsign
 function parseSpot(data: Uint8Array): SpotEvent | undefined {
   try {
     const parsed = JSON.parse(new TextDecoder().decode(data)) as Record<string, unknown>
-    if (typeof parsed.callsign !== 'string' || !isDisplayableCallsign(parsed.callsign)
-      || typeof parsed.node !== 'string' || typeof parsed.segmentId !== 'string' || typeof parsed.at !== 'string') {
+    if (typeof parsed.callsign !== 'string' || (!isDisplayableCallsign(parsed.callsign) && parsed.callsign !== NO_CALLSIGN)
+      || typeof parsed.node !== 'string' || typeof parsed.id !== 'string' || typeof parsed.at !== 'string') {
       return undefined
     }
-    return { at: parsed.at, callsign: parsed.callsign, node: parsed.node, segmentId: parsed.segmentId }
+    return {
+      at: parsed.at,
+      callsign: parsed.callsign,
+      id: parsed.id,
+      node: parsed.node,
+    }
   }
   catch {
     return undefined

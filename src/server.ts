@@ -279,7 +279,19 @@ async function serveAdminApi(request: IncomingMessage, response: ServerResponse,
       response.writeHead(404).end('Not Found')
       return
     }
-    json(response, 200, segmentRepository.find(id))
+    const segment = segmentRepository.find(id)
+    if (!segment) {
+      response.writeHead(404).end('Not Found')
+      return
+    }
+    const effectiveCallsign = segment.effectiveCallsign ?? 'N0CALL'
+    spotStore.publishReview({
+      at: segment.capturedAt,
+      callsign: effectiveCallsign,
+      id: segment.id,
+      node: segment.nodeId,
+    })
+    json(response, 200, segment)
     return
   }
   if (action === 'audio' && request.method === 'GET') {

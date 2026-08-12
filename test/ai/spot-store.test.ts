@@ -4,7 +4,7 @@ import test from 'node:test'
 import { isDisplayableCallsign, NO_CALLSIGN, SpotStore } from '../../src/ai/spot-store.js'
 
 function spot(callsign: string) {
-  return { at: '2026-08-12T12:00:00.000Z', callsign, node: '1900', segmentId: 'abc123' }
+  return { at: '2026-08-12T12:00:00.000Z', callsign, id: 'abc123', node: '1900' }
 }
 
 function fakeConnection() {
@@ -55,5 +55,20 @@ test('forwards valid Core NATS spots and filters N0CALL', async () => {
   assert.deepEqual(received, ['BG5ABC'])
   assert.equal(isDisplayableCallsign(NO_CALLSIGN), false)
   assert.equal(isDisplayableCallsign('BG5ABC'), true)
+  await store.close()
+})
+
+test('forwards manual review events including N0CALL by record id', async () => {
+  const fake = fakeConnection()
+  const received: Array<{ at: string, callsign: string, id: string, node: string }> = []
+  const store = new SpotStore({ createConnection: async () => fake.connection })
+  await store.start(event => received.push(event))
+
+  const reviewed = spot(NO_CALLSIGN)
+  store.publishReview(reviewed)
+  assert.equal(fake.published[0]?.subject, 'iaxmon.nodes.1900.ai.spot.N0CALL')
+  fake.receive(reviewed)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(received, [reviewed])
   await store.close()
 })

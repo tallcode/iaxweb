@@ -1,13 +1,14 @@
 // AI Spot: newest recognized callsign per station, backed by /api/spots history
 // and live {type:'spot'} messages on the status WebSocket.
 const MAX_ITEMS = 100
+const NO_CALLSIGN = 'N0CALL'
 
 export class SpotPanel {
   constructor(root) {
     this.root = root
     this.list = root.querySelector('.spot-list')
     this.empty = root.querySelector('.spot-empty')
-    this.spots = new Map() // callsign → spot
+    this.spots = new Map() // segment id → spot
     this.enabled = false
     this.started = false
   }
@@ -28,13 +29,18 @@ export class SpotPanel {
     setInterval(() => this.render(), 15_000)
   }
 
-  // Applies a live spot or merges loaded history (same callsign → newest wins).
+  // Applies a live spot or merges loaded history by immutable segment id.
   apply(spot) {
     if (!this.enabled)
       return
-    const previous = this.spots.get(spot.callsign)
+    if (spot.callsign === NO_CALLSIGN) {
+      this.spots.delete(spot.id)
+      this.render()
+      return
+    }
+    const previous = this.spots.get(spot.id)
     if (!previous || spot.at >= previous.at) {
-      this.spots.set(spot.callsign, spot)
+      this.spots.set(spot.id, spot)
       this.render()
     }
   }
@@ -54,10 +60,16 @@ export class SpotPanel {
   }
 
   render() {
-    const sorted = [...this.spots.values()].sort((a, b) => (a.at < b.at ? 1 : -1))
+    const newestByCallsign = new Map()
+    for (const spot of this.spots.values()) {
+      const current = newestByCallsign.get(spot.callsign)
+      if (!current || spot.at >= current.at)
+        newestByCallsign.set(spot.callsign, spot)
+    }
+    const sorted = [...newestByCallsign.values()].sort((a, b) => (a.at < b.at ? 1 : -1))
     this.empty.hidden = sorted.length > 0
 
-    const keyFor = spot => `${spot.callsign}|${spot.node}|${spot.at}`
+    const keyFor = spot => `${spot.id}|${spot.callsign}|${spot.node}|${spot.at}`
     const currentKeys = new Set([...this.list.children].map(child => child.dataset.key))
     const desiredKeys = new Set(sorted.map(keyFor))
     const sameSet = currentKeys.size === desiredKeys.size

@@ -143,8 +143,8 @@ test('returns the newest effective spot per callsign and excludes N0CALL', () =>
   assert.deepEqual(repository.recentSpots(), [{
     at: second.timestamp,
     callsign: 'BG5AAA',
+    id: second.id,
     node: '1901',
-    segmentId: second.id,
   }])
   repository.close()
 })

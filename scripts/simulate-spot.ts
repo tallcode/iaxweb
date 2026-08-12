@@ -16,8 +16,8 @@ await store.start(spot => console.log('received spot:', JSON.stringify(spot, nul
 store.publish({
   at: new Date().toISOString(),
   callsign: 'BG5ATV',
+  id: 'simulated-segment',
   node: '1900',
-  segmentId: 'simulated-segment',
 })
 await new Promise(resolve => setTimeout(resolve, 100))
 await store.close()

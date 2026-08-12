@@ -262,10 +262,10 @@ export class AiService {
       console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.Callsign ? ` 呼号=${parsed.Callsign}` : ''} | ${parsed.message ?? text}`)
       if (parsed.Callsign && this.config.llmPublishSpot) {
         this.onSpot?.({
-          at: new Date().toISOString(),
+          at: record.timestamp,
           callsign: parsed.Callsign,
+          id: record.id,
           node: nodeId,
-          segmentId: record.id,
         })
       }
       const risk = parsed.risk
