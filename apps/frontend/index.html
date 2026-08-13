@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1017" />
+    <meta
+      name="description"
+      content="实时查看浙江业余无线电中继台的在线状态、连接拓扑、工作频率及发射状态，支持中继音频在线收听。"
+    />
+    <title>浙江业余无线电中继台实时状态与在线收听</title>
+    <script>
+      ;(function (w, d, s, q, i) {
+        w[q] = w[q] || []
+        var f = d.getElementsByTagName(s)[0]
+        var j = d.createElement(s)
+        j.async = true
+        j.id = 'beacon-aplus'
+        j.src = 'https://d.alicdn.com/alilog/mlog/aplus/' + i + '.js'
+        f.parentNode.insertBefore(j, f)
+      })(window, document, 'script', 'aplus_queue', '203467608')
+
+      window.aplus_queue.push({
+        action: 'aplus.setMetaInfo',
+        arguments: ['appKey', '6a5b5fa46f259537c7cc1d25'],
+      })
+      window.aplus_queue.push({ action: 'aplus.sendPV', arguments: [{}, {}] })
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

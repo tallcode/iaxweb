@@ -11,6 +11,7 @@ services:
       # host 8059 -> container 3000
       - '8059:3000'
     volumes:
+      - ./config:/app/config:ro
       - ./data:/app/data
     environment:
       # Point this at your NATS cluster. On Docker Desktop use

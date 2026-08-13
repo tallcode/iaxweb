@@ -6,6 +6,8 @@ node_modules
 !.env.example
 *.log
 dist
+data
+config
 .DS_Store
 Dockerfile
 .dockerignore

@@ -2,11 +2,24 @@
 
 `iaxmon --nats` 的轻量 WebSocket 网关和浏览器播放器。
 
-- Node.js + TypeScript，通过 `tsx` 直接运行
+- npm workspaces monorepo，前后端独立开发、统一构建
+- 后端使用 Node.js + TypeScript，通过 `tsx` 直接运行
 - Core NATS 普通订阅（不使用 queue group）
 - 原生 HTTP 与 WebSocket 服务
-- 原生 HTML、CSS 和 JavaScript，无前端框架
+- 前端使用 Vue、Vite、Pinia、Vue Router、TypeScript 和 Tailwind CSS
 - 浏览器解码 8 kHz 单声道 G.711 μ-law，并按媒体时间戳提供 100 ms 抖动缓冲
+
+## 项目结构
+
+```text
+apps/backend/       HTTP、WebSocket、NATS、Allmon3 和 AI 服务
+apps/frontend/      Vue 单页应用、地图与管理页面
+packages/contracts/ 前后端共享的 API 和 WebSocket TypeScript 类型
+config/             可热更新的 AI 提示词、schema、热词及呼号配置
+data/               SQLite、录音及其他可写运行数据
+```
+
+根目录使用 `@antfu/eslint-config` 统一检查 TypeScript、Vue、CSS、HTML 和 JSON。
 
 ## 配置
 
@@ -63,34 +76,36 @@ AI 按节点独立启用，与网关其余功能互不影响；未启用的节�
 
 配置文件每次识别前重新读取，保存后立即生效，无需重启：
 
-- `ai/hotwords.json`：即时热词，格式 `{"词": 权重}`，权重 1~5（或 50 超热词）。适合放呼号、Q 简语、值机常用词；
-- `ai/background.txt`：背景文本（400 字以内），如网名称、NCS、流程说明。
+- `config/hotwords.json`：即时热词，格式 `{"词": 权重}`，权重 1~5（或 50 超热词）。适合放呼号、Q 简语、值机常用词；
+- `config/background.txt`：背景文本（400 字以内），如网名称、NCS、流程说明。
 
 LLM 后处理：每条识别结果再调用文本模型，对识别文本做结构化解析。调用时附带最近 `AI_CONTEXT_WINDOW_MS` 内的解析历史作为对话上下文。输出按 schema 文件严格校验，不合规记警告。`AI_LLM_ENABLED=false` 可关闭：
 
-默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中同时预留 `manual_callsign`、`manual_risk_level`、`manual_note` 三个人工复核字段。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。使用随附 Compose 部署时，宿主机 `./data` 已挂载为容器内 `/app/data`；请先以部署用户创建该目录，并把其 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保可写。
+默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中同时预留 `manual_callsign`、`manual_risk_level`、`manual_note` 三个人工复核字段。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。
+
+`config/` 和 `data/` 都是宿主目录，整个目录均被 Git 和 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护，保存后下一次调用立即读取；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，只保存 SQLite、WAL 和录音。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
 
 提示词与输出 schema 决定解析行为，有两套可选（每次调用前重新读取，保存后立即生效）：
 
-- 完整版：`ai/example/full/`，规范化文本到 `revise`、提取发言人呼号到 `Callsign`（识别不出或不一致时省略）、风控判断到 `risk`；
-- 简化版：`ai/example/simple/`，只提取发言人呼号到 `Callsign`，`revise` 和 `risk` 永远为空（控制台仍打印原始识别文本）。
+- 完整版：`config/example/full/`，规范化文本到 `revise`、提取发言人呼号到 `Callsign`（识别不出或不一致时省略）、风控判断到 `risk`；
+- 简化版：`config/example/simple/`，只提取发言人呼号到 `Callsign`，`revise` 和 `risk` 永远为空（控制台仍打印原始识别文本）。
 
-两套底层管线完全一致，切换模式只需把对应示例复制到默认位置（默认使用 `ai/prompt.txt` + `ai/schema.json`，当前为简化版）：
+两套底层管线完全一致，切换模式只需把对应示例复制到默认位置（默认使用 `config/prompt.txt` + `config/schema.json`，当前为简化版）：
 
 ```bash
 # 启用简化版
-cp ai/example/simple/prompt.txt ai/prompt.txt
-cp ai/example/simple/schema.json ai/schema.json
+cp config/example/simple/prompt.txt config/prompt.txt
+cp config/example/simple/schema.json config/schema.json
 # 切回完整版
-cp ai/example/full/prompt.txt ai/prompt.txt
-cp ai/example/full/schema.json ai/schema.json
+cp config/example/full/prompt.txt config/prompt.txt
+cp config/example/full/schema.json config/schema.json
 ```
 
 也可用 `AI_LLM_PROMPT_FILE`/`AI_LLM_SCHEMA_FILE` 直接指定任意路径而不复制。两个默认文件任一缺失时 LLM 后处理不生效（等同 `AI_LLM_ENABLED=false`），此时输出原始识别文本。
 
 识别到呼号时默认发布到 AI Spot 面板（见下节）；`AI_LLM_PUBLISH_SPOT=false` 可关闭，此时只记日志、不发布呼号。
 
-可选的常见呼号相似度提示默认关闭。设置 `AI_CALLSIGN_HINTS_ENABLED=true` 后，系统从 `ai/callsigns.txt` 读取常见呼号（每行一个，支持 `#` 注释），从当前 ASR 文本提取紧凑形式、逐字拼读或字母解释法片段。ASR 原文会保存为 `recognition`，独立的闭集音素纠错结果保存为 `corrected`；ASR 上下文始终使用原文，呼号候选及省钱短路则使用 `corrected`。LLM 的当前文本和历史都遵循同一规则：始终保留 ASR 原文；仅当 `corrected` 与原文不同且含有 `Bravo` 或 `Boston` 时，才紧随其后附带一段简短标注的音素纠错辅助文本，避免无意义的 token 消耗。英文通过 CMUdict 取无重音 ARPABET 音素（例如 `alfa` → `alpha`），中文通过 `pinyin-pro` 取无声调拼音（例如“补拉窝” →“布拉沃” → `Bravo`），然后将音素/音节 token 编码后使用 `fastest-levenshtein` 比较。中文仅在无声调拼音序列完全一致时纠正；英文只有最佳候选距离不大于 1 且没有同分字母时才纠正。对字母解释语境中连续的 2–3 个英文词，系统还会以清浊/元音/鼻音等音素类别做滑动窗口比对；因此 `thank you` 在这类语境中可纠正为 `Tango`，但普通致谢不会被改写。`flower` → `Bravo` 仍作为 ASR 专属混淆表保留。归一化后再以位置敏感的 Levenshtein 距离选出已知呼号候选供 LLM 纠错。每个原文片段独立保留自己的最小距离候选，只有距离恰为 1 的候选会进入 LLM hint；距离 0 的库内命中不会提示，避免把紧凑形式误当成拼读证据。长粘连串只保留具有完整字母后缀的窗口，避免半截呼号污染候选。候选只是历史数据库检索结果；LLM 必须以原文字母解释法、紧凑呼号和通联语义为最高依据，不能用候选覆盖原文证据。呼号表在每次 LLM 调用前重读，保存后无需重启。
+可选的常见呼号相似度提示默认关闭。设置 `AI_CALLSIGN_HINTS_ENABLED=true` 后，系统从 `config/callsigns.txt` 读取常见呼号（每行一个，支持 `#` 注释），从当前 ASR 文本提取紧凑形式、逐字拼读或字母解释法片段。ASR 原文会保存为 `recognition`，独立的闭集音素纠错结果保存为 `corrected`；ASR 上下文始终使用原文，呼号候选及省钱短路则使用 `corrected`。LLM 的当前文本和历史都遵循同一规则：始终保留 ASR 原文；仅当 `corrected` 与原文不同且含有 `Bravo` 或 `Boston` 时，才紧随其后附带一段简短标注的音素纠错辅助文本，避免无意义的 token 消耗。英文通过 CMUdict 取无重音 ARPABET 音素（例如 `alfa` → `alpha`），中文通过 `pinyin-pro` 取无声调拼音（例如“补拉窝” →“布拉沃” → `Bravo`），然后将音素/音节 token 编码后使用 `fastest-levenshtein` 比较。中文仅在无声调拼音序列完全一致时纠正；英文只有最佳候选距离不大于 1 且没有同分字母时才纠正。对字母解释语境中连续的 2–3 个英文词，系统还会以清浊/元音/鼻音等音素类别做滑动窗口比对；因此 `thank you` 在这类语境中可纠正为 `Tango`，但普通致谢不会被改写。`flower` → `Bravo` 仍作为 ASR 专属混淆表保留。归一化后再以位置敏感的 Levenshtein 距离选出已知呼号候选供 LLM 纠错。每个原文片段独立保留自己的最小距离候选，只有距离恰为 1 的候选会进入 LLM hint；距离 0 的库内命中不会提示，避免把紧凑形式误当成拼读证据。长粘连串只保留具有完整字母后缀的窗口，避免半截呼号污染候选。候选只是历史数据库检索结果；LLM 必须以原文字母解释法、紧凑呼号和通联语义为最高依据，不能用候选覆盖原文证据。呼号表在每次 LLM 调用前重读，保存后无需重启。
 
 不调用 LLM 即可手动检查片段提取和相似度候选：
 
@@ -132,19 +147,19 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 | `AI_PERSISTENCE_ENABLED` | `false` | 是否持久化 SQLite 结果及 WAV 录音 |
 | `AI_DATABASE_FILE` | `data/ai.sqlite` | AI 识别与人工复核结果的 SQLite 文件路径 |
 | `AI_RECORDINGS_DIR` | 与数据库同级的 `rec` | 成功识别语音的 WAV 存储目录 |
-| `AI_ADMIN_FILE` | 与数据库同级的 `admin.json` | 管理页面账号配置文件路径 |
-| `AI_HOTWORDS_FILE` | `ai/hotwords.json` | 热词文件路径 |
-| `AI_BACKGROUND_FILE` | `ai/background.txt` | 背景文本文件路径 |
+| `AI_ADMIN_FILE` | `config/admin.json` | 管理页面账号配置文件路径 |
+| `AI_HOTWORDS_FILE` | `config/hotwords.json` | 热词文件路径 |
+| `AI_BACKGROUND_FILE` | `config/background.txt` | 背景文本文件路径 |
 | `AI_LLM_ENABLED` | `true` | LLM 后处理开关 |
 | `AI_LLM_PUBLISH_SPOT` | `true` | 识别到呼号时是否发布到 AI Spot 面板 |
 | `AI_LLM_MODEL` | `qwen3.7-flash` | LLM 后处理模型 |
 | `AI_LLM_ENABLE_THINKING` | `false` | 思考模式；默认关闭（任务简单，开启会显著变慢并可能超时） |
 | `AI_LLM_THINKING_BUDGET` | 未设置 | 思考 token 预算，开启思考时限制思考量 |
 | `AI_LLM_TIMEOUT_MS` | `30000` | 单次请求超时 |
-| `AI_LLM_PROMPT_FILE` | `ai/prompt.txt` | LLM 提示词文件路径（切换简化版：复制 `ai/example/simple/prompt.txt` 覆盖之） |
-| `AI_LLM_SCHEMA_FILE` | `ai/schema.json` | LLM 输出 JSON Schema 路径（切换简化版：复制 `ai/example/simple/schema.json` 覆盖之） |
+| `AI_LLM_PROMPT_FILE` | `config/prompt.txt` | LLM 提示词文件路径（切换简化版：复制 `config/example/simple/prompt.txt` 覆盖之） |
+| `AI_LLM_SCHEMA_FILE` | `config/schema.json` | LLM 输出 JSON Schema 路径（切换简化版：复制 `config/example/simple/schema.json` 覆盖之） |
 | `AI_CALLSIGN_HINTS_ENABLED` | `false` | 是否向 LLM 提供常见呼号相似度候选 |
-| `AI_CALLSIGNS_FILE` | `ai/callsigns.txt` | 常见呼号表路径，每行一个呼号 |
+| `AI_CALLSIGNS_FILE` | `config/callsigns.txt` | 常见呼号表路径，每行一个呼号 |
 
 ## 运行
 
@@ -153,15 +168,20 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:3000` 查看实时节点拓扑；`/map` 仍作为兼容入口。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
+`npm run dev` 会同时启动后端和 Vite 开发服务器。打开 `http://localhost:5173` 查看实时节点拓扑；前端会把 `/api`、`/audio` 和 `/status` 代理到 `http://localhost:3000`。`/map` 仍作为兼容入口。
+
+也可以使用 `npm run dev:backend` 或 `npm run dev:frontend` 单独启动一个 workspace。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
 
 根目录的 `nodes.json` 是地图的静态节点与链路配置。服务启动时会立即根据该文件生成默认离线状态，无需等待 Allmon3 返回；后续实时数据逐项覆盖默认值。`TYPE` 支持 `HUB` 和 `REPEATER`，`NAME` 保存节点短名称，`LINK` 声明允许显示的拓扑边，`FREQ` 保存中继频率信息；HUB 配置 `AUDIO: true` 时，地图节点会显示音频播放控件。
 
 生产环境：
 
 ```bash
+npm run build
 npm start
 ```
+
+生产构建输出到 `apps/frontend/dist`，由后端直接托管，因此现有单端口部署方式不变。
 
 反向代理需要允许 `/audio` 和 `/status` 的 WebSocket Upgrade。`GET /healthz` 可用于存活检查。
 
@@ -169,13 +189,13 @@ npm start
 
 启用 `AI_PERSISTENCE_ENABLED=true` 后，访问 `/admin/` 查看已持久化的识别记录。页面按时间倒序分页展示中国时区的记录，可播放录音，并可编辑人工复核呼号；留空会撤销人工覆盖，`N0CALL` 表示人工确认无呼号。
 
-管理账号文件默认是 `data/admin.json`，不提交到 Git。先生成密码哈希：
+管理账号文件默认是 `config/admin.json`，不提交到 Git。先生成密码哈希：
 
 ```bash
 npm run hash-admin-password -- '替换为强密码'
 ```
 
-再创建 `data/admin.json`：
+再创建 `config/admin.json`：
 
 ```json
 {
@@ -188,7 +208,7 @@ npm run hash-admin-password -- '替换为强密码'
 }
 ```
 
-登录会话仅保存在进程内存，服务重启后所有管理端登录都会失效。持久化启用时 `admin.json` 必须存在且格式正确；Compose 部署时它位于已挂载的 `./data/admin.json`。
+登录会话仅保存在进程内存，服务重启后所有管理端登录都会失效。持久化启用时 `admin.json` 必须存在且格式正确；Compose 部署时它位于只读挂载的 `./config/admin.json`。
 
 ## Docker
 

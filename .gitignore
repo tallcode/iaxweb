@@ -3,4 +3,5 @@ node_modules/
 dist/
 *.log
 data/
+config/
 .DS_Store

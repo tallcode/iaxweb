@@ -1,0 +1,257 @@
+import type { PersistedSegment, SegmentPage } from '@iaxweb/contracts'
+import type { SegmentRecord } from './segment-store.js'
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+
+export interface StoredSpot {
+  at: string
+  callsign: string
+  id: string
+  node: string
+}
+
+export interface ManualReviewPatch {
+  callsign?: string | null
+  note?: string | null
+  riskLevel?: number | null
+}
+
+export type { PersistedSegment, SegmentPage } from '@iaxweb/contracts'
+
+const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS ai_segments (
+    id                TEXT PRIMARY KEY,
+    node_id           TEXT NOT NULL,
+    captured_at       TEXT NOT NULL,
+    duration_ms       INTEGER NOT NULL CHECK (duration_ms >= 0),
+    voiced_ms         INTEGER NOT NULL CHECK (voiced_ms >= 0),
+
+    recognition       TEXT NOT NULL,
+    corrected         TEXT,
+    revise            TEXT,
+    callsign          TEXT COLLATE NOCASE,
+
+    risk_level        INTEGER CHECK (risk_level BETWEEN 1 AND 5),
+    risk_reason       TEXT,
+
+    manual_callsign   TEXT COLLATE NOCASE,
+    manual_risk_level INTEGER CHECK (manual_risk_level BETWEEN 1 AND 5),
+    manual_note       TEXT,
+
+    created_at        TEXT NOT NULL
+                      DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+
+    CHECK (
+      (risk_level IS NULL AND risk_reason IS NULL)
+      OR (risk_level IS NOT NULL AND length(trim(risk_reason)) > 0)
+    )
+  );
+
+  CREATE VIEW IF NOT EXISTS ai_segments_effective AS
+  SELECT
+    *,
+    COALESCE(manual_callsign, callsign) AS effective_callsign,
+    COALESCE(manual_risk_level, risk_level) AS effective_risk_level
+  FROM ai_segments;
+`
+
+const SELECT_EFFECTIVE = `
+  SELECT
+    id,
+    node_id,
+    captured_at,
+    duration_ms,
+    voiced_ms,
+    recognition,
+    corrected,
+    revise,
+    callsign,
+    risk_level,
+    risk_reason,
+    manual_callsign,
+    manual_risk_level,
+    manual_note,
+    created_at,
+    effective_callsign,
+    effective_risk_level
+  FROM ai_segments_effective
+  WHERE id = ?
+`
+
+// SQLite-backed history of successful ASR segments. AI values are immutable
+// evidence; manual fields override them only through the effective view.
+export class SegmentRepository {
+  private readonly database: DatabaseSync
+
+  constructor(databaseFile: string) {
+    if (databaseFile !== ':memory:')
+      mkdirSync(dirname(databaseFile), { recursive: true })
+    this.database = new DatabaseSync(databaseFile, { timeout: 5_000 })
+    this.database.exec('PRAGMA journal_mode = WAL')
+    this.database.exec(SCHEMA)
+  }
+
+  close(): void {
+    this.database.close()
+  }
+
+  insert(nodeId: string, record: SegmentRecord): void {
+    if (record.recognition === undefined)
+      throw new Error('Cannot persist a segment without recognition text')
+
+    this.database.prepare(`
+      INSERT INTO ai_segments (
+        id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      record.id,
+      nodeId,
+      record.timestamp,
+      record.durationMs,
+      record.voicedMs,
+      record.recognition,
+      record.corrected ?? null,
+    )
+  }
+
+  updateAnalysis(record: SegmentRecord): boolean {
+    const result = this.database.prepare(`
+      UPDATE ai_segments
+      SET revise = ?, callsign = ?, risk_level = ?, risk_reason = ?
+      WHERE id = ?
+    `).run(
+      record.revise ?? null,
+      record.callsign ?? null,
+      record.risk?.level ?? null,
+      record.risk?.reason ?? null,
+      record.id,
+    )
+    return Number(result.changes) === 1
+  }
+
+  updateManualReview(id: string, patch: ManualReviewPatch): boolean {
+    const assignments: string[] = []
+    const values: Array<number | string | null> = []
+    if (patch.callsign !== undefined) {
+      assignments.push('manual_callsign = ?')
+      values.push(patch.callsign)
+    }
+    if (patch.riskLevel !== undefined) {
+      assignments.push('manual_risk_level = ?')
+      values.push(patch.riskLevel)
+    }
+    if (patch.note !== undefined) {
+      assignments.push('manual_note = ?')
+      values.push(patch.note)
+    }
+    if (assignments.length === 0)
+      throw new Error('Manual review patch must contain at least one field')
+
+    const result = this.database.prepare(`
+      UPDATE ai_segments SET ${assignments.join(', ')} WHERE id = ?
+    `).run(...values, id)
+    return Number(result.changes) === 1
+  }
+
+  find(id: string): PersistedSegment | undefined {
+    const row = this.database.prepare(SELECT_EFFECTIVE).get(id)
+    return row ? mapRow(row) : undefined
+  }
+
+  list(page: number, pageSize: number): SegmentPage {
+    if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
+      throw new Error('Invalid segment page')
+    const totalRow = this.database.prepare('SELECT COUNT(*) AS total FROM ai_segments').get()
+    const total = requiredNumber(totalRow?.total)
+    const rows = this.database.prepare(`
+      SELECT
+        id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected,
+        revise, callsign, risk_level, risk_reason, manual_callsign,
+        manual_risk_level, manual_note, created_at, effective_callsign,
+        effective_risk_level
+      FROM ai_segments_effective
+      ORDER BY captured_at DESC, id DESC
+      LIMIT ? OFFSET ?
+    `).all(pageSize, (page - 1) * pageSize)
+    return { items: rows.map(mapRow), page, pageSize, total }
+  }
+
+  recentSpots(limit: number = 100): StoredSpot[] {
+    if (!Number.isInteger(limit) || limit < 1)
+      throw new Error('Spot limit must be a positive integer')
+    const rows = this.database.prepare(`
+      WITH ranked AS (
+        SELECT
+          id,
+          node_id,
+          captured_at,
+          effective_callsign,
+          ROW_NUMBER() OVER (
+            PARTITION BY effective_callsign
+            ORDER BY captured_at DESC, id DESC
+          ) AS row_number
+        FROM ai_segments_effective
+        WHERE effective_callsign IS NOT NULL
+          AND effective_callsign <> 'N0CALL'
+      )
+      SELECT id, node_id, captured_at, effective_callsign
+      FROM ranked
+      WHERE row_number = 1
+      ORDER BY captured_at DESC, id DESC
+      LIMIT ?
+    `).all(limit)
+    return rows.map(row => ({
+      at: requiredString(row.captured_at),
+      callsign: requiredString(row.effective_callsign),
+      id: requiredString(row.id),
+      node: requiredString(row.node_id),
+    }))
+  }
+}
+
+function mapRow(row: Record<string, unknown>): PersistedSegment {
+  return {
+    callsign: nullableString(row.callsign),
+    capturedAt: requiredString(row.captured_at),
+    corrected: nullableString(row.corrected),
+    createdAt: requiredString(row.created_at),
+    durationMs: requiredNumber(row.duration_ms),
+    effectiveCallsign: nullableString(row.effective_callsign),
+    effectiveRiskLevel: nullableNumber(row.effective_risk_level),
+    id: requiredString(row.id),
+    manualCallsign: nullableString(row.manual_callsign),
+    manualNote: nullableString(row.manual_note),
+    manualRiskLevel: nullableNumber(row.manual_risk_level),
+    nodeId: requiredString(row.node_id),
+    recognition: requiredString(row.recognition),
+    revise: nullableString(row.revise),
+    riskLevel: nullableNumber(row.risk_level),
+    riskReason: nullableString(row.risk_reason),
+    voicedMs: requiredNumber(row.voiced_ms),
+  }
+}
+
+function requiredString(value: unknown): string {
+  if (typeof value !== 'string')
+    throw new Error('Unexpected non-string SQLite value')
+  return value
+}
+
+function nullableString(value: unknown): string | null {
+  if (value === null)
+    return null
+  return requiredString(value)
+}
+
+function requiredNumber(value: unknown): number {
+  if (typeof value !== 'number')
+    throw new Error('Unexpected non-number SQLite value')
+  return value
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null)
+    return null
+  return requiredNumber(value)
+}
