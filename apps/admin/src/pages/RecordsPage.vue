@@ -22,7 +22,11 @@ const audioPlayer = new Audio()
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const { markRefreshed } = useConditionalAutoRefresh({
-  canRefresh: () => currentPage.value === 1 && editingSegmentId.value === null && !isLoading.value,
+  canRefresh: () => currentPage.value === 1
+    && editingSegmentId.value === null
+    && searchInput.value === ''
+    && callsignFilter.value === ''
+    && !isLoading.value,
   refresh: loadSegments,
 })
 
@@ -79,6 +83,7 @@ async function changePage(nextPage: number): Promise<void> {
   currentPage.value = nextPage
   pageInput.value = String(nextPage)
   await loadSegments()
+  window.scrollTo({ behavior: 'smooth', top: 0 })
 }
 
 async function goToPage(): Promise<void> {
@@ -237,9 +242,9 @@ function formatTime(iso: string): string {
 </script>
 
 <template>
-  <main class="min-h-dvh bg-slate-950 px-4 py-10 text-slate-100 sm:px-6 lg:px-8">
+  <main class="min-h-dvh bg-slate-950 px-4 pb-4 text-slate-100 sm:px-6 lg:px-8">
     <section class="mx-auto max-w-screen-2xl">
-      <header class="mb-6 flex items-center justify-between gap-3">
+      <header class="sticky top-0 z-10 -mx-4 mb-6 flex items-center justify-between gap-3 bg-slate-950/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         <p class="shrink-0 whitespace-nowrap text-sm text-slate-400">
           {{ statusMessage }}
         </p>
@@ -311,14 +316,14 @@ function formatTime(iso: string): string {
           </tbody>
         </table>
       </div>
-      <nav class="mt-5 flex flex-wrap items-center justify-center gap-3 text-sm">
-        <button :disabled="currentPage <= 1" class="rounded-lg border border-slate-700 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-40" @click="changePage(currentPage - 1)">
+      <nav class="sticky bottom-0 z-10 -mx-4 mt-5 flex flex-wrap items-center justify-center gap-2 border-t border-slate-800 bg-slate-950/95 px-3 py-2 text-xs backdrop-blur sm:-mx-6 sm:gap-3 sm:px-6 sm:py-3 sm:text-sm lg:-mx-8 lg:px-8">
+        <button :disabled="currentPage <= 1" class="whitespace-nowrap rounded-lg border border-slate-700 px-2.5 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 sm:px-4 sm:py-2" @click="changePage(currentPage - 1)">
           上一页
-        </button><form class="flex items-center gap-2 text-slate-400" aria-label="页码跳转" @submit.prevent="goToPage">
-          <span>第</span><input v-model="pageInput" type="number" min="1" :max="pageCount" class="w-16 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-center text-slate-200 outline-none focus:border-cyan-500" aria-label="页码"><span>/ {{ pageCount }} 页</span><button type="submit" class="rounded-md border border-slate-700 px-3 py-1.5 text-slate-300 transition hover:border-slate-500 hover:bg-slate-800">
+        </button><form class="flex items-center gap-1 text-slate-400 sm:gap-2" aria-label="页码跳转" @submit.prevent="goToPage">
+          <span>第</span><input v-model="pageInput" type="number" min="1" :max="pageCount" class="w-12 rounded-md border border-slate-700 bg-slate-950 px-1 py-1 text-center text-slate-200 outline-none focus:border-cyan-500 sm:w-16 sm:px-2 sm:py-1.5" aria-label="页码"><span>/ {{ pageCount }} 页</span><button type="submit" class="rounded-md border border-slate-700 px-2 py-1 text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 sm:px-3 sm:py-1.5">
             跳转
           </button>
-        </form><button :disabled="currentPage >= pageCount" class="rounded-lg border border-slate-700 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-40" @click="changePage(currentPage + 1)">
+        </form><button :disabled="currentPage >= pageCount" class="whitespace-nowrap rounded-lg border border-slate-700 px-2.5 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 sm:px-4 sm:py-2" @click="changePage(currentPage + 1)">
           下一页
         </button>
       </nav>

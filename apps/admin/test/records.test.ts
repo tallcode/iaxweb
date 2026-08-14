@@ -39,6 +39,7 @@ describe('record callsign editing', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('共 1 条记录')
+    expect(wrapper.get('nav').classes()).toEqual(expect.arrayContaining(['sticky', 'bottom-0']))
     const callsign = wrapper.findAll('button').find(button => button.text() === 'BG5AAA')
     expect(callsign?.classes()).toContain('text-cyan-300')
 
@@ -56,6 +57,36 @@ describe('record callsign editing', () => {
       body: JSON.stringify({ callsign: 'BG5BBB' }),
       method: 'PATCH',
     })
+    wrapper.unmount()
+  })
+
+  it('returns to the top after changing pages', async () => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      src = ''
+
+      load(): void {}
+      pause(): void {}
+      play(): Promise<void> { return Promise.resolve() }
+      removeAttribute(): void {}
+    })
+    const scrollTo = vi.fn()
+    vi.stubGlobal('scrollTo', scrollTo)
+
+    const firstPage: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 51 }
+    const secondPage: SegmentPage = { items: [{ ...segment(), id: 'segment-2' }], page: 2, pageSize: 50, total: 51 }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(firstPage))
+      .mockResolvedValueOnce(jsonResponse(secondPage))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    const nextPage = wrapper.findAll('button').find(button => button.text() === '下一页')
+    await nextPage!.trigger('click')
+    await flushPromises()
+
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'smooth', top: 0 })
     wrapper.unmount()
   })
 
@@ -83,6 +114,31 @@ describe('record callsign editing', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('does not refresh while a callsign search is being entered', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('Audio', class extends EventTarget {
+      src = ''
+
+      load(): void {}
+      pause(): void {}
+      play(): Promise<void> { return Promise.resolve() }
+      removeAttribute(): void {}
+    })
+
+    const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(page))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('BG5AAA')
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

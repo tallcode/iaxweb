@@ -86,6 +86,20 @@ LLM 后处理：每条识别结果再调用文本模型，对识别文本做结�
 
 `config/nodes.json` 随仓库维护并包含在镜像中；`config/` 的其他运行配置和整个 `data/` 目录仍被 Git 与 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的节点定义、提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护，保存后下一次调用立即读取；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，保存 SQLite、WAL、录音和持久化的管理会话。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
 
+### SQLite 备份
+
+可在宿主机上、服务运行期间创建数据库的一致性备份（需要宿主机安装 `sqlite3`）：
+
+```bash
+# 默认写入 /srv/iaxweb/data/backups/
+./scripts/backup-sqlite.sh /srv/iaxweb/data
+
+# 指定独立备份目录
+./scripts/backup-sqlite.sh /srv/iaxweb/data /srv/backups/iaxweb
+```
+
+脚本使用 SQLite 的 `.backup`，会生成单个独立的 `.sqlite` 文件并执行完整性检查；不需要复制 `-wal` 或 `-shm`。它只备份数据库，不含 `data/rec/` 录音、`sessions.json` 或其他运行数据。
+
 提示词与输出 schema 决定解析行为，有两套可选（每次调用前重新读取，保存后立即生效）：
 
 - 完整版：`config/example/full/`，规范化文本到 `revise`、提取发言人呼号到 `Callsign`（识别不出或不一致时省略）、风控判断到 `risk`；
@@ -234,6 +248,8 @@ docker compose up -d
 ```
 
 打开 `http://localhost:8059`。`docker-compose.yml` 使用远程镜像 `ghcr.io/tallcode/iaxweb:latest`（见下方 CI），将当前 `config/` 和 `data/` 挂载进容器，并通过 `env_file: .env` 注入全部运行配置。因此 `NATS_SERVERS` 必须填**容器内可达**的地址——不要用 `127.0.0.1`（那是容器自身）。Docker Desktop 下访问宿主机的 NATS 用 `host.docker.internal`，生产环境直接填 NATS 集群地址。仓库未创建 `.env` 时 Compose 仍可使用代码默认值启动，但实际部署建议先从 `.env.example` 复制并修改。
+
+`docker compose stop` 和 `docker compose down` 会先向容器发送 `SIGTERM`；镜像中的 `tini` 会将信号转发给服务，服务依次停止 AI/NATS/WebSocket 并关闭 SQLite。避免使用 `docker kill`，它会直接发送不可处理的 `SIGKILL`。
 
 ## 镜像发布（GitHub Actions）
 
