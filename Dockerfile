@@ -41,7 +41,7 @@ COPY packages/contracts packages/contracts
 COPY apps/backend/src apps/backend/src
 COPY --from=build /app/apps/admin/dist apps/admin/dist
 COPY --from=build /app/apps/public/dist apps/public/dist
-COPY nodes.json ./
+COPY config/nodes.json config/nodes.json
 
 USER node
 EXPOSE 3000

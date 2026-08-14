@@ -74,6 +74,10 @@ test('rejects max segment not greater than the minimum segment lengths', () => {
     () => loadAiConfig({ AI_MAX_SEGMENT_MS: '2000' }),
     /greater than the minimum segment lengths/,
   )
+  assert.throws(
+    () => loadAiConfig({ AI_MAX_SEGMENT_MS: '3000' }),
+    /greater than the minimum segment lengths/,
+  )
 })
 
 test('rejects max segment above the DashScope 5 minute limit', () => {

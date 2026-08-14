@@ -26,26 +26,38 @@ onBeforeUnmount(() => {
 })
 
 async function logout(): Promise<void> {
-  await fetch('/api/admin/logout', { method: 'POST' })
-  stopPlayback()
-  await router.replace('/')
+  try {
+    await fetch('/api/admin/logout', { method: 'POST' })
+  }
+  catch {
+    // The local session still needs to leave the protected page when offline.
+  }
+  finally {
+    stopPlayback()
+    await router.replace('/')
+  }
 }
 
 async function loadSegments(): Promise<void> {
   statusMessage.value = '加载中…'
-  const response = await fetch(`/api/admin/segments?page=${currentPage.value}&pageSize=${PAGE_SIZE}`)
-  if (response.status === 401) {
-    await router.replace('/')
-    return
+  try {
+    const response = await fetch(`/api/admin/segments?page=${currentPage.value}&pageSize=${PAGE_SIZE}`)
+    if (response.status === 401) {
+      await router.replace('/')
+      return
+    }
+    if (!response.ok) {
+      statusMessage.value = response.status === 503 ? '持久化未启用' : '加载失败'
+      return
+    }
+    const data = await response.json() as SegmentPage
+    total.value = data.total
+    segments.value = data.items
+    statusMessage.value = total.value === 0 ? '暂无记录' : `共 ${total.value} 条记录`
   }
-  if (!response.ok) {
-    statusMessage.value = response.status === 503 ? '持久化未启用' : '加载失败'
-    return
+  catch {
+    statusMessage.value = '加载失败：无法连接服务器'
   }
-  const data = await response.json() as SegmentPage
-  total.value = data.total
-  segments.value = data.items
-  statusMessage.value = total.value === 0 ? '暂无记录' : `共 ${total.value} 条记录`
 }
 
 async function changePage(nextPage: number): Promise<void> {
@@ -95,19 +107,29 @@ async function saveCallsign(segment: PersistedSegment, input: HTMLInputElement):
     return
   }
   input.setCustomValidity('')
-  const response = await fetch(`/api/admin/segments/${encodeURIComponent(segment.id)}/manual-callsign`, {
-    body: JSON.stringify({ callsign: callsign || null }),
-    headers: { 'content-type': 'application/json' },
-    method: 'PATCH',
-  })
-  if (!response.ok) {
-    statusMessage.value = '保存失败：呼号必须是规范呼号或 N0CALL'
-    input.value = segment.manualCallsign ?? ''
-    return
+  try {
+    const response = await fetch(`/api/admin/segments/${encodeURIComponent(segment.id)}/manual-callsign`, {
+      body: JSON.stringify({ callsign: callsign || null }),
+      headers: { 'content-type': 'application/json' },
+      method: 'PATCH',
+    })
+    if (!response.ok) {
+      if (response.status === 401) {
+        await router.replace('/')
+        return
+      }
+      statusMessage.value = '保存失败：呼号必须是规范呼号或 N0CALL'
+      input.value = segment.manualCallsign ?? ''
+      return
+    }
+    segment.manualCallsign = callsign || null
+    input.value = callsign
+    statusMessage.value = '已保存'
   }
-  segment.manualCallsign = callsign || null
-  input.value = callsign
-  statusMessage.value = '已保存'
+  catch {
+    statusMessage.value = '保存失败：无法连接服务器'
+    input.value = segment.manualCallsign ?? ''
+  }
 }
 
 function normalizeCallsignInput(event: Event): void {

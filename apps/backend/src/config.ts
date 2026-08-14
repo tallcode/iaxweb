@@ -154,7 +154,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     optional(env, 'AI_MAX_SEGMENT_MS') ?? '120000',
     'AI_MAX_SEGMENT_MS',
   )
-  if (maxSegmentMs <= Math.min(coldMinSegmentMs, hotMinSegmentMs))
+  if (maxSegmentMs <= Math.max(coldMinSegmentMs, hotMinSegmentMs))
     throw new Error('AI_MAX_SEGMENT_MS must be greater than the minimum segment lengths')
   if (maxSegmentMs > maxAllowedSegmentMs)
     throw new Error(`AI_MAX_SEGMENT_MS must not exceed ${maxAllowedSegmentMs} (DashScope 5 minute limit)`)

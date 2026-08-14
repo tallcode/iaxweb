@@ -9,7 +9,12 @@ function spot(callsign: string) {
 
 function fakeConnection() {
   const published: Array<{ data: string, subject: string }> = []
+  const subscribed: string[] = []
   let receive: ((data: Uint8Array) => void) | undefined
+  let resolveClosed: (error: Error | undefined) => void = () => undefined
+  const closed = new Promise<Error | undefined>((resolve) => {
+    resolveClosed = resolve
+  })
   async function* messages() {
     const data = await new Promise<Uint8Array>((resolve) => {
       receive = resolve
@@ -22,25 +27,85 @@ function fakeConnection() {
   } as unknown as Subscription
   return {
     connection: {
-      drain: async () => undefined,
+      close: async () => resolveClosed(undefined),
+      closed: () => closed,
+      drain: async () => resolveClosed(undefined),
       publish: (subject: string, data: string) => published.push({ data, subject }),
-      subscribe: () => subscription,
+      subscribe: (subject: string) => {
+        subscribed.push(subject)
+        return subscription
+      },
     } as unknown as NatsConnection,
+    disconnect: (error?: Error) => resolveClosed(error),
     published,
     receive: (event: ReturnType<typeof spot>) => receive?.(new TextEncoder().encode(JSON.stringify(event))),
+    subscribed,
   }
 }
 
-test('publishes displayable spots to Core NATS', async () => {
+test('publishes displayable spots under the configured Core NATS root', async () => {
   const fake = fakeConnection()
-  const store = new SpotStore({ createConnection: async () => fake.connection })
+  const store = new SpotStore({ createConnection: async () => fake.connection, subjectPrefix: 'custom.nodes' })
   await store.start(() => undefined)
 
   store.publish(spot('BG5XXX'))
   assert.deepEqual(fake.published, [{
     data: JSON.stringify(spot('BG5XXX')),
-    subject: 'iaxmon.nodes.1900.ai.spot.BG5XXX',
+    subject: 'custom.nodes.1900.ai.spot.BG5XXX',
   }])
+  assert.deepEqual(fake.subscribed, ['custom.nodes.*.ai.spot.*'])
+  await store.close()
+})
+
+test('retries an unavailable initial Spot connection', async () => {
+  const fake = fakeConnection()
+  const timers: Array<() => void> = []
+  let attempts = 0
+  const store = new SpotStore({
+    createConnection: async () => {
+      attempts++
+      if (attempts === 1)
+        throw new Error('offline')
+      return fake.connection
+    },
+    retryDelayMs: 25,
+    setTimer: (callback) => {
+      timers.push(callback)
+      return timers.length as unknown as ReturnType<typeof setTimeout>
+    },
+  })
+
+  await store.start(() => undefined)
+  assert.equal(attempts, 1)
+  timers.shift()?.()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(attempts, 2)
+  store.publish(spot('BG5XXX'))
+  assert.equal(fake.published.length, 1)
+  await store.close()
+})
+
+test('reconnects after an established Spot connection closes', async () => {
+  const first = fakeConnection()
+  const second = fakeConnection()
+  const timers: Array<() => void> = []
+  let attempts = 0
+  const store = new SpotStore({
+    createConnection: async () => attempts++ === 0 ? first.connection : second.connection,
+    setTimer: (callback) => {
+      timers.push(callback)
+      return timers.length as unknown as ReturnType<typeof setTimeout>
+    },
+  })
+
+  await store.start(() => undefined)
+  first.disconnect(new Error('connection lost'))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(timers.length, 1)
+  timers.shift()?.()
+  await new Promise(resolve => setImmediate(resolve))
+  store.publish(spot('BG5XXX'))
+  assert.equal(second.published.length, 1)
   await store.close()
 })
 

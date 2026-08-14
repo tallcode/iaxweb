@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
@@ -19,6 +19,7 @@ interface SessionFile {
 }
 
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000
+const DUMMY_PASSWORD_HASH = hashPassword('invalid-admin-password')
 
 export class AdminAuth {
   static readonly sessionMaxAgeSeconds = SESSION_MAX_AGE_MS / 1_000
@@ -34,10 +35,11 @@ export class AdminAuth {
     this.loadSessions()
   }
 
-  login(username: string, password: string): string | undefined {
+  async login(username: string, password: string): Promise<string | undefined> {
     this.removeExpiredSessions()
     const user = this.users.find(candidate => candidate.username === username)
-    if (!user || !verifyPassword(password, user.passwordHash))
+    const verified = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH)
+    if (!user || !verified)
       return undefined
     const token = randomBytes(32).toString('base64url')
     const session: StoredSession = {
@@ -152,16 +154,27 @@ function isMissingFile(error: unknown): boolean {
     && 'code' in error && (error as { code?: unknown }).code === 'ENOENT'
 }
 
-function verifyPassword(password: string, encoded: string): boolean {
+async function verifyPassword(password: string, encoded: string): Promise<boolean> {
   const [kind, saltText, expectedText] = encoded.split('$')
   if (kind !== 'scrypt' || !saltText || !expectedText)
     return false
   try {
     const expected = Buffer.from(expectedText, 'base64')
-    const actual = scryptSync(password, Buffer.from(saltText, 'base64'), expected.length)
+    const actual = await derivePassword(password, Buffer.from(saltText, 'base64'), expected.length)
     return expected.length === actual.length && timingSafeEqual(expected, actual)
   }
   catch {
     return false
   }
+}
+
+function derivePassword(password: string, salt: Buffer, length: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, length, (error, derivedKey) => {
+      if (error)
+        reject(error)
+      else
+        resolve(derivedKey)
+    })
+  })
 }

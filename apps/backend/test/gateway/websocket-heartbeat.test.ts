@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isExpectedWebSocketClose } from '../src/websocket-heartbeat.js'
+import { isExpectedWebSocketClose } from '../../src/gateway/websocket-heartbeat.js'
 
 test('classifies normal and browser-aborted WebSocket closes as expected', () => {
   assert.equal(isExpectedWebSocketClose(1000), true)

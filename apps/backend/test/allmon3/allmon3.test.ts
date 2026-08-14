@@ -1,4 +1,4 @@
-import type { NodeConfig, NodeDefinitions, NodeStatus, StatusSnapshot } from '../src/allmon3.js'
+import type { NodeConfig, NodeDefinitions, NodeStatus, StatusSnapshot } from '../../src/allmon3/index.js'
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -12,7 +12,7 @@ import {
   statusFingerprint,
   TransmissionTracker,
   transmitSource,
-} from '../src/allmon3.js'
+} from '../../src/allmon3/index.js'
 
 const definitions: NodeDefinitions = {
   1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },

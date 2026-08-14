@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { AdminAuth, hashPassword } from '../../src/admin/auth.js'
 
-test('authenticates an admin user with a scrypt hash', (t) => {
+test('authenticates an admin user with a scrypt hash', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-admin-'))
   t.after(() => rmSync(directory, { force: true, recursive: true }))
   const file = join(directory, 'admin.json')
@@ -14,8 +14,9 @@ test('authenticates an admin user with a scrypt hash', (t) => {
   const auth = new AdminAuth(file, sessionsFile)
 
   assert.deepEqual(JSON.parse(readFileSync(sessionsFile, 'utf8')), { sessions: [] })
-  assert.equal(auth.login('admin', 'bad'), undefined)
-  const token = auth.login('admin', 'secret')
+  assert.equal(await auth.login('admin', 'bad'), undefined)
+  assert.equal(await auth.login('missing', 'secret'), undefined)
+  const token = await auth.login('admin', 'secret')
   assert.ok(token)
   assert.equal(auth.isAuthenticated(token), true)
   assert.equal(new AdminAuth(file, sessionsFile).isAuthenticated(token), true)

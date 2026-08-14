@@ -1,5 +1,5 @@
 import type { ConnectionOptions, NatsConnection, Subscription } from '@nats-io/transport-node'
-import type { AppConfig } from './config.js'
+import type { AppConfig } from '../config.js'
 import { randomUUID } from 'node:crypto'
 import { connect, RequestError, TimeoutError } from '@nats-io/transport-node'
 

@@ -1,5 +1,5 @@
 import type { AiConfig } from '../config.js'
-import type { AudioStateEvent } from '../nats-audio.js'
+import type { AudioStateEvent } from '../gateway/nats-audio.js'
 import type { SegmentRecord } from './segment-store.js'
 import type { ClosedSegment, DiscardReason } from './segmenter.js'
 import type { SpotEvent } from './spot-store.js'

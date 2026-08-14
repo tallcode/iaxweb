@@ -7,7 +7,8 @@ node_modules
 *.log
 dist
 data
-config
+config/*
+!config/nodes.json
 .DS_Store
 Dockerfile
 .dockerignore

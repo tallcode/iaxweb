@@ -3,7 +3,7 @@ import { connect } from '@nats-io/transport-node'
 import { config as loadEnv } from 'dotenv'
 import { SpotStore } from '../src/ai/spot-store.js'
 import { loadConfig } from '../src/config.js'
-import { createConnectionOptions } from '../src/nats-audio.js'
+import { createConnectionOptions } from '../src/gateway/nats-audio.js'
 
 loadEnv({ quiet: true })
 const config = loadConfig()

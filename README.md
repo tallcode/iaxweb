@@ -5,18 +5,18 @@
 - npm workspaces monorepo，前后端独立开发、统一构建
 - 后端使用 Node.js + TypeScript，通过 `tsx` 直接运行
 - Core NATS 普通订阅（不使用 queue group）
-- 原生 HTTP 与 WebSocket 服务
+- Fastify HTTP 服务，WebSocket 由 `@fastify/websocket` 接管
 - 前端使用 Vue、Vite、Pinia、Vue Router、TypeScript 和 Tailwind CSS
 - 浏览器解码 8 kHz 单声道 G.711 μ-law，并按媒体时间戳提供 100 ms 抖动缓冲
 
 ## 项目结构
 
 ```text
-apps/backend/       HTTP、WebSocket、NATS、Allmon3 和 AI 服务
+apps/backend/       HTTP 入口，以及 admin、AI、Allmon3、gateway 等后端模块
 apps/public/        公开拓扑 Vue 应用
 apps/admin/         独立管理后台 Vue 应用
 packages/contracts/ 前后端共享的 API 和 WebSocket TypeScript 类型
-config/             可热更新的 AI 提示词、schema、热词及呼号配置
+config/             节点定义，以及可热更新的 AI 提示词、schema、热词及呼号配置
 data/               SQLite、录音及其他可写运行数据
 ```
 
@@ -30,7 +30,7 @@ data/               SQLite、录音及其他可写运行数据
 cp .env.example .env
 ```
 
-服务启动时通过 `dotenv` 自动读取项目根目录的 `.env`。systemd、Docker 或进程管理器直接提供的环境变量优先级更高，不会被 `.env` 覆盖。
+服务启动时通过 `dotenv` 自动读取项目根目录的 `.env`。systemd、Docker 或进程管理器直接提供的环境变量优先级更高，不会被 `.env` 覆盖。Compose 也通过 `env_file` 将同一个 `.env` 注入容器，因此本机运行和容器部署共用一套变量名与默认路径。
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
@@ -51,7 +51,7 @@ cp .env.example .env
 
 AI 值机员监听节点音频，按发射分段（iaxmon 的 `start`/`stop` 事件），把语音段（冷启动 ≥5 秒、热启动 ≥2 秒，最长 2 分钟）送阿里云百炼语音识别（Qwen-Audio-3.0-ASR-Flash 同步接口），识别结果输出到控制台。
 
-在 `nodes.json` 中为节点添加 `"AI": true` 启用（该节点必须同时 `"AUDIO": true`），并在 `.env` 设置 `DASHSCOPE_API_KEY`：
+在 `config/nodes.json` 中为节点添加 `"AI": true` 启用（该节点必须同时 `"AUDIO": true`），并在 `.env` 设置 `DASHSCOPE_API_KEY`：
 
 ```json
 {
@@ -84,7 +84,7 @@ LLM 后处理：每条识别结果再调用文本模型，对识别文本做结�
 
 默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中同时预留 `manual_callsign`、`manual_risk_level`、`manual_note` 三个人工复核字段。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。
 
-`config/` 和 `data/` 都是宿主目录，整个目录均被 Git 和 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护，保存后下一次调用立即读取；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，保存 SQLite、WAL、录音和持久化的管理会话。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
+`config/nodes.json` 随仓库维护并包含在镜像中；`config/` 的其他运行配置和整个 `data/` 目录仍被 Git 与 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的节点定义、提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护，保存后下一次调用立即读取；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，保存 SQLite、WAL、录音和持久化的管理会话。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
 
 提示词与输出 schema 决定解析行为，有两套可选（每次调用前重新读取，保存后立即生效）：
 
@@ -174,7 +174,7 @@ npm run dev
 
 也可以使用 `npm run dev:backend`、`npm run dev:public` 或 `npm run dev:admin` 单独启动一个 workspace。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
 
-根目录的 `nodes.json` 是地图的静态节点与链路配置。服务启动时会立即根据该文件生成默认离线状态，无需等待 Allmon3 返回；后续实时数据逐项覆盖默认值。`TYPE` 支持 `HUB` 和 `REPEATER`，`NAME` 保存节点短名称，`LINK` 声明允许显示的拓扑边，`FREQ` 保存中继频率信息；HUB 配置 `AUDIO: true` 时，地图节点会显示音频播放控件。
+`config/nodes.json` 是地图的静态节点与链路配置。服务启动时会立即根据该文件生成默认离线状态，无需等待 Allmon3 返回；后续实时数据逐项覆盖默认值。`TYPE` 支持 `HUB` 和 `REPEATER`，`NAME` 保存节点短名称，`LINK` 声明允许显示的拓扑边，`FREQ` 保存中继频率信息；HUB 配置 `AUDIO: true` 时，地图节点会显示音频播放控件。
 
 生产环境：
 
@@ -210,7 +210,7 @@ npm run hash-admin-password -- '替换为强密码'
 }
 ```
 
-登录会话保存在 `data/sessions.json`，首次启动会自动创建。每个会话有效期为 7 天；服务启动、登录、认证和登出时都会清理过期会话，服务重启后未过期的会话仍有效。文件仅保存随机 cookie token 的 SHA-256 哈希，不保存原始 token。持久化启用时 `admin.json` 必须存在且格式正确；Compose 部署时它位于只读挂载的 `./config/admin.json`。
+登录会话保存在 `data/sessions.json`，首次启动会自动创建。每个会话有效期为 7 天；服务启动、登录、认证和登出时都会清理过期会话，服务重启后未过期的会话仍有效。文件仅保存随机 cookie token 的 SHA-256 哈希，不保存原始 token。登录密码使用异步 scrypt 校验，并按来源地址和用户名分别限制为每 5 分钟最多 10 次尝试；成功登录会重置计数。会话 Cookie 使用 `HttpOnly` 和 `SameSite=Strict`，检测到 HTTPS 或 `X-Forwarded-Proto: https` 时还会设置 `Secure`。反向代理终止 TLS 时应转发该协议头。持久化启用时 `admin.json` 必须存在且格式正确；Compose 部署时它位于只读挂载的 `./config/admin.json`。
 
 ## Docker
 
@@ -233,7 +233,7 @@ docker run --rm -p 3000:3000 \
 docker compose up -d
 ```
 
-打开 `http://localhost:8059`。`docker-compose.yml` 使用远程镜像 `ghcr.io/tallcode/iaxweb:latest`（见下方 CI），并会自动读取同目录 `.env` 做变量替换，因此 `NATS_SERVERS` 必须填**容器内可达**的地址——不要用 `127.0.0.1`（那是容器自身）。Docker Desktop 下访问宿主机的 NATS 用 `host.docker.internal`，生产环境直接填 NATS 集群地址。
+打开 `http://localhost:8059`。`docker-compose.yml` 使用远程镜像 `ghcr.io/tallcode/iaxweb:latest`（见下方 CI），将当前 `config/` 和 `data/` 挂载进容器，并通过 `env_file: .env` 注入全部运行配置。因此 `NATS_SERVERS` 必须填**容器内可达**的地址——不要用 `127.0.0.1`（那是容器自身）。Docker Desktop 下访问宿主机的 NATS 用 `host.docker.internal`，生产环境直接填 NATS 集群地址。仓库未创建 `.env` 时 Compose 仍可使用代码默认值启动，但实际部署建议先从 `.env.example` 复制并修改。
 
 ## 镜像发布（GitHub Actions）
 
@@ -250,7 +250,7 @@ ghcr.io/tallcode/iaxweb:sha-<commit>
 
 ### `/audio/<nodeId>`
 
-节点 ID 为必填路径参数，并且必须是 `nodes.json` 中设置了 `AUDIO: true` 的节点。比如 `/audio/1900` 转发 `iaxmon.nodes.1900.audio/events`，`/audio/1800` 转发 `iaxmon.nodes.1800.audio/events`。不同节点的 WebSocket、NATS 状态和监听人数完全隔离。未知或未开启音频的节点会拒绝升级。
+节点 ID 为必填路径参数，并且必须是 `config/nodes.json` 中设置了 `AUDIO: true` 的节点。比如 `/audio/1900` 转发 `iaxmon.nodes.1900.audio/events`，`/audio/1800` 转发 `iaxmon.nodes.1800.audio/events`。不同节点的 WebSocket、NATS 状态和监听人数完全隔离。未知或未开启音频的节点会拒绝升级。
 
 网关直接把该节点 `<subject_prefix>.audio` 的 NATS 二进制 payload 转发为 WebSocket 二进制消息，把 `<subject_prefix>.events` 以及当前状态快照转发为文本 JSON。浏览器依据 iaxmon `NATS.md` 中的版本、类型、时间戳和 PCMU payload 解码播放。
 
@@ -280,4 +280,4 @@ ghcr.io/tallcode/iaxweb:sha-<commit>
 
 每个节点还包含网关派生字段 `TX_SOURCE`（`local`、`remote`、`system` 或 `null`）和 `LAST_TX_AT`（ISO 8601 时间或 `null`）。最近发射时间保存在当前网关进程内；进程启动前的历史发射无法从 Allmon3 状态协议中恢复。
 
-地图只绘制 `nodes.json` 的 `LINK` 中声明的链路：Allmon3 `CONNS` 显示已建立连接时使用实线，否则使用虚线；未出现在 `LINK` 中的动态连接不绘制。HUB 使用独立样式并隐藏发射状态与最近发射时间，中继节点保持完整发射信息。
+地图始终绘制 `config/nodes.json` 的 `LINK` 中声明的计划链路：Allmon3 `CONNS` 显示已建立连接时使用实线，否则使用虚线。若 Allmon3 报告了未在 `LINK` 中声明的动态连接，连接建立期间也会临时绘制为实线，断开后自动消失。HUB 使用独立样式并隐藏发射状态与最近发射时间，中继节点保持完整发射信息。

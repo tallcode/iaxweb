@@ -10,18 +10,26 @@ const submitting = ref(false)
 
 async function login(): Promise<void> {
   submitting.value = true
-  const response = await fetch('/api/admin/login', {
-    body: JSON.stringify({ password: password.value, username: username.value }),
-    headers: { 'content-type': 'application/json' },
-    method: 'POST',
-  })
-  submitting.value = false
-  if (!response.ok) {
-    loginError.value = '用户名或密码错误'
-    return
+  loginError.value = ''
+  try {
+    const response = await fetch('/api/admin/login', {
+      body: JSON.stringify({ password: password.value, username: username.value }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    })
+    if (!response.ok) {
+      loginError.value = response.status === 429 ? '登录尝试过多，请稍后再试' : '用户名或密码错误'
+      return
+    }
+    password.value = ''
+    await router.replace('/records')
   }
-  password.value = ''
-  await router.replace('/records')
+  catch {
+    loginError.value = '无法连接服务器，请检查网络后重试'
+  }
+  finally {
+    submitting.value = false
+  }
 }
 </script>
 
