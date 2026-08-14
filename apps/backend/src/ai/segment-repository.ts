@@ -159,10 +159,16 @@ export class SegmentRepository {
     return row ? mapRow(row) : undefined
   }
 
-  list(page: number, pageSize: number): SegmentPage {
+  list(page: number, pageSize: number, callsign?: string): SegmentPage {
     if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
       throw new Error('Invalid segment page')
-    const totalRow = this.database.prepare('SELECT COUNT(*) AS total FROM ai_segments').get()
+    const whereClause = callsign === undefined ? '' : 'WHERE effective_callsign = ? COLLATE NOCASE'
+    const parameters = callsign === undefined ? [] : [callsign]
+    const totalRow = this.database.prepare(`
+      SELECT COUNT(*) AS total
+      FROM ai_segments_effective
+      ${whereClause}
+    `).get(...parameters)
     const total = requiredNumber(totalRow?.total)
     const rows = this.database.prepare(`
       SELECT
@@ -171,9 +177,10 @@ export class SegmentRepository {
         manual_risk_level, manual_note, created_at, effective_callsign,
         effective_risk_level
       FROM ai_segments_effective
+      ${whereClause}
       ORDER BY captured_at DESC, id DESC
       LIMIT ? OFFSET ?
-    `).all(pageSize, (page - 1) * pageSize)
+    `).all(...parameters, pageSize, (page - 1) * pageSize)
     return { items: rows.map(mapRow), page, pageSize, total }
   }
 

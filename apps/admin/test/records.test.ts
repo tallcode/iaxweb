@@ -1,0 +1,150 @@
+// @vitest-environment jsdom
+import type { PersistedSegment, SegmentPage } from '@iaxweb/contracts'
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const replace = vi.fn()
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ replace }),
+}))
+
+afterEach(() => {
+  replace.mockReset()
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+describe('record callsign editing', () => {
+  it('shows the effective callsign and switches to a green manual value after Enter', async () => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      src = ''
+
+      load(): void {}
+      pause(): void {}
+      play(): Promise<void> { return Promise.resolve() }
+      removeAttribute(): void {}
+    })
+
+    const aiSegment = segment()
+    const reviewedSegment = { ...aiSegment, effectiveCallsign: 'BG5BBB', manualCallsign: 'BG5BBB' }
+    const page: SegmentPage = { items: [aiSegment], page: 1, pageSize: 50, total: 1 }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(page))
+      .mockResolvedValueOnce(jsonResponse(reviewedSegment))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('共 1 条记录')
+    const callsign = wrapper.findAll('button').find(button => button.text() === 'BG5AAA')
+    expect(callsign?.classes()).toContain('text-cyan-300')
+
+    await callsign!.trigger('click')
+    const editor = wrapper.findAll<HTMLInputElement>('input[aria-label="编辑呼号"]')[0]!
+    await editor.setValue('BG5BBB')
+    await editor.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(wrapper.findAll('input[aria-label="编辑呼号"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('共 1 条记录')
+    const updatedCallsign = wrapper.findAll('button').find(button => button.text() === 'BG5BBB')
+    expect(updatedCallsign?.classes()).toContain('text-emerald-400')
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      body: JSON.stringify({ callsign: 'BG5BBB' }),
+      method: 'PATCH',
+    })
+    wrapper.unmount()
+  })
+
+  it('refreshes once per minute only while the page is eligible', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('Audio', class extends EventTarget {
+      src = ''
+
+      load(): void {}
+      pause(): void {}
+      play(): Promise<void> { return Promise.resolve() }
+      removeAttribute(): void {}
+    })
+
+    const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(page))
+      .mockResolvedValueOnce(jsonResponse(page))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('refreshes immediately after the page becomes visible when a refresh is overdue', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('Audio', class extends EventTarget {
+      src = ''
+
+      load(): void {}
+      pause(): void {}
+      play(): Promise<void> { return Promise.resolve() }
+      removeAttribute(): void {}
+    })
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+
+    const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(page))
+      .mockResolvedValueOnce(jsonResponse(page))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    delete (document as { visibilityState?: string }).visibilityState
+  })
+})
+
+function segment(): PersistedSegment {
+  return {
+    callsign: 'BG5AAA',
+    capturedAt: new Date().toISOString(),
+    corrected: null,
+    createdAt: new Date().toISOString(),
+    durationMs: 1_000,
+    effectiveCallsign: 'BG5AAA',
+    effectiveRiskLevel: null,
+    id: 'segment-1',
+    manualCallsign: null,
+    manualNote: null,
+    manualRiskLevel: null,
+    nodeId: '1900',
+    recognition: '这里是 BG5AAA',
+    revise: null,
+    riskLevel: null,
+    riskReason: null,
+    voicedMs: 900,
+  }
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    headers: { 'content-type': 'application/json' },
+    status: 200,
+  })
+}

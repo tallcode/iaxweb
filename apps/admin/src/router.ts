@@ -12,7 +12,7 @@ export const router = createRouter({
 
 router.beforeEach(async (to) => {
   try {
-    const response = await fetch('/api/admin/segments?page=1&pageSize=1')
+    const response = await fetch('/api/admin/session')
     const authenticated = response.ok
 
     if (to.meta.requiresAuth && !authenticated)

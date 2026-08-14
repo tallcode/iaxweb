@@ -1,3 +1,4 @@
+import type { SegmentRecord } from '../../src/ai/segment-store.js'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -54,6 +55,37 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   })
   assert.equal(authenticated.statusCode, 200)
   assert.deepEqual(authenticated.json(), { items: [], page: 1, pageSize: 50, total: 0 })
+
+  const session = await app.inject({
+    headers: { cookie: cookie!.split(';', 1)[0] },
+    url: '/api/admin/session',
+  })
+  assert.equal(session.statusCode, 204)
+  assert.equal(session.body, '')
+
+  const segment: SegmentRecord = {
+    callsign: 'BG5AAA',
+    durationMs: 1_000,
+    id: 'matching-segment',
+    payloads: [],
+    recognition: '这里是 BG5AAA',
+    timestamp: '2026-08-14T12:00:00.000Z',
+    voicedMs: 900,
+  }
+  repository.insert('1900', segment)
+  repository.updateAnalysis(segment)
+  const exactSearch = await app.inject({
+    headers: { cookie: cookie!.split(';', 1)[0] },
+    url: '/api/admin/segments?callsign=bg5aaa',
+  })
+  assert.equal(exactSearch.statusCode, 200)
+  assert.equal(exactSearch.json().total, 1)
+  const partialSearch = await app.inject({
+    headers: { cookie: cookie!.split(';', 1)[0] },
+    url: '/api/admin/segments?callsign=BG5AA',
+  })
+  assert.equal(partialSearch.statusCode, 200)
+  assert.equal(partialSearch.json().total, 0)
 
   const malformed = await app.inject({
     headers: { cookie: 'broken=%; admin_token=invalid' },

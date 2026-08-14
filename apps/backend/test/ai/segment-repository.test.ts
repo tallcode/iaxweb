@@ -163,3 +163,22 @@ test('lists segments newest first with pagination', () => {
   assert.throws(() => repository.list(0, 50), /Invalid segment page/)
   repository.close()
 })
+
+test('filters pages by exact effective callsign without case sensitivity', () => {
+  const repository = new SegmentRepository(':memory:')
+  const firstMatch = record({ callsign: 'BG5AAA', id: 'first-match', timestamp: '2026-08-10T12:00:00.000Z' })
+  const overridden = record({ callsign: 'BG5AAA', id: 'overridden', timestamp: '2026-08-11T12:00:00.000Z' })
+  const latestMatch = record({ callsign: 'BG5AAA', id: 'latest-match', timestamp: '2026-08-12T12:00:00.000Z' })
+  for (const segment of [firstMatch, overridden, latestMatch]) {
+    repository.insert('1900', segment)
+    repository.updateAnalysis(segment)
+  }
+  repository.updateManualReview(overridden.id, { callsign: 'BG5BBB' })
+
+  const result = repository.list(1, 50, 'bg5aaa')
+  assert.equal(result.total, 2)
+  assert.deepEqual(result.items.map(item => item.id), ['latest-match', 'first-match'])
+  assert.equal(repository.list(1, 50, 'BG5BBB').items[0]?.id, 'overridden')
+  assert.equal(repository.list(1, 50, 'BG5AA').total, 0)
+  repository.close()
+})

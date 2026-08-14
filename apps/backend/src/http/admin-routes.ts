@@ -32,6 +32,7 @@ interface SegmentParams {
 }
 
 interface SegmentQuery {
+  callsign?: string
   page?: string
   pageSize?: string
 }
@@ -82,11 +83,18 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
       return reply.code(401).send('Unauthorized')
   }
 
+  app.get('/session', { preHandler: requireAuthentication }, async (_request, reply) => {
+    return reply.header('cache-control', 'no-store').code(204).send()
+  })
+
   app.get<{ Querystring: SegmentQuery }>('/segments', { preHandler: requireAuthentication }, async (request, reply) => {
     const page = parsePage(request.query.page, 1)
     const pageSize = parsePage(request.query.pageSize, 50)
+    const callsign = request.query.callsign?.trim().toUpperCase()
+    if (callsign !== undefined && !CALLSIGN_PATTERN.test(callsign))
+      return reply.code(400).send('Invalid callsign')
     try {
-      return reply.header('cache-control', 'no-store').send(segmentRepository.list(page, pageSize))
+      return reply.header('cache-control', 'no-store').send(segmentRepository.list(page, pageSize, callsign))
     }
     catch {
       return reply.code(400).send('Invalid pagination')
