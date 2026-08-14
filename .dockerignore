@@ -8,7 +8,6 @@ node_modules
 dist
 data
 config/*
-!config/nodes.json
 .DS_Store
 Dockerfile
 .dockerignore

@@ -84,7 +84,7 @@ LLM 后处理：每条识别结果再调用文本模型，对识别文本做结�
 
 默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中同时预留 `manual_callsign`、`manual_risk_level`、`manual_note` 三个人工复核字段。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。
 
-`config/nodes.json` 随仓库维护并包含在镜像中；`config/` 的其他运行配置和整个 `data/` 目录仍被 Git 与 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的节点定义、提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护，保存后下一次调用立即读取；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，保存 SQLite、WAL、录音和持久化的管理会话。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
+`config/` 和整个 `data/` 目录均被 Git 与 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的节点定义、提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，保存 SQLite、WAL、录音和持久化的管理会话。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
 
 ### SQLite 备份
 
