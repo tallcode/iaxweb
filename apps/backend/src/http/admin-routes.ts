@@ -33,6 +33,7 @@ interface SegmentParams {
 
 interface SegmentQuery {
   callsign?: string
+  manualOnly?: string
   page?: string
   pageSize?: string
 }
@@ -91,10 +92,11 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
     const page = parsePage(request.query.page, 1)
     const pageSize = parsePage(request.query.pageSize, 50)
     const callsign = request.query.callsign?.trim().toUpperCase()
+    const manualOnly = request.query.manualOnly === 'true'
     if (callsign !== undefined && !CALLSIGN_PATTERN.test(callsign))
       return reply.code(400).send('Invalid callsign')
     try {
-      return reply.header('cache-control', 'no-store').send(segmentRepository.list(page, pageSize, callsign))
+      return reply.header('cache-control', 'no-store').send(segmentRepository.list(page, pageSize, callsign, manualOnly))
     }
     catch {
       return reply.code(400).send('Invalid pagination')
@@ -128,6 +130,30 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
         id: segment.id,
         node: segment.nodeId,
       })
+      return reply.header('cache-control', 'no-store').send(segment)
+    },
+  )
+
+  app.patch<{ Body: ManualCallsignBody, Params: SegmentParams }>(
+    '/segments/:id/manual-callee-callsign',
+    { preHandler: requireAuthentication },
+    async (request, reply) => {
+      if (!Object.hasOwn(request.body ?? {}, 'callsign')
+        || (request.body.callsign !== null && typeof request.body.callsign !== 'string')) {
+        return reply.code(400).send('Invalid callsign')
+      }
+
+      const callsign = typeof request.body.callsign === 'string'
+        ? request.body.callsign.trim().toUpperCase()
+        : null
+      if (callsign !== null && !CALLSIGN_PATTERN.test(callsign))
+        return reply.code(400).send('Invalid callsign')
+      if (!segmentRepository.updateManualReview(request.params.id, { calleeCallsign: callsign }))
+        return reply.code(404).send('Not Found')
+
+      const segment = segmentRepository.find(request.params.id)
+      if (!segment)
+        return reply.code(404).send('Not Found')
       return reply.header('cache-control', 'no-store').send(segment)
     },
   )

@@ -12,6 +12,7 @@ export interface StoredSpot {
 }
 
 export interface ManualReviewPatch {
+  calleeCallsign?: string | null
   callsign?: string | null
   note?: string | null
   riskLevel?: number | null
@@ -36,6 +37,7 @@ const SCHEMA = `
     risk_reason       TEXT,
 
     manual_callsign   TEXT COLLATE NOCASE,
+    callee_callsign   TEXT COLLATE NOCASE,
     manual_risk_level INTEGER CHECK (manual_risk_level BETWEEN 1 AND 5),
     manual_note       TEXT,
 
@@ -70,6 +72,7 @@ const SELECT_EFFECTIVE = `
     risk_level,
     risk_reason,
     manual_callsign,
+    callee_callsign,
     manual_risk_level,
     manual_note,
     created_at,
@@ -137,6 +140,10 @@ export class SegmentRepository {
       assignments.push('manual_callsign = ?')
       values.push(patch.callsign)
     }
+    if (patch.calleeCallsign !== undefined) {
+      assignments.push('callee_callsign = ?')
+      values.push(patch.calleeCallsign)
+    }
     if (patch.riskLevel !== undefined) {
       assignments.push('manual_risk_level = ?')
       values.push(patch.riskLevel)
@@ -159,11 +166,18 @@ export class SegmentRepository {
     return row ? mapRow(row) : undefined
   }
 
-  list(page: number, pageSize: number, callsign?: string): SegmentPage {
+  list(page: number, pageSize: number, callsign?: string, manualOnly: boolean = false): SegmentPage {
     if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
       throw new Error('Invalid segment page')
-    const whereClause = callsign === undefined ? '' : 'WHERE effective_callsign = ? COLLATE NOCASE'
-    const parameters = callsign === undefined ? [] : [callsign]
+    const conditions: string[] = []
+    const parameters: string[] = []
+    if (manualOnly)
+      conditions.push('manual_callsign IS NOT NULL')
+    if (callsign !== undefined) {
+      conditions.push(`${manualOnly ? 'manual_callsign' : 'effective_callsign'} = ? COLLATE NOCASE`)
+      parameters.push(callsign)
+    }
+    const whereClause = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`
     const totalRow = this.database.prepare(`
       SELECT COUNT(*) AS total
       FROM ai_segments_effective
@@ -173,7 +187,7 @@ export class SegmentRepository {
     const rows = this.database.prepare(`
       SELECT
         id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected,
-        revise, callsign, risk_level, risk_reason, manual_callsign,
+        revise, callsign, risk_level, risk_reason, manual_callsign, callee_callsign,
         manual_risk_level, manual_note, created_at, effective_callsign,
         effective_risk_level
       FROM ai_segments_effective
@@ -219,6 +233,7 @@ export class SegmentRepository {
 
 function mapRow(row: Record<string, unknown>): PersistedSegment {
   return {
+    calleeCallsign: nullableString(row.callee_callsign),
     callsign: nullableString(row.callsign),
     capturedAt: requiredString(row.captured_at),
     corrected: nullableString(row.corrected),

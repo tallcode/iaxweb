@@ -31,6 +31,7 @@ export interface SpotEvent {
 }
 
 export interface PersistedSegment {
+  calleeCallsign: string | null
   callsign: string | null
   capturedAt: string
   corrected: string | null

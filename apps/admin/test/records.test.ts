@@ -44,12 +44,12 @@ describe('record callsign editing', () => {
     expect(callsign?.classes()).toContain('text-cyan-300')
 
     await callsign!.trigger('click')
-    const editor = wrapper.findAll<HTMLInputElement>('input[aria-label="编辑呼号"]')[0]!
+    const editor = wrapper.get<HTMLInputElement>('input[aria-label="编辑主叫呼号"]')
     await editor.setValue('BG5BBB')
     await editor.trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
-    expect(wrapper.findAll('input[aria-label="编辑呼号"]')).toHaveLength(0)
+    expect(wrapper.findAll('input[aria-label="编辑主叫呼号"]')).toHaveLength(0)
     expect(wrapper.text()).toContain('共 1 条记录')
     const updatedCallsign = wrapper.findAll('button').find(button => button.text() === 'BG5BBB')
     expect(updatedCallsign?.classes()).toContain('text-emerald-400')
@@ -57,6 +57,38 @@ describe('record callsign editing', () => {
       body: JSON.stringify({ callsign: 'BG5BBB' }),
       method: 'PATCH',
     })
+    wrapper.unmount()
+  })
+
+  it('saves a manually reviewed callee callsign', async () => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      src = ''
+
+      load(): void {}
+      pause(): void {}
+      play(): Promise<void> { return Promise.resolve() }
+      removeAttribute(): void {}
+    })
+    const aiSegment = segment()
+    const reviewedSegment = { ...aiSegment, calleeCallsign: 'BG5BBB' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [aiSegment], page: 1, pageSize: 50, total: 1 }))
+      .mockResolvedValueOnce(jsonResponse(reviewedSegment))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    const callee = wrapper.findAll('button').find(button => button.text() === '—')
+    await callee!.trigger('click')
+    const editor = wrapper.get<HTMLInputElement>('input[aria-label="编辑被叫呼号"]')
+    await editor.setValue('BG5BBB')
+    await editor.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('BG5BBB')
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('/manual-callee-callsign')
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ body: JSON.stringify({ callsign: 'BG5BBB' }), method: 'PATCH' })
     wrapper.unmount()
   })
 
@@ -142,6 +174,34 @@ describe('record callsign editing', () => {
     wrapper.unmount()
   })
 
+  it('requests only manually reviewed callsigns when the manual scope is selected', async () => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      src = ''
+
+      load(): void {}
+      pause(): void {}
+      play(): Promise<void> { return Promise.resolve() }
+      removeAttribute(): void {}
+    })
+    const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(page))
+      .mockResolvedValueOnce(jsonResponse(page))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('BG5AAA')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('callsign=BG5AAA')
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('manualOnly=true')
+    wrapper.unmount()
+  })
+
   it('refreshes immediately after the page becomes visible when a refresh is overdue', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('Audio', class extends EventTarget {
@@ -178,6 +238,7 @@ describe('record callsign editing', () => {
 
 function segment(): PersistedSegment {
   return {
+    calleeCallsign: null,
     callsign: 'BG5AAA',
     capturedAt: new Date().toISOString(),
     corrected: null,

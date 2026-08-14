@@ -26,6 +26,7 @@ test('persists ASR and later LLM results in one row', () => {
   repository.insert('1900', segment)
 
   assert.deepEqual(repository.find(segment.id), {
+    calleeCallsign: null,
     callsign: null,
     capturedAt: segment.timestamp,
     corrected: segment.corrected,
@@ -85,6 +86,19 @@ test('manual review takes precedence without overwriting AI results', () => {
   const cleared = repository.find(segment.id)
   assert.equal(cleared?.effectiveCallsign, 'BG5XXX')
   assert.equal(cleared?.effectiveRiskLevel, 4)
+  repository.close()
+})
+
+test('persists a manually reviewed callee callsign without changing AI analysis', () => {
+  const repository = new SegmentRepository(':memory:')
+  const segment = record({ callsign: 'BG5AAA' })
+  repository.insert('1900', segment)
+  repository.updateAnalysis(segment)
+
+  assert.equal(repository.updateManualReview(segment.id, { calleeCallsign: 'BG5BBB' }), true)
+  const reviewed = repository.find(segment.id)
+  assert.equal(reviewed?.calleeCallsign, 'BG5BBB')
+  assert.equal(reviewed?.callsign, 'BG5AAA')
   repository.close()
 })
 
@@ -180,5 +194,21 @@ test('filters pages by exact effective callsign without case sensitivity', () =>
   assert.deepEqual(result.items.map(item => item.id), ['latest-match', 'first-match'])
   assert.equal(repository.list(1, 50, 'BG5BBB').items[0]?.id, 'overridden')
   assert.equal(repository.list(1, 50, 'BG5AA').total, 0)
+  repository.close()
+})
+
+test('filters manually reviewed callsigns independently from AI callsigns', () => {
+  const repository = new SegmentRepository(':memory:')
+  const aiOnly = record({ callsign: 'BG5AAA', id: 'ai-only', timestamp: '2026-08-10T12:00:00.000Z' })
+  const reviewed = record({ callsign: 'BG5AAA', id: 'reviewed', timestamp: '2026-08-11T12:00:00.000Z' })
+  for (const segment of [aiOnly, reviewed]) {
+    repository.insert('1900', segment)
+    repository.updateAnalysis(segment)
+  }
+  repository.updateManualReview(reviewed.id, { callsign: 'BG5BBB' })
+
+  assert.deepEqual(repository.list(1, 50, undefined, true).items.map(item => item.id), ['reviewed'])
+  assert.equal(repository.list(1, 50, 'BG5AAA', true).total, 0)
+  assert.equal(repository.list(1, 50, 'bg5bbb', true).items[0]?.id, 'reviewed')
   repository.close()
 })
