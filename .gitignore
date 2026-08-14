@@ -4,5 +4,4 @@ dist/
 *.log
 data/
 config/*
-!config/nodes.json
 .DS_Store

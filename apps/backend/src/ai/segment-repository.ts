@@ -184,7 +184,7 @@ export class SegmentRepository {
     return { items: rows.map(mapRow), page, pageSize, total }
   }
 
-  recentSpots(limit: number = 100): StoredSpot[] {
+  recentSpots(limit: number = 30): StoredSpot[] {
     if (!Number.isInteger(limit) || limit < 1)
       throw new Error('Spot limit must be a positive integer')
     const rows = this.database.prepare(`

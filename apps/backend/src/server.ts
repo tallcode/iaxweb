@@ -138,6 +138,7 @@ app.register(registerWebSocketRoutes, {
 
 app.register(registerStaticRoutes, {
   adminRoot: resolve(repositoryRoot, 'apps/admin/dist'),
+  nodeDefinitions,
   publicRoot: resolve(repositoryRoot, 'apps/public/dist'),
 })
 

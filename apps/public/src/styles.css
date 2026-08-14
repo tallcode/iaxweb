@@ -180,12 +180,12 @@ body {
   flex-direction: column;
   gap: 0.38rem;
   width: 14rem;
-  padding: 0.78rem 0.85rem;
+  padding: 0.73rem;
   border: 1px solid #354254;
-  border-radius: 0.9rem;
+  border-radius: 0.5rem;
   color: #e9eef6;
   background: linear-gradient(rgb(21 29 40 / 94%), rgb(21 29 40 / 94%)), #0b1017;
-  box-shadow: 0 0.8rem 2.2rem rgb(0 0 0 / 24%);
+  box-shadow: 0 0.73rem 2.2rem rgb(0 0 0 / 24%);
   transform: translate(-50%, -50%);
   transition:
     border-color 160ms ease,
@@ -590,12 +590,31 @@ body {
 }
 
 .spot-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   margin: 0;
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   color: #7dd3a8;
   text-transform: uppercase;
+}
+
+.spot-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: var(--sans, system-ui, sans-serif);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  cursor: help;
 }
 
 .spot-list {

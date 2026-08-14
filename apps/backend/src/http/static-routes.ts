@@ -1,8 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import type { NodeDefinitions } from '../allmon3/index.js'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import fastifyStatic from '@fastify/static'
 
 interface StaticRoutesOptions {
   adminRoot: string
+  nodeDefinitions?: NodeDefinitions
   publicRoot: string
 }
 
@@ -10,29 +15,91 @@ interface WildcardParams {
   '*': string
 }
 
+interface HtmlDocument {
+  content: string
+  etag: string
+}
+
+const HTML_CACHE_CONTROL = 'public, max-age=0, must-revalidate'
+const ONE_YEAR_MS = 31_536_000_000
+
 export async function registerStaticRoutes(app: FastifyInstance, options: StaticRoutesOptions): Promise<void> {
   await app.register(fastifyStatic, {
     root: options.publicRoot,
     serve: false,
   })
 
-  const sendPublicIndex = async (_request: FastifyRequest, reply: FastifyReply) =>
-    reply.header('cache-control', 'no-cache').sendFile('index.html', options.publicRoot)
+  const publicIndex = readFileSync(join(options.publicRoot, 'index.html'), 'utf8')
+  const publicIndexWithMetadata = injectRepeaterMetadata(publicIndex, options.nodeDefinitions)
+  const publicDocument = createHtmlDocument(publicIndexWithMetadata)
+  const sendPublicIndex = (request: FastifyRequest, reply: FastifyReply) =>
+    sendHtml(request, reply, publicDocument)
 
   app.get('/', sendPublicIndex)
   app.get('/map', sendPublicIndex)
   app.get('/map/', sendPublicIndex)
 
   app.get<{ Params: WildcardParams }>('/assets/*', async (request, reply) =>
-    reply.header('cache-control', 'no-cache').sendFile(`assets/${request.params['*']}`, options.publicRoot))
+    reply.sendFile(`assets/${request.params['*']}`, options.publicRoot, { immutable: true, maxAge: ONE_YEAR_MS }))
 
   app.get<{ Params: WildcardParams }>('/admin/assets/*', async (request, reply) =>
-    reply.header('cache-control', 'no-cache').sendFile(`assets/${request.params['*']}`, options.adminRoot))
+    reply.sendFile(`assets/${request.params['*']}`, options.adminRoot, { immutable: true, maxAge: ONE_YEAR_MS }))
 
-  const sendAdminIndex = async (_request: FastifyRequest, reply: FastifyReply) =>
-    reply.header('cache-control', 'no-cache').sendFile('index.html', options.adminRoot)
+  const adminIndex = readFileSync(join(options.adminRoot, 'index.html'), 'utf8')
+  const adminDocument = createHtmlDocument(adminIndex)
+  const sendAdminIndex = (request: FastifyRequest, reply: FastifyReply) => sendHtml(request, reply, adminDocument)
 
   app.get('/admin', sendAdminIndex)
   app.get('/admin/', sendAdminIndex)
   app.get('/admin/*', sendAdminIndex)
+}
+
+function sendHtml(request: FastifyRequest, reply: FastifyReply, document: HtmlDocument): FastifyReply {
+  reply.header('cache-control', HTML_CACHE_CONTROL).header('etag', document.etag)
+  if (matchesEtag(request.headers['if-none-match'], document.etag))
+    return reply.code(304).send()
+  return reply.type('text/html; charset=utf-8').send(document.content)
+}
+
+function createHtmlDocument(content: string): HtmlDocument {
+  return { content, etag: createEtag(content) }
+}
+
+function createEtag(content: string): string {
+  return `"${createHash('sha256').update(content).digest('base64url')}"`
+}
+
+function matchesEtag(value: string | undefined, etag: string): boolean {
+  return value?.split(',').some(candidate => candidate.trim() === '*' || candidate.trim() === etag) ?? false
+}
+
+function injectRepeaterMetadata(html: string, definitions: NodeDefinitions | undefined): string {
+  if (!definitions)
+    return html
+
+  const itemListElement = Object.values(definitions)
+    .filter((definition): definition is Required<Pick<NodeDefinitions[string], 'FREQ' | 'NAME'>> & NodeDefinitions[string] =>
+      definition.TYPE === 'REPEATER' && Boolean(definition.NAME) && Boolean(definition.FREQ))
+    .map((definition, index) => ({
+      '@type': 'ListItem',
+      item: {
+        '@type': 'Thing',
+        additionalProperty: {
+          '@type': 'PropertyValue',
+          name: 'FREQ',
+          value: definition.FREQ,
+        },
+        name: definition.NAME,
+      },
+      position: index + 1,
+    }))
+  if (itemListElement.length === 0)
+    return html
+
+  const metadata = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    itemListElement,
+  }).replaceAll('<', '\\u003c')
+  return html.replace('</head>', `    <script type="application/ld+json">${metadata}</script>\n  </head>`)
 }
