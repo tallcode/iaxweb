@@ -16,6 +16,7 @@ test('loads AI defaults', () => {
   assert.ok(config.databaseFile.endsWith('data/ai.sqlite'))
   assert.ok(config.recordingsDirectory.endsWith('data/rec'))
   assert.ok(config.adminFile.endsWith('config/admin.json'))
+  assert.ok(config.sessionsFile.endsWith('data/sessions.json'))
   assert.equal(config.llmEnabled, true)
   assert.equal(config.persistenceEnabled, false)
   assert.equal(config.llmEnableThinking, false)
@@ -39,6 +40,7 @@ test('loads custom AI settings', () => {
     AI_DATABASE_FILE: '/var/lib/iaxweb/ai.sqlite',
     AI_ADMIN_FILE: '/var/lib/iaxweb/admin.json',
     AI_RECORDINGS_DIR: '/var/lib/iaxweb/rec',
+    AI_SESSIONS_FILE: '/var/lib/iaxweb/sessions.json',
     AI_HOT_MIN_SEGMENT_MS: '1500',
     AI_MAX_SEGMENT_MS: '90000',
     DASHSCOPE_API_KEY: 'sk-test',
@@ -52,6 +54,7 @@ test('loads custom AI settings', () => {
   assert.equal(config.databaseFile, '/var/lib/iaxweb/ai.sqlite')
   assert.equal(config.adminFile, '/var/lib/iaxweb/admin.json')
   assert.equal(config.recordingsDirectory, '/var/lib/iaxweb/rec')
+  assert.equal(config.sessionsFile, '/var/lib/iaxweb/sessions.json')
 })
 
 test('normalizes the DashScope base URL', () => {

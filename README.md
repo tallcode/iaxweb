@@ -13,7 +13,8 @@
 
 ```text
 apps/backend/       HTTP、WebSocket、NATS、Allmon3 和 AI 服务
-apps/frontend/      Vue 单页应用、地图与管理页面
+apps/public/        公开拓扑 Vue 应用
+apps/admin/         独立管理后台 Vue 应用
 packages/contracts/ 前后端共享的 API 和 WebSocket TypeScript 类型
 config/             可热更新的 AI 提示词、schema、热词及呼号配置
 data/               SQLite、录音及其他可写运行数据
@@ -83,7 +84,7 @@ LLM 后处理：每条识别结果再调用文本模型，对识别文本做结�
 
 默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中同时预留 `manual_callsign`、`manual_risk_level`、`manual_note` 三个人工复核字段。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。
 
-`config/` 和 `data/` 都是宿主目录，整个目录均被 Git 和 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护，保存后下一次调用立即读取；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，只保存 SQLite、WAL 和录音。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
+`config/` 和 `data/` 都是宿主目录，整个目录均被 Git 和 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护，保存后下一次调用立即读取；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，保存 SQLite、WAL、录音和持久化的管理会话。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
 
 提示词与输出 schema 决定解析行为，有两套可选（每次调用前重新读取，保存后立即生效）：
 
@@ -148,6 +149,7 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 | `AI_DATABASE_FILE` | `data/ai.sqlite` | AI 识别与人工复核结果的 SQLite 文件路径 |
 | `AI_RECORDINGS_DIR` | 与数据库同级的 `rec` | 成功识别语音的 WAV 存储目录 |
 | `AI_ADMIN_FILE` | `config/admin.json` | 管理页面账号配置文件路径 |
+| `AI_SESSIONS_FILE` | `data/sessions.json` | 管理登录会话文件路径 |
 | `AI_HOTWORDS_FILE` | `config/hotwords.json` | 热词文件路径 |
 | `AI_BACKGROUND_FILE` | `config/background.txt` | 背景文本文件路径 |
 | `AI_LLM_ENABLED` | `true` | LLM 后处理开关 |
@@ -168,9 +170,9 @@ npm install
 npm run dev
 ```
 
-`npm run dev` 会同时启动后端和 Vite 开发服务器。打开 `http://localhost:5173` 查看实时节点拓扑；前端会把 `/api`、`/audio` 和 `/status` 代理到 `http://localhost:3000`。`/map` 仍作为兼容入口。
+`npm run dev` 会同时启动后端、公开端和管理端 Vite 开发服务器。打开 `http://localhost:5173` 查看实时节点拓扑，`http://localhost:5174/admin/` 查看管理端；两个应用都分别构建、分别开发。公开端将 `/api`、`/audio` 和 `/status` 代理到 `http://localhost:3000`，管理端只代理 `/api`。`/map` 仍作为兼容入口。
 
-也可以使用 `npm run dev:backend` 或 `npm run dev:frontend` 单独启动一个 workspace。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
+也可以使用 `npm run dev:backend`、`npm run dev:public` 或 `npm run dev:admin` 单独启动一个 workspace。节点展示 nodeId、名称、在线状态、本地/远程/系统发射状态以及本进程观察到的最近一次发射时间。
 
 根目录的 `nodes.json` 是地图的静态节点与链路配置。服务启动时会立即根据该文件生成默认离线状态，无需等待 Allmon3 返回；后续实时数据逐项覆盖默认值。`TYPE` 支持 `HUB` 和 `REPEATER`，`NAME` 保存节点短名称，`LINK` 声明允许显示的拓扑边，`FREQ` 保存中继频率信息；HUB 配置 `AUDIO: true` 时，地图节点会显示音频播放控件。
 
@@ -181,7 +183,7 @@ npm run build
 npm start
 ```
 
-生产构建输出到 `apps/frontend/dist`，由后端直接托管，因此现有单端口部署方式不变。
+生产构建分别输出到 `apps/public/dist` 与 `apps/admin/dist`，由后端按 `/` 和 `/admin/` 直接托管，因此现有单端口部署方式不变。
 
 反向代理需要允许 `/audio` 和 `/status` 的 WebSocket Upgrade。`GET /healthz` 可用于存活检查。
 
@@ -208,7 +210,7 @@ npm run hash-admin-password -- '替换为强密码'
 }
 ```
 
-登录会话仅保存在进程内存，服务重启后所有管理端登录都会失效。持久化启用时 `admin.json` 必须存在且格式正确；Compose 部署时它位于只读挂载的 `./config/admin.json`。
+登录会话保存在 `data/sessions.json`，首次启动会自动创建。每个会话有效期为 7 天；服务启动、登录、认证和登出时都会清理过期会话，服务重启后未过期的会话仍有效。文件仅保存随机 cookie token 的 SHA-256 哈希，不保存原始 token。持久化启用时 `admin.json` 必须存在且格式正确；Compose 部署时它位于只读挂载的 `./config/admin.json`。
 
 ## Docker
 

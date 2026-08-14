@@ -50,6 +50,7 @@ export interface AiConfig {
   model: string
   persistenceEnabled: boolean
   recordingsDirectory: string
+  sessionsFile: string
 }
 
 function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -224,6 +225,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     model,
     persistenceEnabled: persistenceEnabledText === 'true',
     recordingsDirectory,
+    sessionsFile: resolveProjectPath(optional(env, 'AI_SESSIONS_FILE') ?? 'data/sessions.json'),
   }
 }
 

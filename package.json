@@ -9,10 +9,11 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @iaxweb/frontend",
-    "dev": "concurrently -n backend,frontend -c cyan,magenta \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "npm run build --workspace @iaxweb/public && npm run build --workspace @iaxweb/admin",
+    "dev": "concurrently -n backend,public,admin -c cyan,magenta,yellow \"npm run dev:backend\" \"npm run dev:public\" \"npm run dev:admin\"",
     "dev:backend": "npm run dev --workspace @iaxweb/backend",
-    "dev:frontend": "npm run dev --workspace @iaxweb/frontend",
+    "dev:public": "npm run dev --workspace @iaxweb/public",
+    "dev:admin": "npm run dev --workspace @iaxweb/admin",
     "start": "npm run start --workspace @iaxweb/backend",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",

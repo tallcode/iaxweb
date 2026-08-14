@@ -2,7 +2,7 @@
   "1800": {
     "NAME": "嘉兴HUB",
     "TYPE": "HUB",
-    "AUDIO": true,
+    "AUDIO": false,
     "LINK": [
       "1801",
       "1802",
@@ -27,8 +27,8 @@
   "1900": {
     "NAME": "浙江HUB",
     "TYPE": "HUB",
-    "AUDIO": true,
-    "AI": true,
+    "AUDIO": false,
+    "AI": false,
     "LINK": [
       "1800",
       "1901",

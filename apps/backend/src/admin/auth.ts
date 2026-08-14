@@ -1,38 +1,103 @@
 import { Buffer } from 'node:buffer'
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 interface AdminUser {
   passwordHash: string
   username: string
 }
 
-// In-memory sessions deliberately disappear on restart. Password hashes use
-// scrypt$<base64 salt>$<base64 derived key> and never store cleartext values.
+interface StoredSession {
+  expiresAt: string
+  tokenHash: string
+  username: string
+}
+
+interface SessionFile {
+  sessions: StoredSession[]
+}
+
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000
+
 export class AdminAuth {
-  private readonly sessions = new Set<string>()
+  static readonly sessionMaxAgeSeconds = SESSION_MAX_AGE_MS / 1_000
+  private readonly sessions = new Map<string, StoredSession>()
   private readonly users: AdminUser[]
 
-  constructor(file: string) {
-    this.users = parseUsers(readFileSync(file, 'utf8'))
+  constructor(
+    usersFile: string,
+    private readonly sessionsFile: string,
+    private readonly now: () => Date = () => new Date(),
+  ) {
+    this.users = parseUsers(readFileSync(usersFile, 'utf8'))
+    this.loadSessions()
   }
 
   login(username: string, password: string): string | undefined {
+    this.removeExpiredSessions()
     const user = this.users.find(candidate => candidate.username === username)
     if (!user || !verifyPassword(password, user.passwordHash))
       return undefined
     const token = randomBytes(32).toString('base64url')
-    this.sessions.add(token)
+    const session: StoredSession = {
+      expiresAt: new Date(this.now().getTime() + SESSION_MAX_AGE_MS).toISOString(),
+      tokenHash: hashToken(token),
+      username,
+    }
+    this.sessions.set(session.tokenHash, session)
+    this.persistSessions()
     return token
   }
 
   logout(token: string | undefined): void {
-    if (token)
-      this.sessions.delete(token)
+    this.removeExpiredSessions()
+    if (token && this.sessions.delete(hashToken(token)))
+      this.persistSessions()
   }
 
   isAuthenticated(token: string | undefined): boolean {
-    return token !== undefined && this.sessions.has(token)
+    this.removeExpiredSessions()
+    return token !== undefined && this.sessions.has(hashToken(token))
+  }
+
+  private loadSessions(): void {
+    let text: string
+    try {
+      text = readFileSync(this.sessionsFile, 'utf8')
+    }
+    catch (error) {
+      if (isMissingFile(error)) {
+        this.persistSessions()
+        return
+      }
+      throw error
+    }
+    const { sessions } = parseSessionFile(text)
+    for (const session of sessions)
+      this.sessions.set(session.tokenHash, session)
+    this.removeExpiredSessions()
+  }
+
+  private removeExpiredSessions(): void {
+    const now = this.now().getTime()
+    let changed = false
+    for (const [tokenHash, session] of this.sessions) {
+      if (Date.parse(session.expiresAt) <= now) {
+        this.sessions.delete(tokenHash)
+        changed = true
+      }
+    }
+    if (changed)
+      this.persistSessions()
+  }
+
+  private persistSessions(): void {
+    mkdirSync(dirname(this.sessionsFile), { recursive: true })
+    const temporaryFile = `${this.sessionsFile}.tmp`
+    const content = JSON.stringify({ sessions: [...this.sessions.values()] }, undefined, 2).concat('\n')
+    writeFileSync(temporaryFile, content, { mode: 0o600 })
+    renameSync(temporaryFile, this.sessionsFile)
   }
 }
 
@@ -58,6 +123,33 @@ function parseUsers(text: string): AdminUser[] {
   if (users.length === 0)
     throw new Error('admin.json must contain at least one user')
   return users
+}
+
+function parseSessionFile(text: string): SessionFile {
+  const parsed = JSON.parse(text) as unknown
+  if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as { sessions?: unknown }).sessions))
+    throw new Error('sessions.json must contain a sessions array')
+  const sessions = (parsed as { sessions: unknown[] }).sessions.map((value) => {
+    if (typeof value !== 'object' || value === null)
+      throw new Error('sessions.json contains an invalid session')
+    const { expiresAt, tokenHash, username } = value as Record<string, unknown>
+    if (typeof expiresAt !== 'string' || Number.isNaN(Date.parse(expiresAt))
+      || typeof tokenHash !== 'string' || !/^[a-f0-9]{64}$/.test(tokenHash)
+      || typeof username !== 'string' || username.length === 0) {
+      throw new Error('sessions.json session is invalid')
+    }
+    return { expiresAt, tokenHash, username }
+  })
+  return { sessions }
+}
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === 'object' && error !== null
+    && 'code' in error && (error as { code?: unknown }).code === 'ENOENT'
 }
 
 function verifyPassword(password: string, encoded: string): boolean {

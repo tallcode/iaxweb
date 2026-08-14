@@ -25,7 +25,8 @@ import { startWebSocketHeartbeat } from './websocket-heartbeat.js'
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 loadEnv({ path: resolve(repositoryRoot, '.env'), quiet: true })
 const config = loadConfig()
-const publicRoot = resolve(repositoryRoot, 'apps/frontend/dist')
+const adminRoot = resolve(repositoryRoot, 'apps/admin/dist')
+const publicRoot = resolve(repositoryRoot, 'apps/public/dist')
 const nodesPath = resolve(repositoryRoot, 'nodes.json')
 const nodeDefinitions = parseNodeDefinitions(JSON.parse(readFileSync(nodesPath, 'utf8')) as unknown)
 const mimeTypes: Record<string, string> = {
@@ -55,7 +56,7 @@ const aiNodeIds = Object.entries(nodeDefinitions)
 if (aiNodeIds.length > 0 && !aiConfig.apiKey)
   throw new Error(`DASHSCOPE_API_KEY is required to enable AI for nodes: ${aiNodeIds.join(', ')}`)
 const segmentRepository = aiConfig.persistenceEnabled ? new SegmentRepository(aiConfig.databaseFile) : undefined
-const adminAuth = segmentRepository ? new AdminAuth(aiConfig.adminFile) : undefined
+const adminAuth = segmentRepository ? new AdminAuth(aiConfig.adminFile, aiConfig.sessionsFile) : undefined
 const spotStore = new SpotStore({
   createConnection: () => connect({
     ...createConnectionOptions(config.nats),
@@ -188,11 +189,17 @@ async function serveHttp(request: IncomingMessage, response: ServerResponse): Pr
     return
   }
 
-  const requested = ['/', '/map', '/map/', '/admin', '/admin/'].includes(decodedPath)
+  const isAdminRequest = decodedPath === '/admin' || decodedPath.startsWith('/admin/')
+  const staticRoot = isAdminRequest ? adminRoot : publicRoot
+  const requested = decodedPath === '/' || decodedPath === '/map' || decodedPath === '/map/'
     ? '/index.html'
-    : decodedPath
-  const filePath = resolve(publicRoot, `.${requested}`)
-  if (!filePath.startsWith(`${publicRoot}${sep}`)) {
+    : isAdminRequest
+      ? decodedPath.startsWith('/admin/assets/')
+        ? decodedPath.slice('/admin'.length)
+        : '/index.html'
+      : decodedPath
+  const filePath = resolve(staticRoot, `.${requested}`)
+  if (!filePath.startsWith(`${staticRoot}${sep}`)) {
     response.writeHead(404).end('Not Found')
     return
   }
@@ -227,7 +234,7 @@ async function serveAdminApi(request: IncomingMessage, response: ServerResponse,
       response.writeHead(401).end('Invalid username or password')
       return
     }
-    response.writeHead(204, { 'set-cookie': `admin_token=${issued}; HttpOnly; Path=/; SameSite=Strict` }).end()
+    response.writeHead(204, { 'set-cookie': `admin_token=${issued}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${AdminAuth.sessionMaxAgeSeconds}` }).end()
     return
   }
   if (url.pathname === '/api/admin/logout' && request.method === 'POST') {

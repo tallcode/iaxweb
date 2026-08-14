@@ -4,10 +4,12 @@ FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
-COPY apps/frontend/package.json apps/frontend/package.json
+COPY apps/admin/package.json apps/admin/package.json
+COPY apps/public/package.json apps/public/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 RUN npm ci
-COPY apps/frontend apps/frontend
+COPY apps/admin apps/admin
+COPY apps/public apps/public
 COPY packages/contracts packages/contracts
 COPY tsconfig.json ./
 RUN npm run build
@@ -16,7 +18,8 @@ FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
-COPY apps/frontend/package.json apps/frontend/package.json
+COPY apps/admin/package.json apps/admin/package.json
+COPY apps/public/package.json apps/public/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 RUN npm ci --omit=dev
 
@@ -36,7 +39,8 @@ COPY package.json tsconfig.json ./
 COPY apps/backend/package.json apps/backend/package.json
 COPY packages/contracts packages/contracts
 COPY apps/backend/src apps/backend/src
-COPY --from=build /app/apps/frontend/dist apps/frontend/dist
+COPY --from=build /app/apps/admin/dist apps/admin/dist
+COPY --from=build /app/apps/public/dist apps/public/dist
 COPY nodes.json ./
 
 USER node
