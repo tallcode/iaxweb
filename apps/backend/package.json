@@ -14,6 +14,7 @@
     "hash-admin-password": "tsx scripts/hash-admin-password.ts"
   },
   "dependencies": {
+    "@fastify/compress": "^9.2.0",
     "@fastify/cookie": "^11.1.2",
     "@fastify/static": "^10.1.3",
     "@fastify/websocket": "^11.3.0",

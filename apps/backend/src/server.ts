@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import fastifyCompress from '@fastify/compress'
 import fastifyCookie from '@fastify/cookie'
 import fastifyWebsocket from '@fastify/websocket'
 import { connect } from '@nats-io/transport-node'
@@ -97,6 +98,7 @@ const app = Fastify({
 })
 
 app.register(fastifyCookie)
+app.register(fastifyCompress)
 app.register(fastifyWebsocket, {
   errorHandler(error, socket, request) {
     request.log.error(error, 'WebSocket handler failed')
