@@ -23,6 +23,7 @@ const ONE_YEAR_MS = 31_536_000_000
 
 export async function registerStaticRoutes(app: FastifyInstance, options: StaticRoutesOptions): Promise<void> {
   await app.register(fastifyStatic, {
+    preCompressed: true,
     root: options.publicRoot,
     serve: false,
   })

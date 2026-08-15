@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import Fastify from 'fastify'
 import { registerStaticRoutes } from '../../src/http/static-routes.js'
 
@@ -16,6 +17,7 @@ test('serves both Fastify-hosted SPAs and keeps their assets isolated', async (c
   writeFileSync(join(publicRoot, 'index.html'), '<html><head></head><body>public app</body></html>')
   writeFileSync(join(adminRoot, 'index.html'), 'admin app')
   writeFileSync(join(publicRoot, 'assets', 'app.js'), 'public asset')
+  writeFileSync(join(publicRoot, 'assets', 'app.js.gz'), gzipSync('public asset'))
   writeFileSync(join(adminRoot, 'assets', 'app.js'), 'admin asset')
 
   const app = Fastify()
@@ -42,6 +44,13 @@ test('serves both Fastify-hosted SPAs and keeps their assets isolated', async (c
   const publicAsset = await app.inject('/assets/app.js')
   assert.equal(publicAsset.body, 'public asset')
   assert.equal(publicAsset.headers['cache-control'], 'public, max-age=31536000, immutable')
+  const compressedPublicAsset = await app.inject({
+    headers: { 'accept-encoding': 'gzip' },
+    url: '/assets/app.js',
+  })
+  assert.equal(compressedPublicAsset.headers['content-encoding'], 'gzip')
+  assert.equal(compressedPublicAsset.headers.vary, 'accept-encoding')
+  assert.equal(gunzipSync(compressedPublicAsset.rawPayload).toString(), 'public asset')
   const adminAsset = await app.inject('/admin/assets/app.js')
   assert.equal(adminAsset.body, 'admin asset')
   assert.equal(adminAsset.headers['cache-control'], 'public, max-age=31536000, immutable')

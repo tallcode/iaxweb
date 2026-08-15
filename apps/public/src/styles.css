@@ -194,7 +194,6 @@ body {
 .zhejiang-map {
   width: min(100%, 57rem);
   height: min(100%, 52rem);
-  filter: drop-shadow(0 1rem 1.8rem rgb(0 0 0 / 32%));
 }
 
 .county-shape {
@@ -234,6 +233,7 @@ body {
 .map-state {
   margin: 0;
   color: #96a4b7;
+  fill: #96a4b7;
   font-size: 0.82rem;
 }
 
