@@ -35,6 +35,17 @@ body {
   background: #0b1017;
 }
 
+.app-loading {
+  display: grid;
+  width: 100%;
+  height: var(--app-height);
+  padding: 1.25rem;
+  color: #96a4b7;
+  font-size: 0.82rem;
+  background: radial-gradient(circle at 50% 10%, rgb(37 59 85 / 28%), transparent 42%), #0b1017;
+  place-items: center;
+}
+
 .map-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 12.5rem;
@@ -185,19 +196,41 @@ body {
   position: relative;
   display: grid;
   min-height: 0;
-  padding: 1.15rem;
+  padding: 0;
   overflow: hidden;
   background: radial-gradient(circle at 50% 45%, rgb(50 103 109 / 20%), transparent 45%);
   place-items: center;
 }
 
 .zhejiang-map {
-  width: min(100%, 57rem);
-  height: min(100%, 52rem);
+  --maidenhead-grid-color: rgb(93 164 165 / 34%);
+
+  width: 100%;
+  height: 100%;
+}
+
+.maidenhead-grid {
+  stroke: var(--maidenhead-grid-color);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.maidenhead-grid-six {
+  stroke: rgb(93 164 165 / 6%);
+  stroke-width: 0.45;
+}
+
+.maidenhead-grid-labels {
+  fill: var(--maidenhead-grid-color);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  text-anchor: middle;
 }
 
 .county-shape {
   fill: #35404d;
+  fill-opacity: 0.86;
   stroke: #687789;
   stroke-width: 1.35;
   vector-effect: non-scaling-stroke;
@@ -590,10 +623,6 @@ body {
     gap: 0.28rem;
     width: 6rem;
     padding: 0.52rem 0.56rem;
-  }
-
-  .map-view {
-    padding: 0.7rem;
   }
 
   .node.has-audio {

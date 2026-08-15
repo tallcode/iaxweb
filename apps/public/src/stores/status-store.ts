@@ -8,6 +8,7 @@ const MAX_SPOTS = 100
 
 export const useStatusStore = defineStore('status', () => {
   const statusSnapshot = ref<PublicStatusSnapshot>({})
+  const hasInitialSnapshot = ref(false)
   const statusMessage = ref('正在连接状态服务…')
   const spotsById = ref(new Map<string, SpotEvent>())
   const currentTime = ref(Date.now())
@@ -40,6 +41,7 @@ export const useStatusStore = defineStore('status', () => {
       onOpen: () => statusMessage.value = '已连接，等待完整节点状态…',
       onSnapshot: (nextSnapshot) => {
         statusSnapshot.value = nextSnapshot
+        hasInitialSnapshot.value = true
         updateSummary()
         if (aiSpotEnabled.value && !hasLoadedSpotHistory) {
           hasLoadedSpotHistory = true
@@ -96,6 +98,7 @@ export const useStatusStore = defineStore('status', () => {
 
   return {
     aiSpotEnabled,
+    hasInitialSnapshot,
     recentSpots,
     startStatusStream,
     statusMessage,

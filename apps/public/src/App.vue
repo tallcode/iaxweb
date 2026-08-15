@@ -6,7 +6,7 @@ import { useTransmissionFavicon } from './composables/use-transmission-favicon'
 import { useStatusStore } from './stores/status-store'
 
 const statusStore = useStatusStore()
-const { aiSpotEnabled, recentSpots, statusMessage, statusSnapshot } = storeToRefs(statusStore)
+const { aiSpotEnabled, hasInitialSnapshot, recentSpots, statusMessage, statusSnapshot } = storeToRefs(statusStore)
 const isMobile = ref(false)
 let mobileMediaQuery: MediaQueryList | undefined
 
@@ -32,7 +32,10 @@ function updateMobileState(event: MediaQueryListEvent): void {
 </script>
 
 <template>
-  <div class="map-shell" :class="{ 'ai-spot-disabled': !aiSpotEnabled }">
+  <div v-if="!hasInitialSnapshot" class="app-loading" role="status">
+    {{ statusMessage }}
+  </div>
+  <div v-else class="map-shell" :class="{ 'ai-spot-disabled': !aiSpotEnabled }">
     <header class="map-header">
       <p class="m-0 text-[0.82rem] text-[#96a4b7] max-[680px]:whitespace-nowrap max-[680px]:text-[0.68rem]" aria-live="polite" :aria-label="statusMessage">
         {{ statusMessage }}
