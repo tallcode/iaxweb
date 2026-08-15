@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import type { NodeDefinitions } from '../allmon3/index.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -7,7 +6,6 @@ import fastifyStatic from '@fastify/static'
 
 interface StaticRoutesOptions {
   adminRoot: string
-  nodeDefinitions?: NodeDefinitions
   publicRoot: string
 }
 
@@ -30,8 +28,7 @@ export async function registerStaticRoutes(app: FastifyInstance, options: Static
   })
 
   const publicIndex = readFileSync(join(options.publicRoot, 'index.html'), 'utf8')
-  const publicIndexWithMetadata = injectRepeaterMetadata(publicIndex, options.nodeDefinitions)
-  const publicDocument = createHtmlDocument(publicIndexWithMetadata)
+  const publicDocument = createHtmlDocument(publicIndex)
   const sendPublicIndex = (request: FastifyRequest, reply: FastifyReply) =>
     sendHtml(request, reply, publicDocument)
 
@@ -71,35 +68,4 @@ function createEtag(content: string): string {
 
 function matchesEtag(value: string | undefined, etag: string): boolean {
   return value?.split(',').some(candidate => candidate.trim() === '*' || candidate.trim() === etag) ?? false
-}
-
-function injectRepeaterMetadata(html: string, definitions: NodeDefinitions | undefined): string {
-  if (!definitions)
-    return html
-
-  const itemListElement = Object.values(definitions)
-    .filter((definition): definition is Required<Pick<NodeDefinitions[string], 'FREQ' | 'NAME'>> & NodeDefinitions[string] =>
-      definition.TYPE === 'REPEATER' && Boolean(definition.NAME) && Boolean(definition.FREQ))
-    .map((definition, index) => ({
-      '@type': 'ListItem',
-      item: {
-        '@type': 'Thing',
-        additionalProperty: {
-          '@type': 'PropertyValue',
-          name: 'FREQ',
-          value: definition.FREQ,
-        },
-        name: definition.NAME,
-      },
-      position: index + 1,
-    }))
-  if (itemListElement.length === 0)
-    return html
-
-  const metadata = JSON.stringify({
-    '@context': 'https://schema.org',
-    '@type': 'ItemList',
-    itemListElement,
-  }).replaceAll('<', '\\u003c')
-  return html.replace('</head>', `    <script type="application/ld+json">${metadata}</script>\n  </head>`)
 }

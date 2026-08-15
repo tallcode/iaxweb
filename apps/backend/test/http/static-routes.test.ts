@@ -22,19 +22,12 @@ test('serves both Fastify-hosted SPAs and keeps their assets isolated', async (c
   context.after(() => app.close())
   await app.register(registerStaticRoutes, {
     adminRoot,
-    nodeDefinitions: {
-      hub: { NAME: '浙江 HUB', TYPE: 'HUB' },
-      repeater: { FREQ: '145.400MHz/-0.6MHz/TSQ88.5Hz', NAME: 'BR5AI', TYPE: 'REPEATER' },
-    },
     publicRoot,
   })
 
   const publicResponse = await app.inject('/')
   const publicIndex = publicResponse.body
-  assert.match(publicIndex, /<script type="application\/ld\+json">/)
-  assert.match(publicIndex, /"name":"BR5AI"/)
-  assert.match(publicIndex, /"value":"145\.400MHz\/-0\.6MHz\/TSQ88\.5Hz"/)
-  assert.doesNotMatch(publicIndex, /浙江 HUB/)
+  assert.doesNotMatch(publicIndex, /application\/ld\+json/)
   assert.equal(publicResponse.headers['cache-control'], 'public, max-age=0, must-revalidate')
   assert.ok(publicResponse.headers.etag)
   const notModified = await app.inject({

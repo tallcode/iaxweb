@@ -14,6 +14,7 @@ export const useStatusStore = defineStore('status', () => {
   let streamClient: StatusStreamClient | undefined
   let clockTimerId: ReturnType<typeof setInterval> | undefined
   let hasLoadedSpotHistory = false
+  let summaryIsMobile = false
 
   const aiSpotEnabled = computed(() => Object.values(statusSnapshot.value).some(node => node.AI === true))
   const recentSpots = computed(() => {
@@ -83,12 +84,14 @@ export const useStatusStore = defineStore('status', () => {
     }
   }
 
-  function updateSummary(isMobile = false): void {
+  function updateSummary(isMobile?: boolean): void {
+    if (isMobile !== undefined)
+      summaryIsMobile = isMobile
     const nodes = Object.values(statusSnapshot.value)
     const onlineCount = nodes.filter(node => node.ONLINE === true).length
     const transmittingCount = nodes.filter(node => node.TYPE !== 'HUB' && node.TX_SOURCE).length
     const fullSummary = `${nodes.length} 个节点 · ${onlineCount} 个在线 · ${transmittingCount} 个正在发射`
-    statusMessage.value = isMobile ? `${nodes.length}/${onlineCount}/${transmittingCount}` : fullSummary
+    statusMessage.value = summaryIsMobile ? `${nodes.length}/${onlineCount}/${transmittingCount}` : fullSummary
   }
 
   return {

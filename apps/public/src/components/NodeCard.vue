@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PublicNodeStatus, TransmitSource } from '@iaxweb/contracts'
 import type { AudioStreamPlayer } from '../services/audio-player'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { SpectrumMeter } from '../services/audio-player'
 
 const props = defineProps<{
@@ -12,6 +12,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  layoutChange: []
   register: [nodeId: string, element: HTMLElement | null]
 }>()
 
@@ -19,6 +20,12 @@ const cardElement = ref<HTMLElement | null>(null)
 const audioControlsElement = ref<HTMLElement | null>(null)
 const audioButton = ref<HTMLButtonElement | null>(null)
 let spectrumMeter: SpectrumMeter | undefined
+let collapseTimer: ReturnType<typeof setTimeout> | undefined
+let pointerDownAt = 0
+let activePointerId: number | undefined
+
+const TAP_MAXIMUM_MS = 250
+const TAP_VISIBLE_MINIMUM_MS = 2_000
 
 const isHub = computed(() => props.node.TYPE === 'HUB')
 const isOnline = computed(() => props.node.ONLINE === true)
@@ -27,7 +34,8 @@ const hasAudio = computed(() => isHub.value && props.node.AUDIO === true)
 const listenerCount = computed(() => Number.isInteger(props.node.LISTENERS) && (props.node.LISTENERS ?? 0) >= 0
   ? props.node.LISTENERS ?? 0
   : 0)
-const displayName = computed(() => props.isMobile
+const isExpanded = ref(false)
+const displayName = computed(() => props.isMobile && !isExpanded.value
   ? props.node.NAME || props.nodeId
   : props.node.DESC || props.node.NAME || props.nodeId)
 const cardClasses = computed(() => [
@@ -36,6 +44,7 @@ const cardClasses = computed(() => [
   isOnline.value ? 'online' : 'offline',
   transmitSource.value ? `tx-${transmitSource.value}` : '',
   hasAudio.value ? 'has-audio' : '',
+  isExpanded.value ? 'mobile-expanded' : '',
 ])
 const ariaLabel = computed(() => isHub.value
   ? `${props.nodeId} ${displayName.value}，HUB，${isOnline.value ? '在线' : '离线'}${hasAudio.value ? `，${listenerCount.value}人正在监听` : ''}`
@@ -51,11 +60,70 @@ const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
 
 onMounted(() => emit('register', props.nodeId, cardElement.value))
 onBeforeUnmount(() => {
+  clearCollapseTimer()
   emit('register', props.nodeId, null)
   spectrumMeter?.detach()
   if (props.audioPlayer.playingNodeId === props.nodeId)
     void props.audioPlayer.stop()
 })
+
+function expandForTouch(event: PointerEvent): void {
+  if (!props.isMobile || event.pointerType === 'mouse' || (event.target as HTMLElement).closest('button'))
+    return
+
+  clearCollapseTimer()
+  if (!isExpanded.value) {
+    setExpanded(true)
+  }
+  pointerDownAt = performance.now()
+  activePointerId = event.pointerId
+  const element = event.currentTarget as HTMLElement
+  element.setPointerCapture?.(event.pointerId)
+}
+
+function deferCollapse(event: PointerEvent): void {
+  if (!props.isMobile || !isExpanded.value || activePointerId !== event.pointerId)
+    return
+  const element = event.currentTarget as HTMLElement
+  if (element.hasPointerCapture?.(event.pointerId))
+    element.releasePointerCapture(event.pointerId)
+
+  activePointerId = undefined
+  const pressedFor = performance.now() - pointerDownAt
+  if (pressedFor > TAP_MAXIMUM_MS) {
+    setExpanded(false)
+    return
+  }
+
+  // A tap gets a brief, readable preview; a held touch closes at release.
+  collapseTimer = setTimeout(collapse, TAP_VISIBLE_MINIMUM_MS - pressedFor)
+}
+
+function clearCollapseTimer(): void {
+  if (collapseTimer)
+    clearTimeout(collapseTimer)
+  collapseTimer = undefined
+}
+
+function collapse(): void {
+  setExpanded(false)
+  collapseTimer = undefined
+}
+
+function setExpanded(value: boolean): void {
+  if (isExpanded.value === value)
+    return
+  isExpanded.value = value
+  void nextTick(() => emit('layoutChange'))
+}
+
+function cancelTouch(event: PointerEvent): void {
+  if (activePointerId !== event.pointerId)
+    return
+  activePointerId = undefined
+  clearCollapseTimer()
+  collapse()
+}
 
 async function toggleAudio(): Promise<void> {
   if (!audioControlsElement.value || !audioButton.value)
@@ -81,7 +149,16 @@ function transmitLabel(value: TransmitSource): string {
 </script>
 
 <template>
-  <article ref="cardElement" :class="cardClasses" :aria-label="ariaLabel">
+  <article
+    ref="cardElement"
+    :class="cardClasses"
+    :aria-expanded="isMobile ? isExpanded : undefined"
+    :aria-label="ariaLabel"
+    @pointercancel="cancelTouch"
+    @pointerdown="expandForTouch"
+    @pointerup="deferCollapse"
+    @contextmenu.prevent
+  >
     <p class="node-name">
       {{ displayName }}
     </p>

@@ -22,6 +22,7 @@ let mobileMediaQuery: MediaQueryList | undefined
 let resizeObserver: ResizeObserver | undefined
 let topologyHeight = 0
 let topologyWidth = 0
+let mobileRelayoutTimer: ReturnType<typeof setTimeout> | undefined
 
 const nodeIds = computed(() => Object.keys(statusSnapshot.value))
 const summaryLabel = computed(() => {
@@ -71,6 +72,8 @@ onBeforeUnmount(() => {
   statusStore.stopStatusStream()
   void audioPlayer.stop()
   transmissionFavicon?.setTransmitting(false)
+  if (mobileRelayoutTimer)
+    clearTimeout(mobileRelayoutTimer)
   resizeObserver?.disconnect()
   mobileMediaQuery?.removeEventListener('change', handleMobileBreakpointChange)
   window.removeEventListener('resize', syncViewportHeight)
@@ -119,6 +122,16 @@ function handleMobileBreakpointChange(event: MediaQueryListEvent): void {
   isMobile.value = event.matches
 }
 
+function scheduleMobileRelayout(): void {
+  if (mobileRelayoutTimer)
+    clearTimeout(mobileRelayoutTimer)
+  // Wait for the card's size transition so collision bounds use its final size.
+  mobileRelayoutTimer = setTimeout(() => {
+    mobileRelayoutTimer = undefined
+    topologyLayout?.relayout()
+  }, 240)
+}
+
 function syncViewportHeight(): void {
   const height = Math.floor(window.visualViewport?.height ?? window.innerHeight)
   document.documentElement.style.setProperty('--app-height', `${height}px`)
@@ -150,6 +163,7 @@ function syncViewportHeight(): void {
           :node-id="nodeId"
           :audio-player="audioPlayer"
           @register="registerNodeElement"
+          @layout-change="scheduleMobileRelayout"
         />
       </div>
       <p v-if="nodeIds.length === 0" class="empty-state">

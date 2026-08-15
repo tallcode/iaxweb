@@ -187,10 +187,15 @@ body {
   background: linear-gradient(rgb(21 29 40 / 94%), rgb(21 29 40 / 94%)), #0b1017;
   box-shadow: 0 0.73rem 2.2rem rgb(0 0 0 / 24%);
   transform: translate(-50%, -50%);
+  -webkit-touch-callout: none;
+  user-select: none;
   transition:
     border-color 160ms ease,
     background 160ms ease,
-    box-shadow 160ms ease;
+    box-shadow 160ms ease,
+    gap 220ms ease,
+    padding 220ms ease,
+    width 220ms ease;
 }
 
 .node.offline {
@@ -559,6 +564,99 @@ body {
 
   .node-state {
     gap: 0.3rem;
+  }
+
+  /* A held touch temporarily exposes the same information density as desktop. */
+  .node.mobile-expanded {
+    z-index: 1;
+    display: flex;
+    gap: 0.38rem;
+    width: min(14rem, calc(100vw - 2rem));
+    padding: 0.73rem;
+  }
+
+  .node.mobile-expanded.has-audio {
+    display: flex;
+    width: min(14rem, calc(100vw - 2rem));
+  }
+
+  .node.mobile-expanded .node-name {
+    font-size: 0.8rem;
+  }
+
+  .node.mobile-expanded .node-footer,
+  .node.mobile-expanded .node-details {
+    display: flex;
+  }
+
+  .node.mobile-expanded .node-footer {
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  .node.mobile-expanded .node-details {
+    flex: 1;
+    flex-direction: column;
+    gap: 0.28rem;
+    min-width: 0;
+  }
+
+  .node.mobile-expanded .node-meta {
+    display: flex;
+  }
+
+  .node.mobile-expanded .node-status time {
+    display: inline;
+  }
+
+  .node.mobile-expanded .node-status {
+    gap: 0.5rem;
+    font-size: 0.7rem;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  .node.mobile-expanded .online-label {
+    font-size: 0.7rem;
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .node.mobile-expanded .node-state {
+    gap: 0.55rem;
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .node.mobile-expanded .node-status time {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .node.mobile-expanded .node-audio {
+    align-self: stretch;
+  }
+
+  .node.mobile-expanded .listener-count {
+    display: inline-flex;
+  }
+
+  .node.mobile-expanded .node-audio.is-playing .spectrum {
+    display: flex;
+  }
+
+  .node.mobile-expanded .node-audio.is-playing .listener-count {
+    display: none;
+  }
+
+  .node.mobile-expanded .audio-toggle {
+    width: 1.8rem;
+    height: 1.8rem;
+    font-size: 0.58rem;
   }
 }
 
