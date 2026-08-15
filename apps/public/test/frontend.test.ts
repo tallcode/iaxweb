@@ -1,5 +1,7 @@
 import type { PublicStatusSnapshot } from '@iaxweb/contracts'
 import { describe, expect, it } from 'vitest'
+import { isFaviconTransmission } from '../src/composables/use-transmission-favicon'
+import { countyState, mapStates } from '../src/services/map-county-status'
 import { ReconnectingWebSocket } from '../src/services/reconnecting-websocket'
 import { markSnapshotOffline } from '../src/services/status-stream'
 import { buildTopologyEdges, createTopologySignature } from '../src/services/topology-graph'
@@ -102,5 +104,35 @@ describe('status models', () => {
       .toBe(createTopologySignature(['1901', '1900'], plannedEdges, false))
     expect(createTopologySignature(Object.keys(disconnected), plannedEdges, false))
       .toBe(createTopologySignature(Object.keys(fixedConnected), fixedConnectedEdges, false))
+  })
+})
+
+describe('transmission favicon', () => {
+  it('activates only for local and remote repeater transmission', () => {
+    expect(isFaviconTransmission({ TYPE: 'REPEATER', TX_SOURCE: 'local' })).toBe(true)
+    expect(isFaviconTransmission({ TYPE: 'REPEATER', TX_SOURCE: 'remote' })).toBe(true)
+    expect(isFaviconTransmission({ TYPE: 'REPEATER', TX_SOURCE: 'system' })).toBe(false)
+    expect(isFaviconTransmission({ TYPE: 'HUB', TX_SOURCE: 'local' })).toBe(false)
+    expect(isFaviconTransmission({ TYPE: 'REPEATER', TX_SOURCE: null })).toBe(false)
+  })
+})
+
+describe('map county states', () => {
+  it('uses city online state while keeping transmission state on its county', () => {
+    const states = mapStates({
+      1801: { GB: '156330481', ONLINE: true, TX_SOURCE: 'remote', TYPE: 'REPEATER' },
+      1802: { GB: '156330424', ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+      1803: { GB: '156330482', ONLINE: true, TX_SOURCE: 'system', TYPE: 'REPEATER' },
+      1901: { GB: '156330106', ONLINE: true, TX_SOURCE: null, TYPE: 'REPEATER' },
+      1902: { GB: '156330203', ONLINE: false, TX_SOURCE: 'system', TYPE: 'REPEATER' },
+      1903: { GB: '156330481', ONLINE: true, TX_SOURCE: 'local', TYPE: 'HUB' },
+    })
+
+    expect(countyState('156330481', states)).toBe('tx-remote')
+    expect(countyState('156330424', states)).toBe('tx-local')
+    expect(countyState('156330482', states)).toBe('tx-system')
+    expect(countyState('156330499', states)).toBe('online')
+    expect(countyState('156330106', states)).toBe('online')
+    expect(countyState('156330203', states)).toBe('offline')
   })
 })

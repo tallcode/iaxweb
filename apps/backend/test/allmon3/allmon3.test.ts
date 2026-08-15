@@ -16,7 +16,7 @@ import {
 
 const definitions: NodeDefinitions = {
   1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },
-  1901: { FREQ: '145.400MHz/-0.6MHz/TSQ88.5Hz', NAME: 'BR5AI', TYPE: 'REPEATER' },
+  1901: { FREQ: '145.400MHz/-0.6MHz/TSQ88.5Hz', GB: '156330106', NAME: 'BR5AI', TYPE: 'REPEATER' },
 }
 
 test('builds defaults immediately when live details are missing', () => {
@@ -31,6 +31,7 @@ test('builds defaults immediately when live details are missing', () => {
   assert.equal(snapshot['1901']?.ONLINE, false)
   assert.equal(snapshot['1901']?.TXKEYED, false)
   assert.equal(snapshot['1901']?.FREQ, '145.400MHz/-0.6MHz/TSQ88.5Hz')
+  assert.equal(snapshot['1901']?.GB, '156330106')
   assert.equal(snapshot['1901']?.NAME, 'BR5AI')
 })
 
@@ -54,13 +55,14 @@ test('builds a sorted snapshot and applies name overrides', () => {
 test('validates static node definitions', () => {
   assert.deepEqual(parseNodeDefinitions({
     1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },
-    1901: { NAME: 'BR5AI', TYPE: 'REPEATER' },
+    1901: { GB: '156330106', NAME: 'BR5AI', TYPE: 'REPEATER' },
   }), {
     1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },
-    1901: { NAME: 'BR5AI', TYPE: 'REPEATER' },
+    1901: { GB: '156330106', NAME: 'BR5AI', TYPE: 'REPEATER' },
   })
   assert.throws(() => parseNodeDefinitions({ 1900: { TYPE: 'UNKNOWN' } }), /TYPE HUB or REPEATER/)
   assert.throws(() => parseNodeDefinitions({ 1900: { NAME: 1900, TYPE: 'HUB' } }), /invalid NAME/)
+  assert.throws(() => parseNodeDefinitions({ 1900: { GB: '330100', TYPE: 'HUB' } }), /invalid GB/)
   assert.throws(() => parseNodeDefinitions({ 1900: { AUDIO: 'yes', TYPE: 'HUB' } }), /invalid AUDIO/)
 })
 
@@ -102,6 +104,7 @@ test('trims public status payloads without mutating full snapshots', () => {
       },
       DESC: '浙江 HUB',
       ERROR: null,
+      GB: '156330106',
       LAST_TX_AT: null,
       LINK: ['1901'],
       ME: 1900,
@@ -122,6 +125,7 @@ test('trims public status payloads without mutating full snapshots', () => {
         1901: { CSTATE: 'ESTABLISHED' },
       },
       DESC: '浙江 HUB',
+      GB: '156330106',
       LAST_TX_AT: null,
       LINK: ['1901'],
       ONLINE: true,

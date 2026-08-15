@@ -17,6 +17,9 @@ export function parseNodeDefinitions(value: unknown): NodeDefinitions {
     const freq = rawDefinition.FREQ
     if (freq !== undefined && typeof freq !== 'string')
       throw new Error(`config/nodes.json node ${node} has an invalid FREQ`)
+    const gb = rawDefinition.GB
+    if (gb !== undefined && (typeof gb !== 'string' || !/^156\d{6}$/.test(gb)))
+      throw new Error(`config/nodes.json node ${node} has an invalid GB`)
     const name = rawDefinition.NAME
     if (name !== undefined && typeof name !== 'string')
       throw new Error(`config/nodes.json node ${node} has an invalid NAME`)
@@ -35,6 +38,7 @@ export function parseNodeDefinitions(value: unknown): NodeDefinitions {
       ...(audio !== undefined ? { AUDIO: audio } : {}),
       ...(link ? { LINK: [...link] } : {}),
       ...(freq ? { FREQ: freq } : {}),
+      ...(gb ? { GB: gb } : {}),
       ...(name ? { NAME: name } : {}),
     }
   }

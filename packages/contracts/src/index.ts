@@ -11,6 +11,7 @@ export interface PublicNodeStatus {
   CONNS?: Record<string, PublicConnectionStatus>
   DESC?: string
   FREQ?: string
+  GB?: string
   LAST_TX_AT?: string | null
   LINK?: string[]
   LISTENERS?: number

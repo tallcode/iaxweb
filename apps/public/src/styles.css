@@ -97,6 +97,38 @@ body {
   font-size: 0.82rem;
 }
 
+.page-nav {
+  display: inline-flex;
+  flex: none;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border: 1px solid rgb(89 101 117 / 34%);
+  border-radius: 0.46rem;
+  background: rgb(255 255 255 / 3%);
+}
+
+.page-nav a {
+  padding: 0.28rem 0.55rem;
+  border-radius: 0.3rem;
+  color: #96a4b7;
+  font-size: 0.72rem;
+  line-height: 1;
+  text-decoration: none;
+  transition:
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.page-nav a:hover,
+.page-nav a:focus-visible {
+  color: #dce5ef;
+}
+
+.page-nav .router-link-active {
+  color: #c5e3e2;
+  background: #17383c;
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -146,6 +178,63 @@ body {
   position: relative;
   min-height: 0;
   overflow: hidden;
+}
+
+.map-view {
+  grid-area: topology;
+  position: relative;
+  display: grid;
+  min-height: 0;
+  padding: 1.15rem;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 45%, rgb(50 103 109 / 20%), transparent 45%);
+  place-items: center;
+}
+
+.zhejiang-map {
+  width: min(100%, 57rem);
+  height: min(100%, 52rem);
+  filter: drop-shadow(0 1rem 1.8rem rgb(0 0 0 / 32%));
+}
+
+.county-shape {
+  fill: #35404d;
+  stroke: #687789;
+  stroke-width: 1.35;
+  vector-effect: non-scaling-stroke;
+  transition:
+    fill 160ms ease,
+    stroke 160ms ease;
+}
+
+.county-shape.online {
+  fill: #215442;
+  stroke: #4bc88b;
+}
+
+.county-shape.tx-local {
+  fill: #614316;
+  stroke: #ffb44a;
+}
+
+.county-shape.tx-remote {
+  fill: #163c64;
+  stroke: #62a8ff;
+}
+
+.county-shape.tx-system {
+  fill: #44285f;
+  stroke: #ad78df;
+}
+
+.county-shape:hover {
+  filter: brightness(1.2);
+}
+
+.map-state {
+  margin: 0;
+  color: #96a4b7;
+  font-size: 0.82rem;
 }
 
 .topology::before {
@@ -476,6 +565,10 @@ body {
     white-space: nowrap;
   }
 
+  .page-nav {
+    display: none;
+  }
+
   .legend {
     flex-wrap: nowrap;
     justify-content: flex-end;
@@ -497,6 +590,10 @@ body {
     gap: 0.28rem;
     width: 6rem;
     padding: 0.52rem 0.56rem;
+  }
+
+  .map-view {
+    padding: 0.7rem;
   }
 
   .node.has-audio {

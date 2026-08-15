@@ -37,6 +37,7 @@ test('serves both Fastify-hosted SPAs and keeps their assets isolated', async (c
   assert.equal(notModified.statusCode, 304)
   assert.equal(notModified.body, '')
   assert.equal((await app.inject('/map')).body, publicIndex)
+  assert.equal((await app.inject('/topology')).body, publicIndex)
   assert.equal((await app.inject('/admin/reviews/one')).body, 'admin app')
   const publicAsset = await app.inject('/assets/app.js')
   assert.equal(publicAsset.body, 'public asset')

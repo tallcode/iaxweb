@@ -35,6 +35,8 @@ export async function registerStaticRoutes(app: FastifyInstance, options: Static
   app.get('/', sendPublicIndex)
   app.get('/map', sendPublicIndex)
   app.get('/map/', sendPublicIndex)
+  app.get('/topology', sendPublicIndex)
+  app.get('/topology/', sendPublicIndex)
 
   app.get<{ Params: WildcardParams }>('/assets/*', async (request, reply) =>
     reply.sendFile(`assets/${request.params['*']}`, options.publicRoot, { immutable: true, maxAge: ONE_YEAR_MS }))

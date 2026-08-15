@@ -64,6 +64,8 @@ function publicNodeStatus(status: NodeStatus, listeners?: number): PublicNodeSta
     publicStatus.DESC = status.DESC
   if (status.FREQ !== undefined)
     publicStatus.FREQ = status.FREQ
+  if (status.GB !== undefined)
+    publicStatus.GB = status.GB
   if (status.LAST_TX_AT !== undefined)
     publicStatus.LAST_TX_AT = status.LAST_TX_AT
   if (status.LINK !== undefined)
@@ -113,6 +115,7 @@ function definitionFields(definition?: NodeDefinition): NodeStatus {
     LINK: definition?.LINK ?? [],
     TYPE: definition?.TYPE ?? 'REPEATER',
     ...(definition?.FREQ ? { FREQ: definition.FREQ } : {}),
+    ...(definition?.GB ? { GB: definition.GB } : {}),
     ...(definition?.NAME ? { NAME: definition.NAME } : {}),
   }
 }

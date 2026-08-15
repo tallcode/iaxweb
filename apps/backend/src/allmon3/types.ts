@@ -9,6 +9,7 @@ export interface NodeDefinition {
   AI?: boolean
   AUDIO?: boolean
   FREQ?: string
+  GB?: string
   LINK?: string[]
   NAME?: string
   TYPE: NodeType
@@ -24,6 +25,7 @@ export interface NodeStatusFields {
   DESC: string
   ERROR: string | null
   FREQ: string
+  GB: string
   LAST_TX_AT: string | null
   LINK: string[]
   ME: number
