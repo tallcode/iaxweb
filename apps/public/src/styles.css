@@ -36,14 +36,21 @@ body {
 }
 
 .app-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
   display: grid;
   width: 100%;
-  height: var(--app-height);
   padding: 1.25rem;
   color: #96a4b7;
   font-size: 0.82rem;
   background: radial-gradient(circle at 50% 10%, rgb(37 59 85 / 28%), transparent 42%), #0b1017;
   place-items: center;
+}
+
+.map-shell.app-pending {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .map-shell {
@@ -256,6 +263,29 @@ body {
 
 .county-shape.tx-system {
   fill: #44285f;
+  stroke: #ad78df;
+}
+
+.county-outline {
+  fill: none;
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.county-outline.online {
+  stroke: #4bc88b;
+}
+
+.county-outline.tx-local {
+  stroke: #ffb44a;
+}
+
+.county-outline.tx-remote {
+  stroke: #62a8ff;
+}
+
+.county-outline.tx-system {
   stroke: #ad78df;
 }
 

@@ -8,7 +8,8 @@ import { TopologyLayout } from '../services/topology-layout'
 import { useStatusStore } from '../stores/status-store'
 
 const statusStore = useStatusStore()
-const { statusSnapshot } = storeToRefs(statusStore)
+const { hasInitialSnapshot, statusSnapshot } = storeToRefs(statusStore)
+const emit = defineEmits<{ pageReady: [] }>()
 const topologyElement = ref<HTMLElement | null>(null)
 const edgeCanvas = ref<HTMLCanvasElement | null>(null)
 const isMobile = ref(false)
@@ -20,6 +21,7 @@ let resizeObserver: ResizeObserver | undefined
 let topologyHeight = 0
 let topologyWidth = 0
 let mobileRelayoutTimer: ReturnType<typeof setTimeout> | undefined
+let hasReportedInitialLayout = false
 
 const nodeIds = computed(() => Object.keys(statusSnapshot.value))
 
@@ -97,6 +99,11 @@ async function updateTopologyGraph(): Promise<void> {
   ids.forEach((nodeId, index) => topologyLayout?.ensureNode(nodeId, index, ids.length))
   const edges = buildTopologyEdges(statusSnapshot.value)
   topologyLayout.updateGraph(edges, createTopologySignature(ids, edges, isMobile.value))
+  if (hasInitialSnapshot.value && !hasReportedInitialLayout) {
+    await nextTick()
+    hasReportedInitialLayout = true
+    emit('pageReady')
+  }
 }
 
 function handleMobileBreakpointChange(event: MediaQueryListEvent): void {

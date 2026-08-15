@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import SpotPanel from './components/SpotPanel.vue'
 import { useTransmissionFavicon } from './composables/use-transmission-favicon'
 import { useStatusStore } from './stores/status-store'
 
 const statusStore = useStatusStore()
 const { aiSpotEnabled, hasInitialSnapshot, recentSpots, statusMessage, statusSnapshot } = storeToRefs(statusStore)
+const route = useRoute()
 const isMobile = ref(false)
+const isPageReady = ref(false)
+const isAppReady = computed(() => hasInitialSnapshot.value && isPageReady.value)
 let mobileMediaQuery: MediaQueryList | undefined
 
 useTransmissionFavicon(statusSnapshot)
@@ -25,17 +29,22 @@ onBeforeUnmount(() => {
   mobileMediaQuery?.removeEventListener('change', updateMobileState)
 })
 
+watch(() => route.fullPath, () => {
+  isPageReady.value = false
+})
+
 function updateMobileState(event: MediaQueryListEvent): void {
   isMobile.value = event.matches
   statusStore.updateSummary(isMobile.value)
 }
+
+function markPageReady(): void {
+  isPageReady.value = true
+}
 </script>
 
 <template>
-  <div v-if="!hasInitialSnapshot" class="app-loading" role="status">
-    {{ statusMessage }}
-  </div>
-  <div v-else class="map-shell" :class="{ 'ai-spot-disabled': !aiSpotEnabled }">
+  <div class="map-shell" :class="{ 'ai-spot-disabled': !aiSpotEnabled, 'app-pending': !isAppReady }">
     <header class="map-header">
       <p class="m-0 text-[0.82rem] text-[#96a4b7] max-[680px]:whitespace-nowrap max-[680px]:text-[0.68rem]" aria-live="polite" :aria-label="statusMessage">
         {{ statusMessage }}
@@ -56,10 +65,15 @@ function updateMobileState(event: MediaQueryListEvent): void {
         <span><i class="dot system" />系统发射</span>
       </div>
     </header>
-    <RouterView />
+    <RouterView v-slot="{ Component }">
+      <component :is="Component" @page-ready="markPageReady" />
+    </RouterView>
     <SpotPanel v-if="aiSpotEnabled" :spots="recentSpots" />
     <footer class="site-footer">
       <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">浙ICP备20025327号-6</a>
     </footer>
+  </div>
+  <div v-if="!isAppReady" class="app-loading" role="status">
+    {{ statusMessage }}
   </div>
 </template>

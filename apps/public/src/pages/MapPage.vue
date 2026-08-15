@@ -24,6 +24,8 @@ interface CountyShape {
   path: string
 }
 
+const emit = defineEmits<{ pageReady: [] }>()
+
 // Keep the viewport aligned to whole four-character Maidenhead squares so no
 // partial grids appear along the SVG edges.
 const GRID_LONGITUDE_STEP = 2
@@ -43,6 +45,8 @@ const countyShapes = ref<CountyShape[]>([])
 const loadFailed = ref(false)
 const { statusSnapshot } = storeToRefs(useStatusStore())
 const states = computed(() => mapStates(statusSnapshot.value))
+const onlineCountyShapes = computed(() => countyShapes.value.filter(county => stateFor(county.gb) === 'online'))
+const transmittingCountyShapes = computed(() => countyShapes.value.filter(county => stateFor(county.gb).startsWith('tx-')))
 const sixDigitGridPaths = createGridPaths(SIX_DIGIT_LONGITUDE_STEP, SIX_DIGIT_LATITUDE_STEP)
 const gridPaths = createGridPaths()
 const gridLabels = createGridLabels()
@@ -57,6 +61,9 @@ onMounted(async () => {
   }
   catch {
     loadFailed.value = true
+  }
+  finally {
+    emit('pageReady')
   }
 })
 
@@ -198,6 +205,12 @@ function maidenheadGrid([longitude, latitude]: Position): string {
       <path v-for="county in countyShapes" :key="county.gb" class="county-shape" :class="stateFor(county.gb)" :d="county.path" fill-rule="evenodd">
         <title>{{ county.name }}</title>
       </path>
+      <g class="county-outlines" aria-hidden="true">
+        <path v-for="county in onlineCountyShapes" :key="county.gb" class="county-outline" :class="stateFor(county.gb)" :d="county.path" fill="none" fill-rule="evenodd" />
+      </g>
+      <g class="county-outlines county-transmission-outlines" aria-hidden="true">
+        <path v-for="county in transmittingCountyShapes" :key="county.gb" class="county-outline" :class="stateFor(county.gb)" :d="county.path" fill="none" fill-rule="evenodd" />
+      </g>
       <g class="maidenhead-grid-labels" aria-label="Maidenhead 四位网格文字" aria-hidden="true">
         <text v-for="label in gridLabels" :key="label.grid" :x="label.position[0]" :y="label.position[1]">
           {{ label.grid }}
