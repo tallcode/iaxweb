@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { SpotEvent } from '@iaxweb/contracts'
 
-defineProps<{ spots: SpotEvent[] }>()
+defineProps<{ historyReady: boolean, spots: SpotEvent[] }>()
 
 function relativeTime(iso: string): string {
   const then = new Date(iso)
@@ -35,7 +35,7 @@ function relativeTime(iso: string): string {
         <time class="spot-time" :datetime="spot.at">{{ relativeTime(spot.at) }}</time>
       </li>
     </ul>
-    <p v-else class="spot-empty">
+    <p v-else-if="historyReady" class="spot-empty">
       暂无呼号
     </p>
   </aside>

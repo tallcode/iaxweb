@@ -42,7 +42,7 @@ const NORTH = 32
 const STORAGE_KEY = `zhejiang-map:${zhejiangUrl}`
 
 const countyShapes = ref<CountyShape[]>([])
-const loadFailed = ref(false)
+const mapLoadState = ref<'failed' | 'loading' | 'ready'>('loading')
 const { statusSnapshot } = storeToRefs(useStatusStore())
 const states = computed(() => mapStates(statusSnapshot.value))
 const onlineCountyShapes = computed(() => countyShapes.value.filter(county => stateFor(county.gb) === 'online'))
@@ -56,11 +56,12 @@ onMounted(async () => {
     const cached = loadFromStorage()
     const data = cached ?? await loadFromNetwork()
     countyShapes.value = shapesFrom(data)
+    mapLoadState.value = 'ready'
     if (!cached)
       saveToStorage(data)
   }
   catch {
-    loadFailed.value = true
+    mapLoadState.value = 'failed'
   }
   finally {
     emit('pageReady')
@@ -216,8 +217,11 @@ function maidenheadGrid([longitude, latitude]: Position): string {
           {{ label.grid }}
         </text>
       </g>
-      <text v-if="!countyShapes.length" class="map-state" :x="MAP_WIDTH / 2" :y="MAP_HEIGHT / 2" text-anchor="middle">
-        {{ loadFailed ? '地图数据加载失败' : '正在加载浙江省地图…' }}
+      <text v-if="mapLoadState === 'failed'" class="map-state" :x="MAP_WIDTH / 2" :y="MAP_HEIGHT / 2" text-anchor="middle">
+        地图数据加载失败
+      </text>
+      <text v-else-if="mapLoadState === 'ready' && !countyShapes.length" class="map-state" :x="MAP_WIDTH / 2" :y="MAP_HEIGHT / 2" text-anchor="middle">
+        暂无地图数据
       </text>
     </svg>
   </main>

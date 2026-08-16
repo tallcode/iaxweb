@@ -141,8 +141,8 @@ function syncViewportHeight(): void {
         @layout-change="scheduleMobileRelayout"
       />
     </div>
-    <p v-if="nodeIds.length === 0" class="empty-state">
-      等待完整节点状态…
+    <p v-if="hasInitialSnapshot && nodeIds.length === 0" class="empty-state">
+      暂无节点数据
     </p>
   </main>
 </template>

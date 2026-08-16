@@ -12,10 +12,11 @@ export const useStatusStore = defineStore('status', () => {
   const hasInitialSnapshot = ref(false)
   const connectionState = ref<StatusConnectionState>('connecting')
   const spotsById = ref(new Map<string, SpotEvent>())
+  const spotHistoryReady = ref(false)
   const currentTime = ref(Date.now())
   let streamClient: StatusStreamClient | undefined
   let clockTimerId: ReturnType<typeof setInterval> | undefined
-  let hasLoadedSpotHistory = false
+  let hasStartedSpotHistoryLoad = false
 
   const aiSpotEnabled = computed(() => Object.values(statusSnapshot.value).some(node => node.AI === true))
   const repeaterSummary = computed<RepeaterSummary>(() => {
@@ -52,8 +53,8 @@ export const useStatusStore = defineStore('status', () => {
         statusSnapshot.value = nextSnapshot
         hasInitialSnapshot.value = true
         connectionState.value = 'ready'
-        if (aiSpotEnabled.value && !hasLoadedSpotHistory) {
-          hasLoadedSpotHistory = true
+        if (aiSpotEnabled.value && !hasStartedSpotHistoryLoad) {
+          hasStartedSpotHistoryLoad = true
           void loadSpotHistory()
         }
       },
@@ -93,6 +94,9 @@ export const useStatusStore = defineStore('status', () => {
     catch {
       // Live status remains usable when optional history is unavailable.
     }
+    finally {
+      spotHistoryReady.value = true
+    }
   }
 
   return {
@@ -101,6 +105,7 @@ export const useStatusStore = defineStore('status', () => {
     hasInitialSnapshot,
     recentSpots,
     repeaterSummary,
+    spotHistoryReady,
     startStatusStream,
     statusSnapshot,
     stopStatusStream,
