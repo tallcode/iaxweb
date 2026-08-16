@@ -1,4 +1,5 @@
 import type { PublicStatusSnapshot, SpotEvent } from '@iaxweb/contracts'
+import type { RepeaterSummary, StatusConnectionState } from '../services/status-presentation'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { markSnapshotOffline, StatusStreamClient } from '../services/status-stream'
@@ -9,15 +10,22 @@ const MAX_SPOTS = 100
 export const useStatusStore = defineStore('status', () => {
   const statusSnapshot = ref<PublicStatusSnapshot>({})
   const hasInitialSnapshot = ref(false)
-  const statusMessage = ref('正在连接状态服务…')
+  const connectionState = ref<StatusConnectionState>('connecting')
   const spotsById = ref(new Map<string, SpotEvent>())
   const currentTime = ref(Date.now())
   let streamClient: StatusStreamClient | undefined
   let clockTimerId: ReturnType<typeof setInterval> | undefined
   let hasLoadedSpotHistory = false
-  let summaryIsMobile = false
 
   const aiSpotEnabled = computed(() => Object.values(statusSnapshot.value).some(node => node.AI === true))
+  const repeaterSummary = computed<RepeaterSummary>(() => {
+    const repeaters = Object.values(statusSnapshot.value).filter(node => node.TYPE === 'REPEATER')
+    return {
+      online: repeaters.filter(node => node.ONLINE === true).length,
+      total: repeaters.length,
+      transmitting: repeaters.filter(node => node.TX_SOURCE).length,
+    }
+  })
   const recentSpots = computed(() => {
     void currentTime.value
     const newestByCallsign = new Map<string, SpotEvent>()
@@ -34,15 +42,16 @@ export const useStatusStore = defineStore('status', () => {
   function startStatusStream(): void {
     if (streamClient)
       return
+    connectionState.value = 'connecting'
     streamClient = new StatusStreamClient({
-      onConnecting: () => statusMessage.value = '状态服务已断开，正在重连…',
+      onConnecting: () => connectionState.value = 'reconnecting',
       onExpired: () => statusSnapshot.value = markSnapshotOffline(statusSnapshot.value),
-      onInvalidMessage: () => statusMessage.value = '收到无法解析的状态数据',
-      onOpen: () => statusMessage.value = '已连接，等待完整节点状态…',
+      onInvalidMessage: () => connectionState.value = 'invalid-data',
+      onOpen: () => connectionState.value = 'waiting-snapshot',
       onSnapshot: (nextSnapshot) => {
         statusSnapshot.value = nextSnapshot
         hasInitialSnapshot.value = true
-        updateSummary()
+        connectionState.value = 'ready'
         if (aiSpotEnabled.value && !hasLoadedSpotHistory) {
           hasLoadedSpotHistory = true
           void loadSpotHistory()
@@ -86,24 +95,14 @@ export const useStatusStore = defineStore('status', () => {
     }
   }
 
-  function updateSummary(isMobile?: boolean): void {
-    if (isMobile !== undefined)
-      summaryIsMobile = isMobile
-    const nodes = Object.values(statusSnapshot.value).filter(node => node.TYPE !== 'HUB')
-    const onlineCount = nodes.filter(node => node.ONLINE === true).length
-    const transmittingCount = nodes.filter(node => node.TYPE !== 'HUB' && node.TX_SOURCE).length
-    const fullSummary = `${nodes.length} 个节点 · ${onlineCount} 个在线 · ${transmittingCount} 个正在发射`
-    statusMessage.value = summaryIsMobile ? `${nodes.length}/${onlineCount}/${transmittingCount}` : fullSummary
-  }
-
   return {
     aiSpotEnabled,
+    connectionState,
     hasInitialSnapshot,
     recentSpots,
+    repeaterSummary,
     startStatusStream,
-    statusMessage,
     statusSnapshot,
     stopStatusStream,
-    updateSummary,
   }
 })

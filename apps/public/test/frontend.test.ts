@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { isFaviconTransmission } from '../src/composables/use-transmission-favicon'
 import { countyState, mapStates } from '../src/services/map-county-status'
 import { ReconnectingWebSocket } from '../src/services/reconnecting-websocket'
+import { formatRepeaterSummary, headerStatusMessage, loadingStatusMessage } from '../src/services/status-presentation'
 import { markSnapshotOffline } from '../src/services/status-stream'
-import { useStatusStore } from '../src/stores/status-store'
 import { buildTopologyEdges, createTopologySignature } from '../src/services/topology-graph'
+import { useStatusStore } from '../src/stores/status-store'
 
 class FakeSocket extends EventTarget {
   binaryType: BinaryType = 'blob'
@@ -61,10 +62,19 @@ describe('status models', () => {
       1900: { ONLINE: true, TX_SOURCE: null, TYPE: 'HUB' },
     }
 
-    store.updateSummary()
-    expect(store.statusMessage).toBe('2 个节点 · 1 个在线 · 1 个正在发射')
-    store.updateSummary(true)
-    expect(store.statusMessage).toBe('2/1/1')
+    expect(store.repeaterSummary).toEqual({ online: 1, total: 2, transmitting: 1 })
+    expect(formatRepeaterSummary(store.repeaterSummary, false)).toBe('2 个节点 · 1 个在线 · 1 个正在发射')
+    expect(formatRepeaterSummary(store.repeaterSummary, true)).toBe('2/1/1')
+  })
+
+  it('keeps loading lifecycle messages separate from the node summary', () => {
+    const summary = { online: 4, total: 5, transmitting: 1 }
+
+    expect(loadingStatusMessage('connecting', false, false)).toBe('正在连接状态服务…')
+    expect(loadingStatusMessage('waiting-snapshot', false, true)).toBe('已连接，等待完整节点状态…')
+    expect(loadingStatusMessage('ready', true, false)).toBe('正在准备页面…')
+    expect(headerStatusMessage('ready', summary, false)).toBe('5 个节点 · 4 个在线 · 1 个正在发射')
+    expect(headerStatusMessage('reconnecting', summary, false)).toBe('状态服务已断开，正在重连…')
   })
 
   it('keeps static metadata and clears live fields after expiry', () => {

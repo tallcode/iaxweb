@@ -7,9 +7,9 @@ import { buildTopologyEdges, createTopologySignature } from '../services/topolog
 import { TopologyLayout } from '../services/topology-layout'
 import { useStatusStore } from '../stores/status-store'
 
+const emit = defineEmits<{ pageReady: [] }>()
 const statusStore = useStatusStore()
 const { hasInitialSnapshot, statusSnapshot } = storeToRefs(statusStore)
-const emit = defineEmits<{ pageReady: [] }>()
 const topologyElement = ref<HTMLElement | null>(null)
 const edgeCanvas = ref<HTMLCanvasElement | null>(null)
 const isMobile = ref(false)
