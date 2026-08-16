@@ -12,6 +12,7 @@ const route = useRoute()
 const isMobile = ref(false)
 const isPageReady = ref(false)
 const isAppReady = computed(() => hasInitialSnapshot.value && isPageReady.value)
+const loadingMessage = computed(() => hasInitialSnapshot.value ? '正在准备页面…' : statusMessage.value)
 let mobileMediaQuery: MediaQueryList | undefined
 
 useTransmissionFavicon(statusSnapshot)
@@ -74,6 +75,6 @@ function markPageReady(): void {
     </footer>
   </div>
   <div v-if="!isAppReady" class="app-loading" role="status">
-    {{ statusMessage }}
+    {{ loadingMessage }}
   </div>
 </template>

@@ -1,9 +1,11 @@
 import type { PublicStatusSnapshot } from '@iaxweb/contracts'
-import { describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { isFaviconTransmission } from '../src/composables/use-transmission-favicon'
 import { countyState, mapStates } from '../src/services/map-county-status'
 import { ReconnectingWebSocket } from '../src/services/reconnecting-websocket'
 import { markSnapshotOffline } from '../src/services/status-stream'
+import { useStatusStore } from '../src/stores/status-store'
 import { buildTopologyEdges, createTopologySignature } from '../src/services/topology-graph'
 
 class FakeSocket extends EventTarget {
@@ -49,6 +51,22 @@ describe('reconnecting WebSocket', () => {
 })
 
 describe('status models', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('counts only repeaters in the status summary', () => {
+    const store = useStatusStore()
+    store.statusSnapshot = {
+      1800: { ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+      1801: { ONLINE: false, TX_SOURCE: null, TYPE: 'REPEATER' },
+      1900: { ONLINE: true, TX_SOURCE: null, TYPE: 'HUB' },
+    }
+
+    store.updateSummary()
+    expect(store.statusMessage).toBe('2 个节点 · 1 个在线 · 1 个正在发射')
+    store.updateSummary(true)
+    expect(store.statusMessage).toBe('2/1/1')
+  })
+
   it('keeps static metadata and clears live fields after expiry', () => {
     const expired = markSnapshotOffline({
       1900: {

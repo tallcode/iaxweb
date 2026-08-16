@@ -89,7 +89,7 @@ export const useStatusStore = defineStore('status', () => {
   function updateSummary(isMobile?: boolean): void {
     if (isMobile !== undefined)
       summaryIsMobile = isMobile
-    const nodes = Object.values(statusSnapshot.value)
+    const nodes = Object.values(statusSnapshot.value).filter(node => node.TYPE !== 'HUB')
     const onlineCount = nodes.filter(node => node.ONLINE === true).length
     const transmittingCount = nodes.filter(node => node.TYPE !== 'HUB' && node.TX_SOURCE).length
     const fullSummary = `${nodes.length} 个节点 · ${onlineCount} 个在线 · ${transmittingCount} 个正在发射`
