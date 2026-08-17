@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { isFaviconTransmission } from '../src/composables/use-transmission-favicon'
 import { countyState, mapStates } from '../src/services/map-county-status'
+import { MAP_MAX_ZOOM, mapViewBox, panMapViewport, zoomMapViewport, zoomMapViewportTowardCenter } from '../src/services/map-viewport'
 import { ReconnectingWebSocket } from '../src/services/reconnecting-websocket'
 import { formatRepeaterSummary } from '../src/services/status-presentation'
 import { markSnapshotOffline } from '../src/services/status-stream'
@@ -122,6 +123,58 @@ describe('status models', () => {
       .toBe(createTopologySignature(['1901', '1900'], plannedEdges, false))
     expect(createTopologySignature(Object.keys(disconnected), plannedEdges, false))
       .toBe(createTopologySignature(Object.keys(fixedConnected), fixedConnectedEdges, false))
+  })
+})
+
+describe('map viewport', () => {
+  it('zooms around the pointer and clamps between the map bounds and 10x', () => {
+    const centered = zoomMapViewport({ x: 0, y: 0, zoom: 1 }, 672, 420, 2, 1344, 840)
+    expect(centered).toEqual({ x: 336, y: 210, zoom: 2 })
+    expect(mapViewBox(centered, 1344, 840)).toBe('336 210 672 420')
+
+    const maximum = zoomMapViewport(centered, 672, 420, 100, 1344, 840)
+    expect(maximum.zoom).toBe(MAP_MAX_ZOOM)
+    expect(maximum.x).toBeGreaterThanOrEqual(0)
+    expect(maximum.y).toBeGreaterThanOrEqual(0)
+    expect(maximum.x + 1344 / maximum.zoom).toBeLessThanOrEqual(1344)
+    expect(maximum.y + 840 / maximum.zoom).toBeLessThanOrEqual(840)
+
+    expect(zoomMapViewport(maximum, 672, 420, 0.001, 1344, 840)).toEqual({ x: 0, y: 0, zoom: 1 })
+  })
+
+  it('pans a zoomed viewport without leaving the map bounds', () => {
+    const viewport = { x: 336, y: 210, zoom: 2 }
+    expect(panMapViewport(viewport, 100, -300, 1344, 840)).toEqual({ x: 436, y: 0, zoom: 2 })
+    expect(panMapViewport(viewport, 10_000, 10_000, 1344, 840)).toEqual({ x: 672, y: 420, zoom: 2 })
+  })
+
+  it('moves a panned viewport progressively toward the map center while zooming out', () => {
+    const viewport = { x: 100, y: 50, zoom: 10 }
+    const currentCenter = { x: 167.2, y: 92 }
+    const halfway = zoomMapViewportTowardCenter(viewport, 0.5, 1344, 840)
+    const halfwayCenter = { x: halfway.x + 1344 / halfway.zoom / 2, y: halfway.y + 840 / halfway.zoom / 2 }
+
+    expect(halfway.zoom).toBe(5)
+    expect(halfwayCenter.x - 672).toBeCloseTo((currentCenter.x - 672) * 0.5)
+    expect(halfwayCenter.y - 420).toBeCloseTo((currentCenter.y - 420) * 0.5)
+    expect(zoomMapViewportTowardCenter(halfway, 0.001, 1344, 840)).toEqual({ x: 0, y: 0, zoom: 1 })
+  })
+
+  it('smoothly removes the remaining center offset near 1x', () => {
+    const viewport = { x: 20, y: 10, zoom: 1.4 }
+    const currentCenter = { x: viewport.x + 1344 / viewport.zoom / 2, y: viewport.y + 840 / viewport.zoom / 2 }
+    const nearMinimum = zoomMapViewportTowardCenter(viewport, 1.1 / 1.4, 1344, 840)
+    const nextCenter = { x: nearMinimum.x + 1344 / nearMinimum.zoom / 2, y: nearMinimum.y + 840 / nearMinimum.zoom / 2 }
+
+    expect(nextCenter.x - 672).toBeCloseTo((currentCenter.x - 672) * 0.25)
+    expect(nextCenter.y - 420).toBeCloseTo((currentCenter.y - 420) * 0.25)
+  })
+
+  it('rejects invalid interaction coordinates before they reach the SVG viewBox', () => {
+    const viewport = { x: 100, y: 50, zoom: 2 }
+    expect(zoomMapViewport(viewport, Number.NaN, 420, 2, 1344, 840)).toBe(viewport)
+    expect(panMapViewport(viewport, Number.NaN, 0, 1344, 840)).toBe(viewport)
+    expect(mapViewBox({ x: Number.NaN, y: 0, zoom: 1 }, 1344, 840)).toBe('0 0 1 1')
   })
 })
 
