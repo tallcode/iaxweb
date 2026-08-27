@@ -1,10 +1,12 @@
 // 手动验证常见呼号相似度：npm run callsign-match-test -- "语音识别文本"
+import { dirname, resolve } from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 import { config as loadEnv } from 'dotenv'
 import { CallsignHintMatcher } from '../src/ai/callsign-hints.js'
 import { loadAiConfig } from '../src/config.js'
 
-loadEnv({ quiet: true })
+loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../..', '.env'), quiet: true })
 
 const text = process.argv.slice(2).join(' ').trim()
 if (!text) {
