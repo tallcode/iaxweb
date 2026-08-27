@@ -34,6 +34,7 @@ interface SegmentParams {
 interface SegmentQuery {
   callsign?: string
   manualOnly?: string
+  aiOnly?: string
   page?: string
   pageSize?: string
 }
@@ -93,10 +94,11 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
     const pageSize = parsePage(request.query.pageSize, 50)
     const callsign = request.query.callsign?.trim().toUpperCase()
     const manualOnly = request.query.manualOnly === 'true'
+    const aiOnly = request.query.aiOnly === 'true'
     if (callsign !== undefined && !CALLSIGN_PATTERN.test(callsign))
       return reply.code(400).send('Invalid callsign')
     try {
-      return reply.header('cache-control', 'no-store').send(segmentRepository.list(page, pageSize, callsign, manualOnly))
+      return reply.header('cache-control', 'no-store').send(segmentRepository.list(page, pageSize, callsign, manualOnly, aiOnly))
     }
     catch {
       return reply.code(400).send('Invalid pagination')

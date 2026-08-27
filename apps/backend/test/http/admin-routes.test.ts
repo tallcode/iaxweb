@@ -86,6 +86,18 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   })
   assert.equal(manualOnlySearch.statusCode, 200)
   assert.equal(manualOnlySearch.json().total, 0)
+  const aiOnlySearch = await app.inject({
+    headers: { cookie: cookie!.split(';', 1)[0] },
+    url: '/api/admin/segments?aiOnly=true',
+  })
+  assert.equal(aiOnlySearch.statusCode, 200)
+  assert.equal(aiOnlySearch.json().total, 1)
+  const anyCallsignSearch = await app.inject({
+    headers: { cookie: cookie!.split(';', 1)[0] },
+    url: '/api/admin/segments?manualOnly=true&aiOnly=true',
+  })
+  assert.equal(anyCallsignSearch.statusCode, 200)
+  assert.equal(anyCallsignSearch.json().total, 1)
   repository.updateManualReview(segment.id, { callsign: 'BG5AAA' })
   const reviewedSearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },

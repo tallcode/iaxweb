@@ -166,15 +166,21 @@ export class SegmentRepository {
     return row ? mapRow(row) : undefined
   }
 
-  list(page: number, pageSize: number, callsign?: string, manualOnly: boolean = false): SegmentPage {
+  list(page: number, pageSize: number, callsign?: string, manualOnly: boolean = false, aiOnly: boolean = false): SegmentPage {
     if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
       throw new Error('Invalid segment page')
     const conditions: string[] = []
     const parameters: string[] = []
+    const callsignConditions: string[] = []
     if (manualOnly)
-      conditions.push('manual_callsign IS NOT NULL')
+      callsignConditions.push('manual_callsign IS NOT NULL')
+    if (aiOnly)
+      callsignConditions.push('callsign IS NOT NULL')
+    if (callsignConditions.length > 0)
+      conditions.push(`(${callsignConditions.join(' OR ')})`)
     if (callsign !== undefined) {
-      conditions.push(`${manualOnly ? 'manual_callsign' : 'effective_callsign'} = ? COLLATE NOCASE`)
+      const searchColumn = manualOnly && !aiOnly ? 'manual_callsign' : aiOnly && !manualOnly ? 'callsign' : 'effective_callsign'
+      conditions.push(`${searchColumn} = ? COLLATE NOCASE`)
       parameters.push(callsign)
     }
     const whereClause = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`

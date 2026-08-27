@@ -210,5 +210,13 @@ test('filters manually reviewed callsigns independently from AI callsigns', () =
   assert.deepEqual(repository.list(1, 50, undefined, true).items.map(item => item.id), ['reviewed'])
   assert.equal(repository.list(1, 50, 'BG5AAA', true).total, 0)
   assert.equal(repository.list(1, 50, 'bg5bbb', true).items[0]?.id, 'reviewed')
+
+  assert.deepEqual(repository.list(1, 50, undefined, false, true).items.map(item => item.id), ['reviewed', 'ai-only'])
+  assert.deepEqual(repository.list(1, 50, undefined, true, true).items.map(item => item.id), ['reviewed', 'ai-only'])
+  assert.equal(repository.list(1, 50, 'BG5AAA', true, true).total, 1)
+  assert.deepEqual(repository.list(1, 50, 'BG5AAA', true, true).items.map(item => item.id), ['ai-only'])
+  assert.equal(repository.list(1, 50, 'BG5BBB', true, true).items[0]?.id, 'reviewed')
+  assert.equal(repository.list(1, 50, 'BG5AAA', false, true).total, 2)
+  assert.equal(repository.list(1, 50, 'BG5BBB', false, true).total, 0)
   repository.close()
 })

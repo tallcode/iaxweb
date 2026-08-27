@@ -16,6 +16,7 @@ const total = ref(0)
 const searchInput = ref('')
 const callsignFilter = ref('')
 const manualOnly = ref(false)
+const aiOnly = ref(false)
 type CallsignRole = 'callee' | 'caller'
 const editingCallsign = ref<{ id: string, role: CallsignRole } | null>(null)
 const playingSegmentId = ref<string | null>(null)
@@ -29,6 +30,7 @@ const { markRefreshed } = useConditionalAutoRefresh({
     && searchInput.value === ''
     && callsignFilter.value === ''
     && !manualOnly.value
+    && !aiOnly.value
     && !isLoading.value,
   refresh: loadSegments,
 })
@@ -51,6 +53,8 @@ async function loadSegments(): Promise<void> {
       query.set('callsign', callsignFilter.value)
     if (manualOnly.value)
       query.set('manualOnly', 'true')
+    if (aiOnly.value)
+      query.set('aiOnly', 'true')
     const response = await fetch(`/api/admin/segments?${query}`)
     if (response.status === 401) {
       await router.replace('/')
@@ -72,7 +76,7 @@ async function loadSegments(): Promise<void> {
     segments.value = data.items
     pageInput.value = String(currentPage.value)
     markRefreshed()
-    statusMessage.value = callsignFilter.value || manualOnly.value
+    statusMessage.value = callsignFilter.value || manualOnly.value || aiOnly.value
       ? `共 ${total.value} 条匹配记录`
       : `共 ${total.value} 条记录`
   }
@@ -122,6 +126,7 @@ async function clearCallsignSearch(): Promise<void> {
   searchInput.value = ''
   callsignFilter.value = ''
   manualOnly.value = false
+  aiOnly.value = false
   currentPage.value = 1
   pageInput.value = '1'
   await loadSegments()
@@ -195,10 +200,18 @@ async function saveCallsign(segment: PersistedSegment, role: CallsignRole, input
     }
     const updatedSegment = await response.json() as PersistedSegment
     Object.assign(segment, updatedSegment)
-    if (role === 'caller' && ((callsignFilter.value && (manualOnly.value ? updatedSegment.manualCallsign : updatedSegment.effectiveCallsign) !== callsignFilter.value)
-      || (manualOnly.value && updatedSegment.manualCallsign === null))) {
-      await loadSegments()
-      return true
+    if (role === 'caller') {
+      const searchColumn = manualOnly.value && !aiOnly.value
+        ? updatedSegment.manualCallsign
+        : aiOnly.value && !manualOnly.value
+          ? updatedSegment.callsign
+          : updatedSegment.effectiveCallsign
+      if ((callsignFilter.value && searchColumn !== callsignFilter.value)
+        || (manualOnly.value && updatedSegment.manualCallsign === null)
+        || (aiOnly.value && updatedSegment.callsign === null)) {
+        await loadSegments()
+        return true
+      }
     }
     return true
   }
@@ -266,8 +279,9 @@ function formatTime(iso: string): string {
         </p>
         <form class="ml-auto flex min-w-0 items-center gap-2" role="search" @submit.prevent="searchCallsign">
           <label class="flex shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap text-xs text-slate-300"><input v-model="manualOnly" type="checkbox" class="accent-cyan-500">仅人工</label>
+          <label class="flex shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap text-xs text-slate-300"><input v-model="aiOnly" type="checkbox" class="accent-cyan-500">AI识别</label>
           <input v-model="searchInput" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="w-24 shrink-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 font-mono text-sm uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 sm:w-36 sm:px-3" inputmode="text" :pattern="CALLSIGN_PATTERN.source" placeholder="呼号搜索" aria-label="呼号搜索" spellcheck="false" @input="normalizeSearchInput">
-          <button v-if="searchInput || callsignFilter || manualOnly" type="button" class="shrink-0 rounded-lg border border-slate-700 px-2 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 sm:px-3" @click="clearCallsignSearch">
+          <button v-if="searchInput || callsignFilter || manualOnly || aiOnly" type="button" class="shrink-0 rounded-lg border border-slate-700 px-2 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 sm:px-3" @click="clearCallsignSearch">
             清除
           </button>
           <button type="submit" class="shrink-0 rounded-lg border border-slate-700 px-2 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 sm:px-4">
