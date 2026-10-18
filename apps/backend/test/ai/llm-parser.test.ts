@@ -55,7 +55,8 @@ interface CapturedCall {
   body: {
     enable_thinking?: boolean
     messages: Array<{ content: string, role: string }>
-    response_format?: { json_schema?: { schema?: unknown }, type?: string }
+    response_format?: { type?: string }
+    thinking?: { type?: string }
     thinking_budget?: number
   }
   url: string
@@ -65,6 +66,7 @@ function makeParser(
   fetchImpl: typeof fetch,
   files: { promptFile?: string, schemaFile?: string } = {},
   extra: {
+    baseUrl?: string
     callsignHintsEnabled?: boolean
     callsignsFile?: string
     enableThinking?: boolean
@@ -74,7 +76,7 @@ function makeParser(
   const calls: CapturedCall[] = []
   const parser = new LlmParser({
     apiKey: 'test-key',
-    baseUrl: 'https://dashscope.example',
+    baseUrl: extra.baseUrl ?? 'https://llm.example/v1',
     ...(extra.callsignHintsEnabled !== undefined ? { callsignHintsEnabled: extra.callsignHintsEnabled } : {}),
     ...(extra.callsignsFile !== undefined ? { callsignsFile: extra.callsignsFile } : {}),
     ...(extra.enableThinking !== undefined ? { enableThinking: extra.enableThinking } : {}),
@@ -107,12 +109,12 @@ test('parses a schema-valid model response', async () => {
 
   const call = calls[0]
   assert.ok(call)
-  assert.equal(call.url, 'https://dashscope.example/compatible-mode/v1/chat/completions')
+  assert.equal(call.url, 'https://llm.example/v1/chat/completions')
   assert.equal(call.body.messages[0]?.role, 'system')
   assert.equal(call.body.messages[1]?.role, 'user')
   assert.ok(call.body.messages[1]?.content.startsWith('原始文本'))
-  assert.equal(call.body.response_format?.type, 'json_schema')
-  assert.equal(call.body.enable_thinking, false)
+  assert.equal(call.body.response_format?.type, 'json_object')
+  assert.equal(call.body.enable_thinking, undefined)
 })
 
 test('passes conversation history to the model', async () => {
@@ -188,35 +190,47 @@ test('sends thinking parameters when enabled', async () => {
   assert.equal(calls[0]?.body.thinking_budget, 1024)
 })
 
-test('rejects responses missing required fields', async () => {
-  const { parser } = makeParser(() => Promise.resolve(completion(JSON.stringify({ message: '只有文本' }))))
-  await assert.rejects(parser.parse('x'), /缺少必需字段 "risk"/)
+test('uses DeepSeek thinking and JSON output parameters', async () => {
+  const { calls, parser } = makeParser(
+    () => Promise.resolve(completion(okResult())),
+    {},
+    { baseUrl: 'https://api.deepseek.com', enableThinking: false, thinkingBudget: 1024 },
+  )
+  await parser.parse('x')
+  assert.deepEqual(calls[0]?.body.thinking, { type: 'disabled' })
+  assert.equal(calls[0]?.body.enable_thinking, undefined)
+  assert.equal(calls[0]?.body.thinking_budget, undefined)
+  assert.deepEqual(calls[0]?.body.response_format, { type: 'json_object' })
 })
 
-test('rejects responses with wrong field types', async () => {
-  const { parser } = makeParser(() => Promise.resolve(
-    completion(JSON.stringify({ message: 'x', risk: { level: '高', reason: 'r' } })),
-  ))
-  await assert.rejects(parser.parse('x'), /risk\.level 应为整数/)
+test('ignores responses that violate the schema', async () => {
+  const bodies = [
+    JSON.stringify({ message: '只有文本' }),
+    JSON.stringify({ message: 'x', risk: { level: '高', reason: 'r' } }),
+    JSON.stringify({ message: 'x', risk: { level: 6, reason: 'r' } }),
+    JSON.stringify({ extra: true, ...JSON.parse(okResult()) }),
+  ]
+  for (const body of bodies) {
+    const { parser } = makeParser(() => Promise.resolve(completion(body)))
+    assert.deepEqual(await parser.parse('x'), {})
+  }
 })
 
-test('rejects risk levels outside 1..5', async () => {
-  const { parser } = makeParser(() => Promise.resolve(
-    completion(JSON.stringify({ message: 'x', risk: { level: 6, reason: 'r' } })),
-  ))
-  await assert.rejects(parser.parse('x'), /risk\.level 不能大于 5/)
-})
-
-test('rejects responses with unexpected fields', async () => {
-  const { parser } = makeParser(() => Promise.resolve(
-    completion(JSON.stringify({ extra: true, ...JSON.parse(okResult()) })),
-  ))
-  await assert.rejects(parser.parse('x'), /未定义的字段 "extra"/)
-})
-
-test('rejects non-JSON model output', async () => {
+test('ignores non-JSON model output', async () => {
   const { parser } = makeParser(() => Promise.resolve(completion('不是 JSON')))
-  await assert.rejects(parser.parse('x'), /不是有效 JSON/)
+  assert.deepEqual(await parser.parse('x'), {})
+})
+
+test('ignores empty content from JSON mode', async () => {
+  const { parser } = makeParser(() => Promise.resolve(completion('')))
+  assert.deepEqual(await parser.parse('x'), {})
+})
+
+test('parses JSON wrapped in a markdown fence', async () => {
+  const { parser } = makeParser(() => Promise.resolve(completion(`\`\`\`json\n${okResult()}\n\`\`\``)))
+  const parsed = await parser.parse('x')
+  assert.ok(parsed)
+  assert.equal(parsed.Callsign, 'BD5XXX')
 })
 
 test('retries on server errors', async () => {
@@ -311,7 +325,7 @@ test('hot-reloads prompt and schema files', async (t) => {
       required: ['message', 'risk', 'qth'],
       type: 'object',
     }))
-    await assert.rejects(parser.parse('x'), /缺少必需字段 "qth"/)
+    await assert.deepEqual(await parser.parse('x'), {})
     assert.ok(calls[1]?.body.messages[0]?.content.includes('第二版提示词'))
   }
   finally {

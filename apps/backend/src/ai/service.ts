@@ -52,23 +52,23 @@ export class AiService {
     this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
     this.onSpot = options.onSpot
     this.asr = new AsrClient({
-      apiKey: config.apiKey ?? '',
-      baseUrl: config.baseUrl,
-      model: config.model,
+      apiKey: config.asr.apiKey ?? '',
+      baseUrl: config.asr.baseUrl,
+      model: config.asr.model,
     })
-    this.llm = config.llmEnabled
+    this.llm = config.llm.enabled
       ? new LlmParser({
-          apiKey: config.apiKey ?? '',
-          baseUrl: config.baseUrl,
+          apiKey: config.llm.apiKey ?? '',
+          baseUrl: config.llm.baseUrl,
           ...(config.callsignHintsEnabled
             ? { callsignHintsEnabled: true, callsignsFile: config.callsignsFile }
             : {}),
-          ...(config.llmEnableThinking ? { enableThinking: true } : {}),
-          model: config.llmModel,
-          promptFile: config.llmPromptFile,
-          schemaFile: config.llmSchemaFile,
-          ...(config.llmThinkingBudget !== undefined ? { thinkingBudget: config.llmThinkingBudget } : {}),
-          timeoutMs: config.llmTimeoutMs,
+          ...(config.llm.enableThinking !== undefined ? { enableThinking: config.llm.enableThinking } : {}),
+          model: config.llm.model,
+          promptFile: config.llm.promptFile,
+          schemaFile: config.llm.schemaFile,
+          ...(config.llm.thinkingBudget !== undefined ? { thinkingBudget: config.llm.thinkingBudget } : {}),
+          timeoutMs: config.llm.timeoutMs,
         })
       : undefined
 
@@ -260,7 +260,7 @@ export class AiService {
         }
       }
       console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.Callsign ? ` 呼号=${parsed.Callsign}` : ''} | ${parsed.message ?? text}`)
-      if (parsed.Callsign && this.config.llmPublishSpot) {
+      if (parsed.Callsign && this.config.llm.publishSpot) {
         this.onSpot?.({
           at: record.timestamp,
           callsign: parsed.Callsign,

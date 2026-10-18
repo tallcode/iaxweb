@@ -25,12 +25,27 @@ const invalidSubjectToken = /[\s*>]/
 // request; keep segments safely below that ceiling.
 const maxAllowedSegmentMs = 290_000
 
+export interface AiApiConfig {
+  apiKey?: string
+  baseUrl: string
+  model: string
+}
+
+export interface AiLlmConfig extends AiApiConfig {
+  enableThinking?: boolean
+  enabled: boolean
+  promptFile: string
+  publishSpot: boolean
+  schemaFile: string
+  thinkingBudget?: number
+  timeoutMs: number
+}
+
 export interface AiConfig {
   adminFile: string
   activityWindowMs: number
-  apiKey?: string
+  asr: AiApiConfig
   backgroundFile: string
-  baseUrl: string
   callsignHintsEnabled: boolean
   callsignsFile: string
   coldMinSegmentMs: number
@@ -38,16 +53,8 @@ export interface AiConfig {
   databaseFile: string
   hotMinSegmentMs: number
   hotwordsFile: string
-  llmEnabled: boolean
-  llmEnableThinking: boolean
-  llmModel: string
-  llmPromptFile: string
-  llmPublishSpot: boolean
-  llmSchemaFile: string
-  llmThinkingBudget?: number | undefined
-  llmTimeoutMs: number
+  llm: AiLlmConfig
   maxSegmentMs: number
-  model: string
   persistenceEnabled: boolean
   recordingsDirectory: string
   sessionsFile: string
@@ -133,14 +140,21 @@ function parsePositiveInteger(value: string, name: string): number {
 // enables AI; the API key requirement is enforced where node definitions are
 // known (see server.ts).
 export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
-  const apiKey = optional(env, 'DASHSCOPE_API_KEY')
+  // ASR and LLM are configured independently so they can use different
+  // providers. DASHSCOPE_* is only a backwards-compatible alias for ASR.
+  const asrApiKey = optional(env, 'AI_ASR_API_KEY') ?? optional(env, 'DASHSCOPE_API_KEY')
+  const asrBaseUrl = parseHttpBaseUrl(
+    optional(env, 'AI_ASR_BASE_URL') ?? optional(env, 'DASHSCOPE_BASE_URL') ?? 'https://dashscope.aliyuncs.com',
+    'AI_ASR_BASE_URL',
+  )
+  const asrModel = optional(env, 'AI_ASR_MODEL') ?? 'qwen-audio-3.1-asr-flash'
 
-  const baseUrlText = optional(env, 'DASHSCOPE_BASE_URL') ?? 'https://dashscope.aliyuncs.com'
-  const baseUrl = new URL(baseUrlText)
-  if (!['http:', 'https:'].includes(baseUrl.protocol))
-    throw new Error('DASHSCOPE_BASE_URL must use http or https')
-
-  const model = optional(env, 'AI_ASR_MODEL') ?? 'qwen-audio-3.0-asr-flash'
+  const llmApiKey = optional(env, 'AI_LLM_API_KEY')
+  const llmBaseUrl = parseHttpBaseUrl(
+    optional(env, 'AI_LLM_BASE_URL') ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    'AI_LLM_BASE_URL',
+  )
+  const llmModel = optional(env, 'AI_LLM_MODEL') ?? 'qwen3.7-flash'
 
   const coldMinSegmentMs = parsePositiveInteger(
     optional(env, 'AI_COLD_MIN_SEGMENT_MS') ?? '5000',
@@ -172,7 +186,6 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   const llmEnabledText = optional(env, 'AI_LLM_ENABLED') ?? 'true'
   if (llmEnabledText !== 'true' && llmEnabledText !== 'false')
     throw new Error('AI_LLM_ENABLED must be "true" or "false"')
-  const llmModel = optional(env, 'AI_LLM_MODEL') ?? 'qwen3.7-flash'
 
   const callsignHintsEnabledText = optional(env, 'AI_CALLSIGN_HINTS_ENABLED') ?? 'false'
   if (callsignHintsEnabledText !== 'true' && callsignHintsEnabledText !== 'false')
@@ -186,9 +199,15 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   if (persistenceEnabledText !== 'true' && persistenceEnabledText !== 'false')
     throw new Error('AI_PERSISTENCE_ENABLED must be "true" or "false"')
 
-  const llmEnableThinkingText = optional(env, 'AI_LLM_ENABLE_THINKING') ?? 'false'
-  if (llmEnableThinkingText !== 'true' && llmEnableThinkingText !== 'false')
+  // Qwen models think by default, which regularly blows the non-streaming
+  // timeout. Other providers may reject the Qwen-only enable_thinking field,
+  // so only send it by default for Qwen models.
+  const llmEnableThinkingText = optional(env, 'AI_LLM_ENABLE_THINKING')
+  if (llmEnableThinkingText !== undefined && llmEnableThinkingText !== 'true' && llmEnableThinkingText !== 'false')
     throw new Error('AI_LLM_ENABLE_THINKING must be "true" or "false"')
+  const llmEnableThinking = llmEnableThinkingText !== undefined
+    ? llmEnableThinkingText === 'true'
+    : (llmModel.startsWith('qwen') ? false : undefined)
   const llmThinkingBudgetText = optional(env, 'AI_LLM_THINKING_BUDGET')
   const llmThinkingBudget = llmThinkingBudgetText !== undefined
     ? parsePositiveInteger(llmThinkingBudgetText, 'AI_LLM_THINKING_BUDGET')
@@ -201,11 +220,14 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   const recordingsDirectory = resolveProjectPath(optional(env, 'AI_RECORDINGS_DIR') ?? `${dirname(databaseFile)}/rec`)
 
   return {
-    ...(apiKey ? { apiKey } : {}),
     adminFile: resolveProjectPath(optional(env, 'AI_ADMIN_FILE') ?? 'config/admin.json'),
     activityWindowMs,
+    asr: {
+      ...(asrApiKey ? { apiKey: asrApiKey } : {}),
+      baseUrl: asrBaseUrl,
+      model: asrModel,
+    },
     backgroundFile: resolveProjectPath(optional(env, 'AI_BACKGROUND_FILE') ?? 'config/background.txt'),
-    baseUrl: baseUrl.toString().replace(/\/+$/, ''),
     callsignHintsEnabled: callsignHintsEnabledText === 'true',
     callsignsFile: resolveProjectPath(optional(env, 'AI_CALLSIGNS_FILE') ?? 'config/callsigns.txt'),
     coldMinSegmentMs,
@@ -213,20 +235,30 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     databaseFile,
     hotMinSegmentMs,
     hotwordsFile: resolveProjectPath(optional(env, 'AI_HOTWORDS_FILE') ?? 'config/hotwords.json'),
-    llmEnabled: llmEnabledText === 'true',
-    llmEnableThinking: llmEnableThinkingText === 'true',
-    llmModel,
-    llmPromptFile: resolveProjectPath(optional(env, 'AI_LLM_PROMPT_FILE') ?? 'config/prompt.txt'),
-    llmPublishSpot: llmPublishSpotText === 'true',
-    llmSchemaFile: resolveProjectPath(optional(env, 'AI_LLM_SCHEMA_FILE') ?? 'config/schema.json'),
-    ...(llmThinkingBudget !== undefined ? { llmThinkingBudget } : {}),
-    llmTimeoutMs,
+    llm: {
+      ...(llmApiKey ? { apiKey: llmApiKey } : {}),
+      baseUrl: llmBaseUrl,
+      ...(llmEnableThinking !== undefined ? { enableThinking: llmEnableThinking } : {}),
+      enabled: llmEnabledText === 'true',
+      model: llmModel,
+      promptFile: resolveProjectPath(optional(env, 'AI_LLM_PROMPT_FILE') ?? 'config/prompt.txt'),
+      publishSpot: llmPublishSpotText === 'true',
+      schemaFile: resolveProjectPath(optional(env, 'AI_LLM_SCHEMA_FILE') ?? 'config/schema.json'),
+      ...(llmThinkingBudget !== undefined ? { thinkingBudget: llmThinkingBudget } : {}),
+      timeoutMs: llmTimeoutMs,
+    },
     maxSegmentMs,
-    model,
     persistenceEnabled: persistenceEnabledText === 'true',
     recordingsDirectory,
     sessionsFile: resolveProjectPath(optional(env, 'AI_SESSIONS_FILE') ?? 'data/sessions.json'),
   }
+}
+
+function parseHttpBaseUrl(value: string, name: string): string {
+  const url = new URL(value)
+  if (!['http:', 'https:'].includes(url.protocol))
+    throw new Error(`${name} must use http or https`)
+  return url.toString().replace(/\/+$/, '')
 }
 
 function resolveProjectPath(value: string): string {

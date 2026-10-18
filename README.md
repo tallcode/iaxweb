@@ -49,9 +49,9 @@ cp .env.example .env
 
 ## AI 值机员
 
-AI 值机员监听节点音频，按发射分段（iaxmon 的 `start`/`stop` 事件），把语音段（冷启动 ≥5 秒、热启动 ≥2 秒，最长 2 分钟）送阿里云百炼语音识别（Qwen-Audio-3.0-ASR-Flash 同步接口），识别结果输出到控制台。
+AI 值机员监听节点音频，按发射分段（iaxmon 的 `start`/`stop` 事件），把语音段（冷启动 ≥5 秒、热启动 ≥2 秒，最长 2 分钟）送阿里云百炼语音识别（Qwen-Audio-3.1-ASR-Flash 同步接口），识别结果输出到控制台。
 
-在 `config/nodes.json` 中为节点添加 `"AI": true` 启用（该节点必须同时 `"AUDIO": true`），并在 `.env` 设置 `DASHSCOPE_API_KEY`：
+在 `config/nodes.json` 中为节点添加 `"AI": true` 启用（该节点必须同时 `"AUDIO": true`），并在 `.env` 设置 `AI_ASR_API_KEY`；LLM 后处理另用 `AI_LLM_API_KEY` 配置（可设 `AI_LLM_ENABLED=false` 关闭）：
 
 ```json
 {
@@ -80,7 +80,7 @@ AI 按节点独立启用，与网关其余功能互不影响；未启用的节�
 - `config/hotwords.json`：即时热词，格式 `{"词": 权重}`，权重 1~5（或 50 超热词）。适合放呼号、Q 简语、值机常用词；
 - `config/background.txt`：背景文本（400 字以内），如网名称、NCS、流程说明。
 
-LLM 后处理：每条识别结果再调用文本模型，对识别文本做结构化解析。调用时附带最近 `AI_CONTEXT_WINDOW_MS` 内的解析历史作为对话上下文。输出按 schema 文件严格校验，不合规记警告。`AI_LLM_ENABLED=false` 可关闭：
+LLM 后处理：每条识别结果再调用文本模型，对识别文本做结构化解析。ASR 与 LLM 的 Key、端点和模型完全独立，LLM 可以换成任意 OpenAI 兼容供应商（例如 DeepSeek、OpenAI），只需配置 `AI_LLM_BASE_URL`/`AI_LLM_API_KEY`/`AI_LLM_MODEL`，不影响语音识别。调用时附带最近 `AI_CONTEXT_WINDOW_MS` 内的解析历史作为对话上下文。输出按 schema 文件严格校验，不合规记警告。`AI_LLM_ENABLED=false` 可关闭：
 
 默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中同时预留 `manual_callsign`、`manual_risk_level`、`manual_note` 三个人工复核字段。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。
 
@@ -149,11 +149,34 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 [260809 21:05:40] [1900]: 丢弃段 1.2s（热启动，时长不足 2s）
 ```
 
+### 接口配置
+
+语音识别与大语言模型完全独立：ASR 使用 DashScope 同步接口；LLM 使用 OpenAI 兼容接口，可指向任意供应商。旧的 `DASHSCOPE_API_KEY` / `DASHSCOPE_BASE_URL` 仅作为 ASR 的兼容别名，LLM 不会再读取它们。
+
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `DASHSCOPE_API_KEY` | 未设置 | 百炼 API Key，任一节点启用 AI 时必填 |
-| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com` | DashScope 端点 |
-| `AI_ASR_MODEL` | `qwen-audio-3.0-asr-flash` | 识别模型（也可用 `fun-asr-flash`） |
+| `AI_ASR_API_KEY` | 未设置 | ASR Key，任一节点启用 AI 时必填；兼容旧变量 `DASHSCOPE_API_KEY` |
+| `AI_ASR_BASE_URL` | `https://dashscope.aliyuncs.com` | ASR 端点；兼容旧变量 `DASHSCOPE_BASE_URL` |
+| `AI_ASR_MODEL` | `qwen-audio-3.1-asr-flash` | 识别模型（也可用 `fun-asr-flash`） |
+| `AI_LLM_API_KEY` | 未设置 | LLM Key，`AI_LLM_ENABLED=true` 时必填 |
+| `AI_LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI 兼容 base URL，需包含版本前缀（如 `https://api.deepseek.com/v1`）；客户端追加 `/chat/completions` |
+| `AI_LLM_MODEL` | `qwen3.7-flash` | LLM 后处理模型 |
+| `AI_LLM_ENABLED` | `true` | LLM 后处理开关 |
+| `AI_LLM_PUBLISH_SPOT` | `true` | 识别到呼号时是否发布到 AI Spot 面板 |
+| `AI_LLM_ENABLE_THINKING` | `qwen*` 模型为 `false`，其他模型不发送 | 思考模式；DeepSeek 映射为 `thinking.type`，Qwen 映射为 `enable_thinking` |
+| `AI_LLM_THINKING_BUDGET` | 未设置 | 思考 token 预算（仅 Qwen 系使用），开启思考时限制思考量 |
+| `AI_LLM_TIMEOUT_MS` | `30000` | 单次请求超时 |
+| `AI_LLM_PROMPT_FILE` | `config/prompt.txt` | LLM 提示词文件路径（切换简化版：复制 `config/example/simple/prompt.txt` 覆盖之） |
+| `AI_LLM_SCHEMA_FILE` | `config/schema.json` | LLM 输出 JSON Schema 路径（切换简化版：复制 `config/example/simple/schema.json` 覆盖之） |
+| `AI_CALLSIGN_HINTS_ENABLED` | `false` | 是否向 LLM 提供常见呼号相似度候选 |
+| `AI_CALLSIGNS_FILE` | `config/callsigns.txt` | 常见呼号表路径，每行一个呼号 |
+
+LLM 请求使用 `response_format: json_object`（DeepSeek JSON Output）。模型返回空内容、非 JSON 或不符合 schema 时会被静默忽略，只输出 ASR 原文，不会报错或中断识别。
+
+### 识别与持久化
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
 | `AI_COLD_MIN_SEGMENT_MS` | `5000` | 冷启动时长阈值，不足丢弃 |
 | `AI_HOT_MIN_SEGMENT_MS` | `2000` | 热启动时长阈值，不足丢弃 |
 | `AI_ACTIVITY_WINDOW_MS` | `30000` | 冷/热启动判定的活动窗口 |
@@ -166,16 +189,6 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 | `AI_SESSIONS_FILE` | `data/sessions.json` | 管理登录会话文件路径 |
 | `AI_HOTWORDS_FILE` | `config/hotwords.json` | 热词文件路径 |
 | `AI_BACKGROUND_FILE` | `config/background.txt` | 背景文本文件路径 |
-| `AI_LLM_ENABLED` | `true` | LLM 后处理开关 |
-| `AI_LLM_PUBLISH_SPOT` | `true` | 识别到呼号时是否发布到 AI Spot 面板 |
-| `AI_LLM_MODEL` | `qwen3.7-flash` | LLM 后处理模型 |
-| `AI_LLM_ENABLE_THINKING` | `false` | 思考模式；默认关闭（任务简单，开启会显著变慢并可能超时） |
-| `AI_LLM_THINKING_BUDGET` | 未设置 | 思考 token 预算，开启思考时限制思考量 |
-| `AI_LLM_TIMEOUT_MS` | `30000` | 单次请求超时 |
-| `AI_LLM_PROMPT_FILE` | `config/prompt.txt` | LLM 提示词文件路径（切换简化版：复制 `config/example/simple/prompt.txt` 覆盖之） |
-| `AI_LLM_SCHEMA_FILE` | `config/schema.json` | LLM 输出 JSON Schema 路径（切换简化版：复制 `config/example/simple/schema.json` 覆盖之） |
-| `AI_CALLSIGN_HINTS_ENABLED` | `false` | 是否向 LLM 提供常见呼号相似度候选 |
-| `AI_CALLSIGNS_FILE` | `config/callsigns.txt` | 常见呼号表路径，每行一个呼号 |
 
 ## 运行
 

@@ -5,9 +5,12 @@ import { loadAiConfig } from '../../src/config.js'
 
 test('loads AI defaults', () => {
   const config = loadAiConfig({})
-  assert.equal(config.apiKey, undefined)
-  assert.equal(config.baseUrl, 'https://dashscope.aliyuncs.com')
-  assert.equal(config.model, 'qwen-audio-3.0-asr-flash')
+  assert.equal(config.asr.apiKey, undefined)
+  assert.equal(config.asr.baseUrl, 'https://dashscope.aliyuncs.com')
+  assert.equal(config.asr.model, 'qwen-audio-3.1-asr-flash')
+  assert.equal(config.llm.apiKey, undefined)
+  assert.equal(config.llm.baseUrl, 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+  assert.equal(config.llm.model, 'qwen3.7-flash')
   assert.equal(config.coldMinSegmentMs, 5_000)
   assert.equal(config.hotMinSegmentMs, 2_000)
   assert.equal(config.activityWindowMs, 30_000)
@@ -17,36 +20,44 @@ test('loads AI defaults', () => {
   assert.ok(config.recordingsDirectory.endsWith('data/rec'))
   assert.ok(config.adminFile.endsWith('config/admin.json'))
   assert.ok(config.sessionsFile.endsWith('data/sessions.json'))
-  assert.equal(config.llmEnabled, true)
+  assert.equal(config.llm.enabled, true)
   assert.equal(config.persistenceEnabled, false)
-  assert.equal(config.llmEnableThinking, false)
-  assert.equal(config.llmTimeoutMs, 30_000)
-  assert.equal(config.llmThinkingBudget, undefined)
-  assert.equal(config.llmModel, 'qwen3.7-flash')
-  assert.equal(config.llmPublishSpot, true)
+  assert.equal(config.llm.enableThinking, false)
+  assert.equal(config.llm.timeoutMs, 30_000)
+  assert.equal(config.llm.thinkingBudget, undefined)
+  assert.equal(config.llm.publishSpot, true)
   assert.equal(config.callsignHintsEnabled, false)
   assert.ok(config.callsignsFile.endsWith('config/callsigns.txt'))
-  assert.ok(config.llmPromptFile.endsWith('config/prompt.txt'))
-  assert.ok(config.llmSchemaFile.endsWith('config/schema.json'))
+  assert.ok(config.llm.promptFile.endsWith('config/prompt.txt'))
+  assert.ok(config.llm.schemaFile.endsWith('config/schema.json'))
   assert.ok(config.hotwordsFile.endsWith('config/hotwords.json'))
   assert.ok(config.backgroundFile.endsWith('config/background.txt'))
 })
 
 test('loads custom AI settings', () => {
   const config = loadAiConfig({
+    AI_ASR_API_KEY: 'sk-asr',
+    AI_ASR_BASE_URL: 'https://asr.example/',
     AI_ASR_MODEL: 'fun-asr-flash',
     AI_COLD_MIN_SEGMENT_MS: '4000',
     AI_CONTEXT_WINDOW_MS: '60000',
     AI_DATABASE_FILE: '/var/lib/iaxweb/ai.sqlite',
     AI_ADMIN_FILE: '/var/lib/iaxweb/admin.json',
+    AI_LLM_API_KEY: 'sk-llm',
+    AI_LLM_BASE_URL: 'https://llm.example/v1/',
+    AI_LLM_MODEL: 'deepseek-chat',
     AI_RECORDINGS_DIR: '/var/lib/iaxweb/rec',
     AI_SESSIONS_FILE: '/var/lib/iaxweb/sessions.json',
     AI_HOT_MIN_SEGMENT_MS: '1500',
     AI_MAX_SEGMENT_MS: '90000',
-    DASHSCOPE_API_KEY: 'sk-test',
   })
-  assert.equal(config.apiKey, 'sk-test')
-  assert.equal(config.model, 'fun-asr-flash')
+  assert.equal(config.asr.apiKey, 'sk-asr')
+  assert.equal(config.asr.baseUrl, 'https://asr.example')
+  assert.equal(config.asr.model, 'fun-asr-flash')
+  assert.equal(config.llm.apiKey, 'sk-llm')
+  assert.equal(config.llm.baseUrl, 'https://llm.example/v1')
+  assert.equal(config.llm.model, 'deepseek-chat')
+  assert.equal(config.llm.enableThinking, undefined)
   assert.equal(config.coldMinSegmentMs, 4_000)
   assert.equal(config.hotMinSegmentMs, 1_500)
   assert.equal(config.maxSegmentMs, 90_000)
@@ -57,16 +68,58 @@ test('loads custom AI settings', () => {
   assert.equal(config.sessionsFile, '/var/lib/iaxweb/sessions.json')
 })
 
-test('normalizes the DashScope base URL', () => {
-  const config = loadAiConfig({ DASHSCOPE_BASE_URL: 'https://dashscope.example/' })
-  assert.equal(config.baseUrl, 'https://dashscope.example')
+test('keeps ASR and LLM credentials independent', () => {
+  const config = loadAiConfig({ AI_ASR_API_KEY: 'sk-asr', AI_LLM_API_KEY: 'sk-llm' })
+  assert.equal(config.asr.apiKey, 'sk-asr')
+  assert.equal(config.llm.apiKey, 'sk-llm')
 })
 
-test('rejects a non-http DashScope base URL', () => {
+test('DASHSCOPE_* is only a legacy ASR alias', () => {
+  const config = loadAiConfig({
+    DASHSCOPE_API_KEY: 'sk-legacy',
+    DASHSCOPE_BASE_URL: 'https://legacy.example/',
+  })
+  assert.equal(config.asr.apiKey, 'sk-legacy')
+  assert.equal(config.asr.baseUrl, 'https://legacy.example')
+  assert.equal(config.llm.apiKey, undefined)
+  assert.equal(config.llm.baseUrl, 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+})
+
+test('prefers AI_ASR_* over the legacy DASHSCOPE_* alias', () => {
+  const config = loadAiConfig({
+    AI_ASR_API_KEY: 'sk-new',
+    AI_ASR_BASE_URL: 'https://asr.example',
+    DASHSCOPE_API_KEY: 'sk-legacy',
+    DASHSCOPE_BASE_URL: 'https://legacy.example',
+  })
+  assert.equal(config.asr.apiKey, 'sk-new')
+  assert.equal(config.asr.baseUrl, 'https://asr.example')
+})
+
+test('normalizes the ASR base URL', () => {
+  const config = loadAiConfig({ AI_ASR_BASE_URL: 'https://dashscope.example/' })
+  assert.equal(config.asr.baseUrl, 'https://dashscope.example')
+})
+
+test('rejects a non-http ASR base URL', () => {
   assert.throws(
-    () => loadAiConfig({ DASHSCOPE_BASE_URL: 'ftp://dashscope.example' }),
-    /http or https/,
+    () => loadAiConfig({ AI_ASR_BASE_URL: 'ftp://dashscope.example' }),
+    /AI_ASR_BASE_URL must use http or https/,
   )
+})
+
+test('rejects a non-http LLM base URL', () => {
+  assert.throws(
+    () => loadAiConfig({ AI_LLM_BASE_URL: 'ftp://llm.example' }),
+    /AI_LLM_BASE_URL must use http or https/,
+  )
+})
+
+test('only defaults thinking off for Qwen models', () => {
+  assert.equal(loadAiConfig({}).llm.enableThinking, false)
+  assert.equal(loadAiConfig({ AI_LLM_ENABLE_THINKING: 'true' }).llm.enableThinking, true)
+  assert.equal(loadAiConfig({ AI_LLM_ENABLE_THINKING: 'false' }).llm.enableThinking, false)
+  assert.equal(loadAiConfig({ AI_LLM_MODEL: 'deepseek-chat' }).llm.enableThinking, undefined)
 })
 
 test('rejects max segment not greater than the minimum segment lengths', () => {
@@ -97,7 +150,7 @@ test('rejects an invalid AI_LLM_ENABLED', () => {
 
 test('can disable the LLM stage', () => {
   const config = loadAiConfig({ AI_LLM_ENABLED: 'false' })
-  assert.equal(config.llmEnabled, false)
+  assert.equal(config.llm.enabled, false)
 })
 
 test('can disable SQLite and recording persistence', () => {
@@ -107,7 +160,7 @@ test('can disable SQLite and recording persistence', () => {
 
 test('can disable spot publishing', () => {
   const config = loadAiConfig({ AI_LLM_PUBLISH_SPOT: 'false' })
-  assert.equal(config.llmPublishSpot, false)
+  assert.equal(config.llm.publishSpot, false)
 })
 
 test('can enable common callsign hints and override the list path', () => {
@@ -136,6 +189,6 @@ test('explicit prompt and schema files override the defaults', () => {
     AI_LLM_PROMPT_FILE: '/custom/prompt.txt',
     AI_LLM_SCHEMA_FILE: '/custom/schema.json',
   })
-  assert.ok(config.llmPromptFile.endsWith('custom/prompt.txt'))
-  assert.ok(config.llmSchemaFile.endsWith('custom/schema.json'))
+  assert.ok(config.llm.promptFile.endsWith('custom/prompt.txt'))
+  assert.ok(config.llm.schemaFile.endsWith('custom/schema.json'))
 })

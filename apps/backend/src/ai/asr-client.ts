@@ -122,7 +122,7 @@ export function buildRequestBody(model: string, wav: Uint8Array, context: Transc
   const messages: Array<Record<string, unknown>> = []
   const background = context.background?.slice(0, CONTEXT_CHAR_LIMIT)
   if (background)
-    messages.push({ content: [{ text: background }], role: 'user' })
+    messages.push({ content: [{ text: background, type: 'input_text' }], role: 'user' })
 
   // DashScope counts all context text in the turn against one 400-character
   // budget. Keep the static background intact and use the remaining space for
@@ -131,9 +131,9 @@ export function buildRequestBody(model: string, wav: Uint8Array, context: Transc
   const previousBudget = CONTEXT_CHAR_LIMIT - (background?.length ?? 0)
   const previous = previousBudget > 0 ? context.previous?.slice(-previousBudget) : undefined
   if (previous)
-    messages.push({ content: [{ text: previous }], role: 'user' })
+    messages.push({ content: [{ text: previous, type: 'input_text' }], role: 'user' })
   // The audio message must be the last one.
-  messages.push({ content: [{ audio: audioUrl }], role: 'user' })
+  messages.push({ content: [{ input_audio: { data: audioUrl }, type: 'input_audio' }], role: 'user' })
 
   return {
     input: { messages },

@@ -15,20 +15,20 @@ if (!text) {
 }
 
 const config = loadAiConfig()
-if (!config.apiKey) {
-  console.error('未配置 DASHSCOPE_API_KEY')
+if (!config.llm.apiKey) {
+  console.error('未配置 AI_LLM_API_KEY')
   process.exit(1)
 }
 
 const parser = new LlmParser({
-  apiKey: config.apiKey,
-  baseUrl: config.baseUrl,
-  ...(config.llmEnableThinking ? { enableThinking: true } : {}),
-  model: config.llmModel,
-  promptFile: config.llmPromptFile,
-  schemaFile: config.llmSchemaFile,
-  ...(config.llmThinkingBudget !== undefined ? { thinkingBudget: config.llmThinkingBudget } : {}),
-  timeoutMs: config.llmTimeoutMs,
+  apiKey: config.llm.apiKey,
+  baseUrl: config.llm.baseUrl,
+  ...(config.llm.enableThinking !== undefined ? { enableThinking: config.llm.enableThinking } : {}),
+  model: config.llm.model,
+  promptFile: config.llm.promptFile,
+  schemaFile: config.llm.schemaFile,
+  ...(config.llm.thinkingBudget !== undefined ? { thinkingBudget: config.llm.thinkingBudget } : {}),
+  timeoutMs: config.llm.timeoutMs,
 })
 
 try {

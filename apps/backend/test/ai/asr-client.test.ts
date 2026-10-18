@@ -22,7 +22,7 @@ function makeClient(fetchImpl: typeof fetch): { calls: Array<{ init: RequestInit
       calls.push({ init, url: String(url) })
       return fetchImpl(url, init)
     },
-    model: 'qwen-audio-3.0-asr-flash',
+    model: 'qwen-audio-3.1-asr-flash',
     retryDelaysMs: [0],
   })
   return { calls, client }
@@ -40,12 +40,12 @@ test('builds the request body with context turns and hotwords', () => {
   const messages = (body.input as { messages: Array<Record<string, unknown>> }).messages
   assert.equal(messages.length, 3)
   assert.equal(messages[0]?.role, 'user')
-  assert.deepEqual(messages[0]?.content, [{ text: '背景' }])
+  assert.deepEqual(messages[0]?.content, [{ text: '背景', type: 'input_text' }])
   assert.equal(messages[1]?.role, 'user')
-  assert.deepEqual(messages[1]?.content, [{ text: '上次结果' }])
+  assert.deepEqual(messages[1]?.content, [{ text: '上次结果', type: 'input_text' }])
   // The audio message must be last.
   assert.equal(messages[2]?.role, 'user')
-  const audio = (messages[2]?.content as Array<Record<string, string>>)[0]?.audio
+  const audio = (messages[2]?.content as Array<{ input_audio?: { data?: string } }>)[0]?.input_audio?.data
   assert.ok(audio?.startsWith('data:audio/wav;base64,'))
 
   const parameters = body.parameters as Record<string, unknown>

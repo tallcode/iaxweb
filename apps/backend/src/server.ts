@@ -36,8 +36,10 @@ const aiNodeIds = Object.entries(nodeDefinitions)
   .filter(([, definition]) => definition.AI === true)
   .map(([nodeId]) => nodeId)
 
-if (aiNodeIds.length > 0 && !aiConfig.apiKey)
-  throw new Error(`DASHSCOPE_API_KEY is required to enable AI for nodes: ${aiNodeIds.join(', ')}`)
+if (aiNodeIds.length > 0 && !aiConfig.asr.apiKey)
+  throw new Error(`AI_ASR_API_KEY is required to enable AI for nodes: ${aiNodeIds.join(', ')}`)
+if (aiNodeIds.length > 0 && aiConfig.llm.enabled && !aiConfig.llm.apiKey)
+  throw new Error(`AI_LLM_API_KEY is required when AI_LLM_ENABLED=true for nodes: ${aiNodeIds.join(', ')}`)
 
 const segmentRepository = aiConfig.persistenceEnabled ? new SegmentRepository(aiConfig.databaseFile) : undefined
 const adminAuth = segmentRepository ? new AdminAuth(aiConfig.adminFile, aiConfig.sessionsFile) : undefined

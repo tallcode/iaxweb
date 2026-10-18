@@ -29,7 +29,7 @@ export interface LlmParserOptions {
   timeoutMs?: number
 }
 
-const CHAT_PATH = '/compatible-mode/v1/chat/completions'
+const CHAT_PATH = '/chat/completions'
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_RETRY_DELAYS_MS = [1_000]
 const CALLSIGN_HINT_POLICY = `呼号判断以当前文本或历史中的字母解释法、紧凑呼号原文及通联语义为最高依据。常见呼号相似度候选只是对历史数据库的检索结果，仅供发现可能的字符识别错误；它不代表候选实际出现在语音中，不能证明其属于当前发言人，也不能覆盖或改写原文的字母解释法。候选列表不是白名单，原文证据明确时可以输出列表外的合法呼号；证据不足时不得仅凭候选输出呼号。`
@@ -43,8 +43,9 @@ export class LlmParser {
   private readonly fetchImpl: typeof fetch
   private readonly retryDelaysMs: number[]
   private readonly timeoutMs: number
-  private readonly enableThinking: boolean
+  private readonly enableThinking: boolean | undefined
   private readonly thinkingBudget: number | undefined
+  private readonly isDeepSeek: boolean
   private readonly callsignHints: CallsignHintMatcher | undefined
   private lastPrompt: string | undefined
   private lastSchema: { object: Record<string, unknown>, raw: string } | undefined
@@ -55,10 +56,11 @@ export class LlmParser {
     this.fetchImpl = options.fetchImpl ?? fetch
     this.retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
-    // Qwen3 models think by default; normalization/classification does not
-    // need it and thinking regularly blew the non-streaming timeout.
-    this.enableThinking = options.enableThinking ?? false
+    // undefined means "let the provider decide"; Qwen users normally set
+    // AI_LLM_ENABLE_THINKING=false because thinking often blows the timeout.
+    this.enableThinking = options.enableThinking
     this.thinkingBudget = options.thinkingBudget
+    this.isDeepSeek = /(?:^|\.)deepseek\.com$/i.test(new URL(options.baseUrl).hostname)
     this.callsignHints = options.callsignHintsEnabled && options.callsignsFile
       ? new CallsignHintMatcher(options.callsignsFile)
       : undefined
@@ -86,33 +88,33 @@ export class LlmParser {
     if (callsignHints)
       userContent += `\n\n${callsignHints}`
     const body = {
-      enable_thinking: this.enableThinking,
-      ...(this.thinkingBudget !== undefined ? { thinking_budget: this.thinkingBudget } : {}),
+      ...(this.thinkingParams()),
+      ...(this.thinkingBudget !== undefined && !this.isDeepSeek ? { thinking_budget: this.thinkingBudget } : {}),
       messages: [
         { content: `${prompt}${callsignHints ? `\n\n${CALLSIGN_HINT_POLICY}` : ''}\n\n严格按以下 JSON Schema 输出：\n${schema.raw}`, role: 'system' },
         { content: userContent, role: 'user' },
       ],
       model: this.options.model,
-      response_format: {
-        json_schema: { name: 'transcript-analysis', schema: schema.object },
-        type: 'json_schema',
-      },
+      response_format: { type: 'json_object' },
       temperature: 0.1,
     }
 
     const content = await this.requestWithRetry(body)
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(content)
-    }
-    catch {
-      throw new Error(`LLM 返回的不是有效 JSON: ${content.slice(0, 200)}`)
-    }
-
+    const parsed = parseJsonObject(content)
+    if (parsed === undefined)
+      return {}
     const error = validateAgainstSchema(parsed, schema.object)
     if (error)
-      throw new Error(`LLM 输出不符合 schema: ${error}`)
+      return {}
     return parsed as ParsedTranscript
+  }
+
+  private thinkingParams(): Record<string, unknown> {
+    if (this.enableThinking === undefined)
+      return {}
+    if (this.isDeepSeek)
+      return { thinking: { type: this.enableThinking ? 'enabled' : 'disabled' } }
+    return { enable_thinking: this.enableThinking }
   }
 
   private loadPrompt(): string | undefined {
@@ -239,6 +241,29 @@ export class LlmError extends Error {
     super(message)
     this.name = 'LlmError'
   }
+}
+
+function parseJsonObject(content: string): Record<string, unknown> | undefined {
+  const trimmed = content.trim()
+  if (!trimmed)
+    return undefined
+  const unfenced = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+  const candidates = [unfenced]
+  const start = unfenced.indexOf('{')
+  const end = unfenced.lastIndexOf('}')
+  if (start !== -1 && end > start)
+    candidates.push(unfenced.slice(start, end + 1))
+  for (const candidate of candidates) {
+    try {
+      const value: unknown = JSON.parse(candidate)
+      if (typeof value === 'object' && value !== null && !Array.isArray(value))
+        return value as Record<string, unknown>
+    }
+    catch {
+      continue
+    }
+  }
+  return undefined
 }
 
 // Validates the subset of JSON Schema the LLM parser output uses: object
