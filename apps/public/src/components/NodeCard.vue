@@ -133,7 +133,7 @@ async function toggleAudio(): Promise<void> {
     await props.audioPlayer.toggle(props.nodeId, audioButton.value, spectrumMeter, { play: '▶', stop: '■' })
   }
   catch {
-    await props.audioPlayer.stop()
+    // The player cleans up failed starts; an older failure must not stop a newer session.
   }
 }
 

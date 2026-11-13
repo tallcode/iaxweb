@@ -3,6 +3,7 @@ import { storeToRefs } from 'pinia'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import SpotPanel from './components/SpotPanel.vue'
+import { useMobileLayout } from './composables/use-mobile-layout'
 import { useTransmissionFavicon } from './composables/use-transmission-favicon'
 import { formatRepeaterSummary } from './services/status-presentation'
 import { useStatusStore } from './stores/status-store'
@@ -10,13 +11,12 @@ import { useStatusStore } from './stores/status-store'
 const statusStore = useStatusStore()
 const { aiSpotEnabled, hasInitialSnapshot, recentSpots, repeaterSummary, spotHistoryReady, statusSnapshot } = storeToRefs(statusStore)
 const route = useRoute()
-const isMobile = ref(false)
+const isMobile = useMobileLayout()
 const readyRoutePath = ref<string>()
 const isPageReady = computed(() => readyRoutePath.value === route.fullPath)
 const isInitialAppReady = computed(() => hasInitialSnapshot.value && isPageReady.value)
 const hasEnteredApp = ref(false)
 const headerMessage = computed(() => formatRepeaterSummary(repeaterSummary.value, isMobile.value))
-let mobileMediaQuery: MediaQueryList | undefined
 
 useTransmissionFavicon(statusSnapshot)
 
@@ -26,19 +26,22 @@ watch(isInitialAppReady, (ready) => {
 }, { immediate: true })
 
 onMounted(() => {
-  mobileMediaQuery = matchMedia('(max-width: 680px)')
-  isMobile.value = mobileMediaQuery.matches
-  mobileMediaQuery.addEventListener('change', updateMobileState)
+  syncViewportHeight()
+  window.addEventListener('resize', syncViewportHeight)
+  window.visualViewport?.addEventListener('resize', syncViewportHeight)
   statusStore.startStatusStream()
 })
 
 onBeforeUnmount(() => {
   statusStore.stopStatusStream()
-  mobileMediaQuery?.removeEventListener('change', updateMobileState)
+  window.removeEventListener('resize', syncViewportHeight)
+  window.visualViewport?.removeEventListener('resize', syncViewportHeight)
+  document.documentElement.style.removeProperty('--app-height')
 })
 
-function updateMobileState(event: MediaQueryListEvent): void {
-  isMobile.value = event.matches
+function syncViewportHeight(): void {
+  const height = Math.floor(window.visualViewport?.height ?? window.innerHeight)
+  document.documentElement.style.setProperty('--app-height', `${height}px`)
 }
 
 function markPageReady(routePath: string): void {
@@ -48,9 +51,9 @@ function markPageReady(routePath: string): void {
 </script>
 
 <template>
-  <div class="map-shell" :class="{ 'ai-spot-disabled': !aiSpotEnabled, 'app-pending': !hasEnteredApp }">
+  <div class="map-shell" :class="{ 'is-mobile': isMobile, 'ai-spot-disabled': !aiSpotEnabled, 'app-pending': !hasEnteredApp }">
     <header class="map-header">
-      <p class="m-0 text-[0.82rem] text-[#96a4b7] max-[680px]:whitespace-nowrap max-[680px]:text-[0.68rem]" aria-live="polite" :aria-label="headerMessage">
+      <p aria-live="polite" :aria-label="headerMessage">
         {{ headerMessage }}
       </p>
       <nav class="page-nav" aria-label="页面导航">

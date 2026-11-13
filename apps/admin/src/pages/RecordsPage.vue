@@ -22,6 +22,7 @@ const editingCallsign = ref<{ id: string, role: CallsignRole } | null>(null)
 const playingSegmentId = ref<string | null>(null)
 const isLoading = ref(false)
 const audioPlayer = new Audio()
+let segmentRequest: AbortController | undefined
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const { markRefreshed } = useConditionalAutoRefresh({
@@ -39,12 +40,16 @@ audioPlayer.addEventListener('ended', stopPlayback)
 audioPlayer.addEventListener('error', handlePlaybackError)
 onMounted(() => void loadSegments())
 onBeforeUnmount(() => {
+  segmentRequest?.abort()
   stopPlayback()
   audioPlayer.removeEventListener('ended', stopPlayback)
   audioPlayer.removeEventListener('error', handlePlaybackError)
 })
 
 async function loadSegments(): Promise<void> {
+  segmentRequest?.abort()
+  const request = new AbortController()
+  segmentRequest = request
   isLoading.value = true
   statusMessage.value = '加载中…'
   try {
@@ -55,7 +60,9 @@ async function loadSegments(): Promise<void> {
       query.set('manualOnly', 'true')
     if (aiOnly.value)
       query.set('aiOnly', 'true')
-    const response = await fetch(`/api/admin/segments?${query}`)
+    const response = await fetch(`/api/admin/segments?${query}`, { signal: request.signal })
+    if (request.signal.aborted)
+      return
     if (response.status === 401) {
       await router.replace('/')
       return
@@ -65,6 +72,8 @@ async function loadSegments(): Promise<void> {
       return
     }
     const data = await response.json() as SegmentPage
+    if (request.signal.aborted)
+      return
     total.value = data.total
     const lastPage = Math.max(1, Math.ceil(data.total / PAGE_SIZE))
     if (currentPage.value > lastPage) {
@@ -81,10 +90,14 @@ async function loadSegments(): Promise<void> {
       : `共 ${total.value} 条记录`
   }
   catch {
-    statusMessage.value = '加载失败：无法连接服务器'
+    if (!request.signal.aborted)
+      statusMessage.value = '加载失败：无法连接服务器'
   }
   finally {
-    isLoading.value = false
+    if (segmentRequest === request) {
+      isLoading.value = false
+      segmentRequest = undefined
+    }
   }
 }
 

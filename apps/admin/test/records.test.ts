@@ -16,6 +16,41 @@ afterEach(() => {
 })
 
 describe('record callsign editing', () => {
+  it('keeps the newest page when an older request finishes later', async () => {
+    vi.stubGlobal('scrollTo', vi.fn())
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+    let resolveOldPage!: (response: Response) => void
+    let resolveNewPage!: (response: Response) => void
+    const oldPage = new Promise<Response>(resolve => resolveOldPage = resolve)
+    const newPage = new Promise<Response>(resolve => resolveNewPage = resolve)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [segment()], page: 1, pageSize: 50, total: 150 }))
+      .mockReturnValueOnce(oldPage)
+      .mockReturnValueOnce(newPage)
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    const next = wrapper.findAll('button').find(button => button.text() === '下一页')!
+    await next.trigger('click')
+    const oldSignal = fetchMock.mock.calls[1]![1].signal as AbortSignal
+    await next.trigger('click')
+    expect(oldSignal.aborted).toBe(true)
+
+    resolveNewPage(jsonResponse({ items: [{ ...segment(), id: 'new', recognition: 'Page three' }], page: 3, pageSize: 50, total: 150 }))
+    await flushPromises()
+    resolveOldPage(jsonResponse({ items: [{ ...segment(), id: 'old', recognition: 'Page two' }], page: 2, pageSize: 50, total: 150 }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Page three')
+    expect(wrapper.text()).not.toContain('Page two')
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="页码"]').element.value).toBe('3')
+    wrapper.unmount()
+  })
+
   it('shows the effective callsign and switches to a green manual value after Enter', async () => {
     vi.stubGlobal('Audio', class extends EventTarget {
       src = ''

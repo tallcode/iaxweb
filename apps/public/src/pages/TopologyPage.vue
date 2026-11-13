@@ -2,6 +2,7 @@
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NodeCard from '../components/NodeCard.vue'
+import { useMobileLayout } from '../composables/use-mobile-layout'
 import { AudioStreamPlayer } from '../services/audio-player'
 import { buildTopologyEdges, createTopologySignature } from '../services/topology-graph'
 import { TopologyLayout } from '../services/topology-layout'
@@ -12,11 +13,10 @@ const statusStore = useStatusStore()
 const { hasInitialSnapshot, statusSnapshot } = storeToRefs(statusStore)
 const topologyElement = ref<HTMLElement | null>(null)
 const edgeCanvas = ref<HTMLCanvasElement | null>(null)
-const isMobile = ref(false)
+const isMobile = useMobileLayout()
 const nodeElements = new Map<string, HTMLElement>()
 const audioPlayer = new AudioStreamPlayer()
 let topologyLayout: TopologyLayout | undefined
-let mobileMediaQuery: MediaQueryList | undefined
 let resizeObserver: ResizeObserver | undefined
 let topologyHeight = 0
 let topologyWidth = 0
@@ -26,12 +26,7 @@ let hasReportedInitialLayout = false
 const nodeIds = computed(() => Object.keys(statusSnapshot.value))
 
 onMounted(() => {
-  syncViewportHeight()
-  window.addEventListener('resize', syncViewportHeight)
-  window.visualViewport?.addEventListener('resize', syncViewportHeight)
-  mobileMediaQuery = matchMedia('(max-width: 680px)')
-  isMobile.value = mobileMediaQuery.matches
-  mobileMediaQuery.addEventListener('change', handleMobileBreakpointChange)
+  audioPlayer.setVisualizationEnabled(!isMobile.value)
 
   if (topologyElement.value && edgeCanvas.value) {
     topologyWidth = topologyElement.value.clientWidth
@@ -41,6 +36,7 @@ onMounted(() => {
       edgeCanvas.value,
       nodeElements,
       matchMedia('(prefers-reduced-motion: reduce)').matches,
+      () => isMobile.value,
     )
     resizeObserver = new ResizeObserver(([entry]) => {
       if (!entry)
@@ -63,15 +59,15 @@ onBeforeUnmount(() => {
   if (mobileRelayoutTimer)
     clearTimeout(mobileRelayoutTimer)
   resizeObserver?.disconnect()
-  mobileMediaQuery?.removeEventListener('change', handleMobileBreakpointChange)
-  window.removeEventListener('resize', syncViewportHeight)
-  window.visualViewport?.removeEventListener('resize', syncViewportHeight)
+  topologyLayout?.dispose()
+  topologyLayout = undefined
 })
 
 watch(statusSnapshot, () => void updateTopologyGraph(), { deep: true })
 watch(isMobile, () => {
   audioPlayer.setVisualizationEnabled(!isMobile.value)
   void updateTopologyGraph()
+  scheduleMobileRelayout()
 })
 
 function registerNodeElement(nodeId: string, element: HTMLElement | null): void {
@@ -106,10 +102,6 @@ async function updateTopologyGraph(): Promise<void> {
   }
 }
 
-function handleMobileBreakpointChange(event: MediaQueryListEvent): void {
-  isMobile.value = event.matches
-}
-
 function scheduleMobileRelayout(): void {
   if (mobileRelayoutTimer)
     clearTimeout(mobileRelayoutTimer)
@@ -118,11 +110,6 @@ function scheduleMobileRelayout(): void {
     mobileRelayoutTimer = undefined
     topologyLayout?.relayout()
   }, 240)
-}
-
-function syncViewportHeight(): void {
-  const height = Math.floor(window.visualViewport?.height ?? window.innerHeight)
-  document.documentElement.style.setProperty('--app-height', `${height}px`)
 }
 </script>
 

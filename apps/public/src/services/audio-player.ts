@@ -24,6 +24,7 @@ export class AudioStreamPlayer {
   private connection: ReconnectingWebSocket | null = null
   private context: AudioContext | null = null
   private lastTimestamp: number | null = null
+  private playbackVersion = 0
 
   get playingNodeId(): string | null {
     return this.binding?.nodeId ?? null
@@ -35,42 +36,59 @@ export class AudioStreamPlayer {
     spectrumMeter: SpectrumMeter,
     labels: AudioLabels = { play: '播放', stop: '停止' },
   ): Promise<void> {
-    if (this.context && this.playingNodeId === nodeId) {
+    if (this.playingNodeId === nodeId) {
       await this.stop()
       return
     }
-    if (this.context)
-      await this.stop()
     await this.start(nodeId, button, spectrumMeter, labels)
   }
 
   async start(nodeId: string, button: HTMLButtonElement, spectrumMeter: SpectrumMeter, labels: AudioLabels): Promise<void> {
     const context = new AudioContext({ sampleRate: SAMPLE_RATE })
+    const version = ++this.playbackVersion
+    const closing = this.releasePlayback()
     this.context = context
+    this.binding = { button, labels, nodeId, spectrumMeter }
     try {
-      await context.resume()
+      await Promise.all([closing, context.resume()])
+      if (version !== this.playbackVersion)
+        return
+      this.setVisualizationEnabled()
+      this.resetTimeline()
+      this.setPlaying(true)
+      this.connection = new ReconnectingWebSocket(`/audio/${encodeURIComponent(nodeId)}`, {
+        binaryType: 'arraybuffer',
+        delays: [1_000, 2_000, 8_000, 32_000],
+        maxFailures: 4,
+        onDisconnect: () => {
+          if (version === this.playbackVersion)
+            this.resetTimeline()
+        },
+        onExhausted: () => {
+          if (version === this.playbackVersion)
+            void this.stop(false)
+        },
+        onMessage: (event) => {
+          if (version === this.playbackVersion)
+            this.handleMessage(event)
+        },
+      })
+      this.connection.start()
     }
     catch (error) {
-      this.context = null
-      await context.close()
+      if (version !== this.playbackVersion)
+        return
+      await this.stop()
       throw error
     }
-    this.binding = { button, labels, nodeId, spectrumMeter }
-    this.setVisualizationEnabled()
-    this.resetTimeline()
-    this.setPlaying(true)
-    this.connection = new ReconnectingWebSocket(`/audio/${encodeURIComponent(nodeId)}`, {
-      binaryType: 'arraybuffer',
-      delays: [1_000, 2_000, 8_000, 32_000],
-      maxFailures: 4,
-      onDisconnect: () => this.resetTimeline(),
-      onExhausted: () => void this.stop(false),
-      onMessage: event => this.handleMessage(event),
-    })
-    this.connection.start()
   }
 
   async stop(closeSocket = true): Promise<void> {
+    ++this.playbackVersion
+    await this.releasePlayback(closeSocket)
+  }
+
+  private async releasePlayback(closeSocket = true): Promise<void> {
     const connection = this.connection
     this.connection = null
     if (closeSocket)
@@ -84,8 +102,9 @@ export class AudioStreamPlayer {
     const context = this.context
     this.context = null
     this.resetTimeline()
-    await context?.close()
     this.setBindingPlaying(binding, false)
+    if (context && context.state !== 'closed')
+      await context.close()
   }
 
   setVisualizationEnabled(enabled = this.binding?.spectrumMeter.enabled ?? false): void {

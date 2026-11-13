@@ -14,6 +14,7 @@ const REQUIRED_STABLE_ITERATIONS = 36
 const STABLE_SPEED_THRESHOLD = 0.03
 
 export class TopologyLayout {
+  private disposed = false
   private animationFrame = 0
   private readonly canvas: HTMLCanvasElement
   private readonly context: CanvasRenderingContext2D
@@ -21,6 +22,7 @@ export class TopologyLayout {
   private edges: TopologyEdge[] = []
   private readonly motionStates = new Map<string, NodeMotionState>()
   private readonly reduceMotion: boolean
+  private readonly isMobile: () => boolean
   private signature = ''
   private hasStartedLayout = false
   private readonly topology: HTMLElement
@@ -30,6 +32,7 @@ export class TopologyLayout {
     canvas: HTMLCanvasElement,
     nodeElements: Map<string, HTMLElement>,
     reduceMotion: boolean,
+    isMobile: () => boolean,
   ) {
     this.topology = topology
     this.canvas = canvas
@@ -39,9 +42,12 @@ export class TopologyLayout {
     this.context = context
     this.nodeElements = nodeElements
     this.reduceMotion = reduceMotion
+    this.isMobile = isMobile
   }
 
   ensureNode(nodeId: string, index: number, total: number): void {
+    if (this.disposed)
+      return
     if (!this.motionStates.has(nodeId))
       this.motionStates.set(nodeId, this.initialMotionState(index, total))
   }
@@ -51,6 +57,8 @@ export class TopologyLayout {
   }
 
   updateGraph(edges: TopologyEdge[], signature: string): void {
+    if (this.disposed)
+      return
     this.edges = edges
     if (signature !== this.signature) {
       this.signature = signature
@@ -65,11 +73,22 @@ export class TopologyLayout {
     this.startLayout()
   }
 
+  dispose(): void {
+    this.disposed = true
+    cancelAnimationFrame(this.animationFrame)
+    this.animationFrame = 0
+    this.edges = []
+    this.motionStates.clear()
+    this.nodeElements.clear()
+    this.canvas.width = 0
+    this.canvas.height = 0
+  }
+
   private initialMotionState(index: number, total: number): NodeMotionState {
     const width = this.topology.clientWidth || 800
     const height = this.topology.clientHeight || 600
     const angle = total > 1 ? index / total * Math.PI * 2 : 0
-    const radiusRatio = width < 680 ? 0.22 : 0.3
+    const radiusRatio = this.isMobile() ? 0.22 : 0.3
     const radius = Math.min(width, height) * radiusRatio
     return {
       vx: 0,
@@ -80,6 +99,8 @@ export class TopologyLayout {
   }
 
   private startLayout(): void {
+    if (this.disposed)
+      return
     cancelAnimationFrame(this.animationFrame)
     this.animationFrame = 0
     const duration = this.hasStartedLayout ? RELAYOUT_ANIMATION_MS : INITIAL_ANIMATION_MS
@@ -146,11 +167,14 @@ export class TopologyLayout {
     const entries = [...this.motionStates.entries()]
     const width = this.topology.clientWidth
     const height = this.topology.clientHeight
-    const isMobile = width < 680
+    const isMobile = this.isMobile()
     const repulsionStrength = isMobile ? 13_500 : 18_000
     const linkStrength = isMobile ? 0.0045 : 0.0028
     const centerStrength = isMobile ? 0.00105 : 0.0007
     const idealDistance = isMobile ? clamp(width * 0.3, 80, 120) : 265
+    const cardGap = isMobile ? 24 : 12
+    const collisionStrength = isMobile ? 0.12 : 0.04
+    const maximumCollisionForce = isMobile ? 4 : 2.5
 
     for (let left = 0; left < entries.length; left++) {
       for (let right = left + 1; right < entries.length; right++) {
@@ -174,20 +198,20 @@ export class TopologyLayout {
 
         const firstElement = this.nodeElements.get(firstEntry[0])
         const secondElement = this.nodeElements.get(secondEntry[0])
-        const minimumX = ((firstElement?.offsetWidth || 0) + (secondElement?.offsetWidth || 0)) / 2 + 12
-        const minimumY = ((firstElement?.offsetHeight || 0) + (secondElement?.offsetHeight || 0)) / 2 + 12
+        const minimumX = ((firstElement?.offsetWidth || 0) + (secondElement?.offsetWidth || 0)) / 2 + cardGap
+        const minimumY = ((firstElement?.offsetHeight || 0) + (secondElement?.offsetHeight || 0)) / 2 + cardGap
         const overlapX = minimumX - Math.abs(dx)
         const overlapY = minimumY - Math.abs(dy)
         if (overlapX > 0 && overlapY > 0) {
           if (overlapX < overlapY) {
             const direction = dx >= 0 ? 1 : -1
-            const collisionForce = Math.min(2.5, overlapX * 0.04)
+            const collisionForce = Math.min(maximumCollisionForce, overlapX * collisionStrength)
             first.vx -= direction * collisionForce
             second.vx += direction * collisionForce
           }
           else {
             const direction = dy >= 0 ? 1 : -1
-            const collisionForce = Math.min(2.5, overlapY * 0.04)
+            const collisionForce = Math.min(maximumCollisionForce, overlapY * collisionStrength)
             first.vy -= direction * collisionForce
             second.vy += direction * collisionForce
           }
@@ -247,11 +271,11 @@ export class TopologyLayout {
         continue
       this.context.save()
       this.context.setLineDash(edge.connected ? [] : [7, 7])
-      this.context.lineWidth = edge.connected ? 2.8 : 1.4
-      this.context.strokeStyle = edge.connected ? '#52c9c3' : '#465465'
+      this.context.lineWidth = edge.connected ? 1.7 : 1.2
+      this.context.strokeStyle = edge.connected ? 'rgb(82 201 195 / 60%)' : 'rgb(70 84 101 / 75%)'
       if (edge.connected) {
-        this.context.shadowBlur = 9
-        this.context.shadowColor = '#52c9c3'
+        this.context.shadowBlur = 3
+        this.context.shadowColor = 'rgb(82 201 195 / 25%)'
       }
       this.context.beginPath()
       this.context.moveTo(source.x, source.y)
@@ -314,9 +338,9 @@ export class TopologyLayout {
     gradient.addColorStop(0, 'rgb(114 239 231 / 0)')
     gradient.addColorStop(1, '#d8fffc')
     this.context.strokeStyle = gradient
-    this.context.lineWidth = 3
+    this.context.lineWidth = 2.2
     this.context.lineCap = 'round'
-    this.context.shadowBlur = 11
+    this.context.shadowBlur = 5
     this.context.shadowColor = '#72efe7'
     this.context.beginPath()
     this.context.moveTo(tailX, tailY)
@@ -325,7 +349,7 @@ export class TopologyLayout {
 
     this.context.fillStyle = '#e8fffd'
     this.context.beginPath()
-    this.context.arc(x, y, 2.4, 0, Math.PI * 2)
+    this.context.arc(x, y, 1.9, 0, Math.PI * 2)
     this.context.fill()
     this.context.restore()
   }

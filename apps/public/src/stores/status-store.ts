@@ -6,6 +6,7 @@ import { markSnapshotOffline, StatusStreamClient } from '../services/status-stre
 
 const NO_CALLSIGN = 'N0CALL'
 const MAX_SPOTS = 100
+const MAX_CACHED_SPOTS = 1_000
 
 export const useStatusStore = defineStore('status', () => {
   const statusSnapshot = ref<PublicStatusSnapshot>({})
@@ -78,8 +79,18 @@ export const useStatusStore = defineStore('status', () => {
     }
     else {
       const previous = spotsById.value.get(spot.id)
-      if (!previous || spot.at >= previous.at)
+      if (!previous || spot.at >= previous.at) {
         spotsById.value.set(spot.id, spot)
+        if (spotsById.value.size > MAX_CACHED_SPOTS) {
+          let oldest: SpotEvent | undefined
+          for (const cached of spotsById.value.values()) {
+            if (!oldest || cached.at < oldest.at)
+              oldest = cached
+          }
+          if (oldest)
+            spotsById.value.delete(oldest.id)
+        }
+      }
     }
   }
 

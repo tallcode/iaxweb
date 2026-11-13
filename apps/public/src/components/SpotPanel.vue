@@ -1,7 +1,57 @@
 <script setup lang="ts">
 import type { SpotEvent } from '@iaxweb/contracts'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-defineProps<{ historyReady: boolean, spots: SpotEvent[] }>()
+const props = defineProps<{ historyReady: boolean, spots: SpotEvent[] }>()
+const spotListElement = ref<HTMLUListElement | null>(null)
+const visibleSpotCount = ref(0)
+const visibleSpots = computed(() => props.spots.slice(0, visibleSpotCount.value))
+const highlightedSpotKeys = ref(new Set<string>())
+let resizeObserver: ResizeObserver | undefined
+
+function spotKey(spot: SpotEvent): string {
+  return `${spot.id}|${spot.callsign}|${spot.at}`
+}
+
+watch(() => ({ historyReady: props.historyReady, keys: props.spots.map(spotKey) }), (current, previous) => {
+  if (!current.historyReady || !previous?.historyReady) {
+    highlightedSpotKeys.value = new Set()
+    return
+  }
+  const previousKeys = new Set(previous.keys)
+  // Existing rows keep their animation when another spot arrives. Initial
+  // history stays quiet, and keys that leave the bounded list are discarded.
+  highlightedSpotKeys.value = new Set(current.keys.filter(key => highlightedSpotKeys.value.has(key) || !previousKeys.has(key)))
+}, { immediate: true })
+
+function syncSpotCapacity(): void {
+  const list = spotListElement.value
+  if (!list)
+    return
+  const style = getComputedStyle(list)
+  if (style.flexDirection === 'row') {
+    visibleSpotCount.value = 3
+    return
+  }
+  const itemHeight = Number.parseFloat(style.getPropertyValue('--spot-item-height'))
+  const gap = Number.parseFloat(style.rowGap) || 0
+  visibleSpotCount.value = Math.max(0, Math.floor((list.getBoundingClientRect().height + gap) / (itemHeight + gap)))
+}
+
+watch(spotListElement, (list) => {
+  resizeObserver?.disconnect()
+  if (!list)
+    return
+  resizeObserver ??= new ResizeObserver(syncSpotCapacity)
+  resizeObserver.observe(list)
+  syncSpotCapacity()
+}, { flush: 'post' })
+
+onMounted(() => window.addEventListener('resize', syncSpotCapacity))
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  window.removeEventListener('resize', syncSpotCapacity)
+})
 
 function relativeTime(iso: string): string {
   const then = new Date(iso)
@@ -29,8 +79,8 @@ function relativeTime(iso: string): string {
         title="在浙江省业余无线电协会链路联网中继上，用清晰标准的字母解释法说出自己的呼号，AI值机员就有可能把你的呼号记录下来。&#10;如果语速太快，声音太轻，信号有干扰可能无法记录或者识别失败"
       >?</span>
     </h2>
-    <ul v-if="spots.length" class="spot-list">
-      <li v-for="spot in spots" :key="`${spot.id}|${spot.callsign}|${spot.at}`" class="spot-item">
+    <ul v-if="spots.length" ref="spotListElement" class="spot-list">
+      <li v-for="spot in visibleSpots" :key="spotKey(spot)" class="spot-item" :class="{ 'is-new': highlightedSpotKeys.has(spotKey(spot)) }" @animationend="highlightedSpotKeys.delete(spotKey(spot))">
         <span class="spot-callsign">{{ spot.callsign }}</span>
         <time class="spot-time" :datetime="spot.at">{{ relativeTime(spot.at) }}</time>
       </li>
