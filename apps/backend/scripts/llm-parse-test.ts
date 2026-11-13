@@ -4,6 +4,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { config as loadEnv } from 'dotenv'
 import { LlmParser } from '../src/ai/llm-parser.js'
+import { correctExplanationText } from '../src/ai/phonetic-corrector.js'
 import { loadAiConfig } from '../src/config.js'
 
 loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../..', '.env'), quiet: true })
@@ -32,7 +33,7 @@ const parser = new LlmParser({
 })
 
 try {
-  const parsed = await parser.parse(text)
+  const parsed = await parser.parse(text, undefined, correctExplanationText(text).text)
   if (!parsed) {
     console.error('LLM 解析未生效：缺少提示词或 schema 文件')
     process.exit(1)

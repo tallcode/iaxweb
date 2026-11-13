@@ -194,6 +194,22 @@ test('splits overlong transmissions at the maximum length', () => {
     [3_000, 3_000, 1_000],
   )
   assert.equal(capture.discards.length, 0)
+  const ids = capture.segments.map(segment => segment.transmissionId)
+  assert.ok(ids[0])
+  assert.ok(ids.every(id => id === ids[0]))
+  assert.deepEqual(capture.segments.map(segment => segment.partIndex), [0, 1, 2])
+})
+
+test('a later transmission does not inherit the previous chunk identity', () => {
+  const { capture, segmenter } = makeSegmenter({ coldMinMs: 400, hotMinMs: 400 })
+  segmenter.start()
+  pushVoice(segmenter, 30, 0)
+  segmenter.stop()
+  segmenter.start()
+  pushVoice(segmenter, 30, 1_000)
+  segmenter.stop()
+  assert.notEqual(capture.segments[0]?.transmissionId, capture.segments[1]?.transmissionId)
+  assert.deepEqual(capture.segments.map(segment => segment.partIndex), [0, 0])
 })
 
 test('splits overlong transmissions at a quiet window when available', () => {

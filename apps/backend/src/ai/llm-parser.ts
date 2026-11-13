@@ -1,6 +1,10 @@
+import type { CallsignContext, TranscriptTurn } from './callsign-evidence.js'
 import { readFileSync } from 'node:fs'
+import { isDeepStrictEqual } from 'node:util'
 import { logTimestamp } from './asr-context-files.js'
+import { buildCallsignContext } from './callsign-evidence.js'
 import { CallsignHintMatcher, formatCallsignHints } from './callsign-hints.js'
+import { checkCallsignDecision, supportedSelfEvidence } from './callsign-speaker.js'
 import { shouldIncludeCallsignCorrection } from './phonetic-corrector.js'
 
 export interface RiskRating {
@@ -9,7 +13,7 @@ export interface RiskRating {
 }
 
 export interface ParsedTranscript {
-  Callsign?: string | undefined
+  callsign?: string | undefined
   message?: string | undefined
   risk?: RiskRating | undefined
 }
@@ -32,7 +36,12 @@ export interface LlmParserOptions {
 const CHAT_PATH = '/chat/completions'
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_RETRY_DELAYS_MS = [1_000]
-const CALLSIGN_HINT_POLICY = `呼号判断以当前文本或历史中的字母解释法、紧凑呼号原文及通联语义为最高依据。常见呼号相似度候选只是对历史数据库的检索结果，仅供发现可能的字符识别错误；它不代表候选实际出现在语音中，不能证明其属于当前发言人，也不能覆盖或改写原文的字母解释法。候选列表不是白名单，原文证据明确时可以输出列表外的合法呼号；证据不足时不得仅凭候选输出呼号。`
+// Keep off while observing the first deployment. This is deliberately a code
+// switch, not an environment/configuration setting.
+const CALLSIGN_RECHECK_ENABLED = false
+const CALLSIGN_OUTPUT_POLICY = `呼号输出协议：严格输出JSON。只提取当前说话人自己的呼号，先找当前自报依据，再匹配字母解释法候选。完整拼读仅证明字符，不能证明身份；被叫、复述确认和第三方不得记到自己。没有解释法候选或身份不明就拒绝，不能靠裸字母、合法格式、数据库相似提示猜测。
+接受时输出speaker="self"、当前原文逐字引用quote、全大写呼号值callsign及对应候选id整数evidence；字段名callsign小写，不使用Callsign。拒绝时speaker为other或unknown，不输出callsign、evidence、quote。message/risk等额外任务遵循schema。
+当前多个自报片段要全部检查，不停在第一个紧凑形式；完整解释法可以纠正同一自报里的ASR字符错误。历史拼读只支持本轮明确自报的同一呼号。kind=verified-continuation才允许跨段，quote只引用当前后半段，不能拼接历史原文。候选id和呼号必须对应；数据库相似提示不能新增证据候选。`
 
 // LLM 后处理：用对话模型对语音识别文本做结构化解析（完整版含规范化、呼号
 // 提取与风控，简化版只提取呼号）。提示词与 JSON Schema 存在文件中，每次
@@ -66,47 +75,79 @@ export class LlmParser {
       : undefined
   }
 
-  async parse(transcript: string, history?: string, corrected: string = transcript): Promise<ParsedTranscript | undefined> {
-    // 跑测试前注释掉下面这一行（极端省钱开关，测试输入通常不含 B）
-    if (!/B/i.test(corrected))
-      return {}
+  async parse(
+    transcript: string,
+    history?: string | readonly TranscriptTurn[],
+    corrected: string = transcript,
+    metadata: Omit<TranscriptTurn, 'text'> = { id: 'current' },
+  ): Promise<ParsedTranscript | undefined> {
     const prompt = this.loadPrompt()
     const schema = this.loadSchema()
     if (!prompt || !schema)
       return undefined
-    // Recent turns (if any) give the model conversation continuity; the
-    // current transcript is clearly delimited so it is not confused with them.
-    let userContent = history
-      ? `最近对话历史（按时间顺序）：\n${history}\n\n当前语音识别文本：\n${transcript}`
-      : transcript
-    // Only spend tokens on a second transcript when phonetic correction has
-    // actually changed the text and surfaced a possible Chinese callsign's B
-    // prefix. The raw ASR transcript remains the primary evidence.
-    if (shouldIncludeCallsignCorrection(transcript, corrected))
-      userContent += `\n\n音素纠错辅助文本（仅供判断）：\n${corrected}`
+    const turns = typeof history === 'string' ? [{ id: 'history', text: history }] : history ?? []
+    const context = buildCallsignContext({ ...metadata, text: transcript }, turns.filter(turn => turn.id !== metadata.id))
+    // Candidate evidence replaces the old /B/ shortcut, allowing a verified
+    // continuation or history-supported self-introduction to be considered.
+    if (context.candidates.length === 0 && !hasAnalysisFields(schema.object))
+      return {}
     const callsignHints = formatCallsignHints(this.callsignHints?.match(corrected) ?? [])
-    if (callsignHints)
-      userContent += `\n\n${callsignHints}`
-    const body = {
+    const payload = {
+      history: context.history,
+      current: context.current,
+      candidates: context.candidates,
+      ...(shouldIncludeCallsignCorrection(transcript, corrected) ? { corrected: { text: corrected, purpose: '音素纠错辅助文本，仅供判断，不是独立证据' } } : {}),
+      ...(callsignHints ? { similarityHints: callsignHints } : {}),
+    }
+    const body = (content: unknown, recheck = false) => ({
       ...(this.thinkingParams()),
       ...(this.thinkingBudget !== undefined && !this.isDeepSeek ? { thinking_budget: this.thinkingBudget } : {}),
       messages: [
-        { content: `${prompt}${callsignHints ? `\n\n${CALLSIGN_HINT_POLICY}` : ''}\n\n严格按以下 JSON Schema 输出：\n${schema.raw}`, role: 'system' },
-        { content: userContent, role: 'user' },
+        { content: `${prompt}\n\n${CALLSIGN_OUTPUT_POLICY}${recheck ? '\n这是一次引用校验失败后的单次复核。只从独立核验过当前自报引用的候选中选择，suggestedQuote可直接核对；不确定仍然拒绝。' : ''}\n\n严格按以下 JSON Schema 输出：\n${schema.raw}`, role: 'system' },
+        { content: JSON.stringify(content), role: 'user' },
       ],
       model: this.options.model,
       response_format: { type: 'json_object' },
       temperature: 0.1,
-    }
+    })
 
-    const content = await this.requestWithRetry(body)
-    const parsed = parseJsonObject(content)
+    const parsed = normalizeCallsign(parseJsonObject(await this.requestWithRetry(body(payload))))
     if (parsed === undefined)
       return {}
-    const error = validateAgainstSchema(parsed, schema.object)
-    if (error)
-      return {}
-    return parsed as ParsedTranscript
+    const schemaError = validateAgainstSchema(parsed, schema.object)
+    const analysis = schemaError ? {} : analysisFields(parsed)
+    const decision = checkCallsignDecision(parsed, context)
+    if (!schemaError && decision.callsign)
+      return { ...analysis, callsign: decision.callsign }
+    // No evidence, normal refusals and unrelated schema errors never trigger
+    // a second call. Even when enabled, invalid self claims get at most one.
+    if (!CALLSIGN_RECHECK_ENABLED || parsed.speaker !== 'self' || !decision.error)
+      return analysis
+    const supported = supportedSelfEvidence(context)
+    if (supported.length === 0)
+      return analysis
+    return this.recheckCallsign(context, supported, body, schema.object, analysis)
+  }
+
+  private async recheckCallsign(
+    context: CallsignContext,
+    candidates: ReturnType<typeof supportedSelfEvidence>,
+    body: (content: unknown, recheck?: boolean) => unknown,
+    schema: Record<string, unknown>,
+    fallback: ParsedTranscript,
+  ): Promise<ParsedTranscript> {
+    let parsed: Record<string, unknown> | undefined
+    try {
+      parsed = normalizeCallsign(parseJsonObject(await this.requestOnce(body({ history: context.history, current: context.current, candidates }, true))))
+    }
+    catch (error) {
+      console.warn(`${logTimestamp()} [AI]: 呼号单次复核失败: ${errorMessage(error)}`)
+      return fallback
+    }
+    if (!parsed || validateAgainstSchema(parsed, schema))
+      return fallback
+    const decision = checkCallsignDecision(parsed, { ...context, candidates })
+    return decision.callsign ? { ...analysisFields(parsed), callsign: decision.callsign } : fallback
   }
 
   private thinkingParams(): Record<string, unknown> {
@@ -243,6 +284,31 @@ export class LlmError extends Error {
   }
 }
 
+function normalizeCallsign(parsed: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (parsed && typeof parsed.callsign === 'string')
+    return { ...parsed, callsign: parsed.callsign.trim().toUpperCase() }
+  return parsed
+}
+
+function analysisFields(parsed: Record<string, unknown>): ParsedTranscript {
+  const result: ParsedTranscript = {}
+  if (typeof parsed.message === 'string')
+    result.message = parsed.message
+  const risk = parsed.risk
+  if (typeof risk === 'object' && risk !== null && 'level' in risk && 'reason' in risk
+    && Number.isInteger(risk.level) && typeof risk.level === 'number' && risk.level >= 1 && risk.level <= 5 && typeof risk.reason === 'string') {
+    result.risk = { level: risk.level, reason: risk.reason }
+  }
+  return result
+}
+
+function hasAnalysisFields(schema: Record<string, unknown>): boolean {
+  const properties = schema.properties
+  if (typeof properties === 'object' && properties !== null && ('message' in properties || 'risk' in properties))
+    return true
+  return Array.isArray(schema.oneOf) && schema.oneOf.some(branch => typeof branch === 'object' && branch !== null && hasAnalysisFields(branch as Record<string, unknown>))
+}
+
 function parseJsonObject(content: string): Record<string, unknown> | undefined {
   const trimmed = content.trim()
   if (!trimmed)
@@ -266,17 +332,25 @@ function parseJsonObject(content: string): Record<string, unknown> | undefined {
   return undefined
 }
 
-// Validates the subset of JSON Schema the LLM parser output uses: object
-// types with properties/required/additionalProperties, and string/boolean/
-// number/integer leaves. Returns the first problem found, or undefined.
+// Validates the output schema, including the mutually exclusive self/reject
+// branches. Returns the first problem found, or undefined.
 export function validateAgainstSchema(value: unknown, schema: unknown, path = '$'): string | undefined {
   if (typeof schema !== 'object' || schema === null)
     return undefined
   const spec = schema as Record<string, unknown>
 
+  if (Array.isArray(spec.oneOf) && spec.oneOf.filter(branch => validateAgainstSchema(value, branch, path) === undefined).length !== 1)
+    return `${path} 必须恰好匹配 oneOf 的一个分支`
+  if ('const' in spec && !isDeepStrictEqual(value, spec.const))
+    return `${path} 不匹配固定值`
+  if (Array.isArray(spec.enum) && !spec.enum.some(item => isDeepStrictEqual(value, item)))
+    return `${path} 不在允许值中`
+
   if (spec.type === 'string') {
     if (typeof value !== 'string')
       return `${path} 应为字符串`
+    if (typeof spec.minLength === 'number' && value.length < spec.minLength)
+      return `${path} 字符串过短`
     if (typeof spec.pattern === 'string') {
       let pattern: RegExp
       try {
@@ -296,7 +370,7 @@ export function validateAgainstSchema(value: unknown, schema: unknown, path = '$
     return undefined
   }
   if (spec.type === 'number' || spec.type === 'integer') {
-    if (typeof value !== 'number' || (spec.type === 'integer' && !Number.isInteger(value)))
+    if (typeof value !== 'number' || !Number.isFinite(value) || (spec.type === 'integer' && !Number.isInteger(value)))
       return `${path} 应为${spec.type === 'integer' ? '整数' : '数字'}`
     if (typeof spec.minimum === 'number' && value < spec.minimum)
       return `${path} 不能小于 ${spec.minimum}`

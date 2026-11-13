@@ -176,7 +176,7 @@ let englishPhoneEntries: Array<{ entry: ExplanationWord, phoneVariants: string[]
 let chinesePinyinEntries: Array<{ entry: typeof CHINESE_EXPLANATION_WORDS[number], syllables: string[] }> | undefined
 
 export function correctExplanationWord(input: string): PhoneticCorrection | undefined {
-  const lower = input.trim().toLowerCase()
+  const lower = input.trim().toLowerCase().replace(/^x[ \t]+ray$/, 'x-ray')
   const exact = EXACT_ENGLISH.get(lower)
   if (exact)
     return correction(exact, 0, 'en', 'exact')
@@ -201,7 +201,9 @@ export function correctExplanationWord(input: string): PhoneticCorrection | unde
 export function correctExplanationText(input: string): CorrectedExplanationText {
   const corrections: Array<PhoneticCorrection & { source: string }> = []
   const phraseCorrected = correctEnglishPhrases(input, corrections)
-  const text = phraseCorrected.replace(/[A-Za-z]+(?:-[A-Za-z]+)?|\p{Script=Han}+/gu, (source) => {
+  // Match X Ray as one explanation word, preserving its original spelling;
+  // otherwise the isolated X can be incorrectly corrected to Echo.
+  const text = phraseCorrected.replace(/\bx[ \t]+ray\b|[A-Z]+(?:-[A-Z]+)?|\p{Script=Han}+/giu, (source) => {
     const correctionResult = correctExplanationWord(source)
     if (!correctionResult || (correctionResult.method === 'exact' && correctionResult.language === 'en'))
       return source

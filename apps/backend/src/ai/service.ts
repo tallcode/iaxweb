@@ -186,6 +186,8 @@ export class AiService {
       payloads: segment.payloads,
       timestamp: new Date().toISOString(),
       voicedMs: segment.voicedMs,
+      transmissionId: segment.transmissionId,
+      partIndex: segment.partIndex,
     }
     const shortId = record.id.slice(0, 8)
     const wav = encodeWav(decodeMuLaw(concatenate(segment.payloads)))
@@ -238,7 +240,11 @@ export class AiService {
       return
     }
     try {
-      const parsed = await this.llm.parse(text, runtime.store.llmHistory(undefined, record.id), record.corrected ?? text)
+      const parsed = await this.llm.parse(text, runtime.store.llmTurns(undefined, record.id), record.corrected ?? text, {
+        id: record.id,
+        transmissionId: record.transmissionId,
+        partIndex: record.partIndex,
+      })
       // 解析返回 undefined 说明提示词/schema 文件缺失：LLM 解析未生效。
       if (this.stopped)
         return
@@ -248,7 +254,7 @@ export class AiService {
         return
       }
       record.revise = parsed.message
-      record.callsign = parsed.Callsign
+      record.callsign = parsed.callsign
       record.risk = parsed.risk
       if (this.repository) {
         try {
@@ -259,11 +265,11 @@ export class AiService {
           console.warn(`${logTimestamp()} [${nodeId}]: SQLite 更新失败 ${shortId}: ${errorMessage(error)}`)
         }
       }
-      console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.Callsign ? ` 呼号=${parsed.Callsign}` : ''} | ${parsed.message ?? text}`)
-      if (parsed.Callsign && this.config.llm.publishSpot) {
+      console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.callsign ? ` 呼号=${parsed.callsign}` : ''} | ${parsed.message ?? text}`)
+      if (parsed.callsign && this.config.llm.publishSpot) {
         this.onSpot?.({
           at: record.timestamp,
-          callsign: parsed.Callsign,
+          callsign: parsed.callsign,
           id: record.id,
           node: nodeId,
         })

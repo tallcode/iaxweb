@@ -76,6 +76,14 @@ test('does not correct ordinary Chinese particles to explanation words', () => {
   assert.deepEqual(correctExplanationText('是吗？'), { corrections: [], text: '是吗？' })
 })
 
+test('protects multiword X Ray before the isolated X can become Echo', () => {
+  for (const spelling of ['X Ray', 'x ray', 'X   Ray', 'X-ray', 'Xray']) {
+    const text = `Bravo Golf Five Golf ${spelling} Delta`
+    assert.deepEqual(correctExplanationText(text), { corrections: [], text })
+    assert.equal(correctExplanationWord(spelling)?.symbol, 'X')
+  }
+})
+
 test('uses a sliding English phone window only inside an explanation-word context', () => {
   assert.equal(featurePhoneDistance(['TH', 'AE', 'NG', 'K', 'Y', 'UW'], ['T', 'AE', 'NG', 'G', 'OW']), 1)
   assert.deepEqual(correctExplanationText('Bravo Germany Five Foxtrot Bravo, thank you'), {

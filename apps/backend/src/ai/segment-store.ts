@@ -1,3 +1,4 @@
+import type { TranscriptTurn } from './callsign-evidence.js'
 import { shouldIncludeCallsignCorrection } from './phonetic-corrector.js'
 
 // Unified per-segment record accumulating every pipeline stage:
@@ -15,6 +16,8 @@ export interface SegmentRecord {
   revise?: string | undefined
   callsign?: string | undefined
   risk?: RiskRating | undefined
+  transmissionId?: string | undefined
+  partIndex?: number | undefined
 }
 
 export interface RiskRating {
@@ -81,6 +84,20 @@ export class SegmentStore {
       lines.push(`${risk && risk.level > 1 ? `[风控${risk.level}] ` : ''}${text}`)
     }
     return joinWithinBudget(lines, budget)
+  }
+
+  // Raw, independently identified turns are the only source of spelling
+  // evidence. Drop whole oldest turns; never manufacture a truncated quote.
+  llmTurns(budget: number = LLM_HISTORY_BUDGET, excludeId?: string): TranscriptTurn[] {
+    const turns = this.recent()
+      .filter(record => record.id !== excludeId && record.recognition !== undefined)
+      .map(record => ({ id: record.id, text: record.recognition!, transmissionId: record.transmissionId, partIndex: record.partIndex }))
+    let size = turns.reduce((length, turn) => length + turn.text.length, 0) + Math.max(0, turns.length - 1)
+    while (turns.length > 0 && size > budget) {
+      const oldest = turns.shift()!
+      size -= oldest.text.length + (turns.length > 0 ? 1 : 0)
+    }
+    return turns
   }
 
   private prune(): void {

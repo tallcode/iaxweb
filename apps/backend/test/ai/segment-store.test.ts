@@ -124,3 +124,16 @@ test('keeps the tail of a single oversize entry', () => {
   assert.ok(context.endsWith('尾'.repeat(100)))
   assert.ok(!context.includes('头'))
 })
+
+test('structured LLM turns retain raw evidence and chunk identity, not revised labels', () => {
+  const store = new SegmentStore(300_000)
+  store.add(makeRecord({ id: 'first', recognition: 'Bravo Golf Five', revise: 'BG5ATV', callsign: 'BG5ATV', transmissionId: 'tx', partIndex: 0 }))
+  store.add(makeRecord({ id: 'current', recognition: 'Alpha Tango Victor', transmissionId: 'tx', partIndex: 1 }))
+  assert.deepEqual(store.llmTurns(undefined, 'current'), [{ id: 'first', text: 'Bravo Golf Five', transmissionId: 'tx', partIndex: 0 }])
+})
+
+test('structured history drops whole oversize turns rather than inventing partial evidence', () => {
+  const store = new SegmentStore(300_000)
+  store.add(makeRecord({ recognition: 'Bravo '.repeat(100) }))
+  assert.deepEqual(store.llmTurns(30), [])
+})

@@ -130,7 +130,7 @@ export function extractCallsignFragments(transcript: string): CallsignFragment[]
   // Convert consecutive phonetic/digit tokens into character sequences. This
   // also handles spaced compact forms such as "B G 两 G J J".
   const correctedTranscript = correctExplanationText(transcript).text
-  const tokens = correctedTranscript.match(/[A-Za-z]+(?:-[A-Za-z]+)?|[0-9幺两拐洞勾零一二三四五六七八九，,。；;:：]|\p{Script=Han}+/gu) ?? []
+  const tokens = correctedTranscript.match(/\bX[ \t]+Ray\b|[A-Z]+(?:-[A-Z]+)?|[0-9幺两拐洞勾零一二三四五六七八九，,。；;:：]|\p{Script=Han}+/giu) ?? []
   let run: Array<{ normalized: string, source: string }> = []
   const flush = (): void => {
     const lengths = run.length <= 8 ? [run.length] : [8, 7, 6, 5]

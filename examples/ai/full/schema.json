@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "speaker",
+        "quote",
+        "callsign",
+        "evidence",
+        "message",
+        "risk"
+      ],
+      "properties": {
+        "speaker": {
+          "const": "self"
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1
+        },
+        "callsign": {
+          "type": "string",
+          "pattern": "^B[ADGHIY][0-9][A-Z]{2,3}$"
+        },
+        "evidence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "message": {
+          "description": "规范化后的信息文本",
+          "type": "string"
+        },
+        "risk": {
+          "additionalProperties": false,
+          "description": "风控评级",
+          "properties": {
+            "level": {
+              "description": "风控等级 1~5，5 最严重",
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "reason": {
+              "description": "风控原因，中文 20 字以内",
+              "type": "string"
+            }
+          },
+          "required": [
+            "level",
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "speaker",
+        "message",
+        "risk"
+      ],
+      "properties": {
+        "speaker": {
+          "enum": [
+            "other",
+            "unknown"
+          ]
+        },
+        "message": {
+          "description": "规范化后的信息文本",
+          "type": "string"
+        },
+        "risk": {
+          "additionalProperties": false,
+          "description": "风控评级",
+          "properties": {
+            "level": {
+              "description": "风控等级 1~5，5 最严重",
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "reason": {
+              "description": "风控原因，中文 20 字以内",
+              "type": "string"
+            }
+          },
+          "required": [
+            "level",
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  ]
+}

@@ -1,369 +1,216 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
-
 import { LlmParser, validateAgainstSchema } from '../../src/ai/llm-parser.js'
 
 const fixtureDir = mkdtempSync(join(tmpdir(), 'iaxweb-llm-'))
 const fixturePrompt = join(fixtureDir, 'prompt.txt')
 const fixtureSchema = join(fixtureDir, 'schema.json')
+const fixtureSimpleSchema = join(fixtureDir, 'simple.json')
 const fixtureCallsigns = join(fixtureDir, 'callsigns.txt')
-writeFileSync(fixturePrompt, '测试提示词')
+const fullSchema = JSON.parse(readFileSync(new URL('../../../../examples/ai/full/schema.json', import.meta.url), 'utf8'))
+const simpleSchema = JSON.parse(readFileSync(new URL('../../../../examples/ai/simple/schema.json', import.meta.url), 'utf8'))
+writeFileSync(fixturePrompt, '测试提示词，输出JSON')
+writeFileSync(fixtureSchema, JSON.stringify(fullSchema))
+writeFileSync(fixtureSimpleSchema, JSON.stringify(simpleSchema))
 writeFileSync(fixtureCallsigns, 'BG5FBT\nBG5FAT\n')
-writeFileSync(fixtureSchema, JSON.stringify({
-  additionalProperties: false,
-  properties: {
-    Callsign: { type: 'string' },
-    message: { type: 'string' },
-    risk: {
-      additionalProperties: false,
-      properties: {
-        level: { maximum: 5, minimum: 1, type: 'integer' },
-        reason: { type: 'string' },
-      },
-      required: ['level', 'reason'],
-      type: 'object',
-    },
-  },
-  required: ['message', 'risk'],
-  type: 'object',
-}))
 after(() => rmSync(fixtureDir, { force: true, recursive: true }))
 
+const TRANSCRIPT = '这里是 Bravo Delta Five X-ray X-ray X-ray'
 function completion(content: string): Response {
-  return new Response(JSON.stringify({
-    choices: [{ message: { content } }],
-  }), {
-    headers: { 'content-type': 'application/json' },
-    status: 200,
-  })
+  return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { headers: { 'content-type': 'application/json' }, status: 200 })
 }
-
 function okResult(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    Callsign: 'BD5XXX',
-    message: 'BD5XXX 呼叫 CQ，杭州',
-    risk: { level: 1, reason: '正常' },
-    ...overrides,
-  })
+  return JSON.stringify({ speaker: 'self', quote: TRANSCRIPT, callsign: 'BD5XXX', evidence: 1, message: 'BD5XXX 呼叫 CQ，杭州', risk: { level: 1, reason: '正常' }, ...overrides })
 }
-
 interface CapturedCall {
-  body: {
-    enable_thinking?: boolean
-    messages: Array<{ content: string, role: string }>
-    response_format?: { type?: string }
-    thinking?: { type?: string }
-    thinking_budget?: number
-  }
+  body: { enable_thinking?: boolean, messages: Array<{ content: string, role: string }>, response_format?: { type?: string }, thinking?: { type?: string }, thinking_budget?: number }
   url: string
 }
-
 function makeParser(
   fetchImpl: typeof fetch,
   files: { promptFile?: string, schemaFile?: string } = {},
-  extra: {
-    baseUrl?: string
-    callsignHintsEnabled?: boolean
-    callsignsFile?: string
-    enableThinking?: boolean
-    thinkingBudget?: number
-  } = {},
+  extra: { baseUrl?: string, callsignHintsEnabled?: boolean, callsignsFile?: string, enableThinking?: boolean, thinkingBudget?: number } = {},
 ): { calls: CapturedCall[], parser: LlmParser } {
   const calls: CapturedCall[] = []
   const parser = new LlmParser({
     apiKey: 'test-key',
     baseUrl: extra.baseUrl ?? 'https://llm.example/v1',
-    ...(extra.callsignHintsEnabled !== undefined ? { callsignHintsEnabled: extra.callsignHintsEnabled } : {}),
-    ...(extra.callsignsFile !== undefined ? { callsignsFile: extra.callsignsFile } : {}),
-    ...(extra.enableThinking !== undefined ? { enableThinking: extra.enableThinking } : {}),
+    model: 'qwen3.7-flash',
+    ...extra,
     fetchImpl: (url, init) => {
       calls.push({ body: JSON.parse(String(init?.body)), url: String(url) })
       return fetchImpl(url, init)
     },
-    model: 'qwen3.7-flash',
     promptFile: files.promptFile ?? fixturePrompt,
-    retryDelaysMs: [0],
     schemaFile: files.schemaFile ?? fixtureSchema,
-    ...(extra.thinkingBudget !== undefined ? { thinkingBudget: extra.thinkingBudget } : {}),
+    retryDelaysMs: [0],
   })
-  // Most parser tests exercise schema/request behaviour rather than the
-  // production save gate. Give them a corrected transcript that passes it;
-  // the dedicated test below verifies gate behaviour explicitly.
-  const parse = parser.parse.bind(parser)
-  parser.parse = (transcript, history, corrected) => parse(transcript, history, corrected ?? 'Bravo')
   return { calls, parser }
 }
 
-test('parses a schema-valid model response', async () => {
+test('accepts only a current speaker with matching explanation evidence', async () => {
   const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())))
-
-  const parsed = await parser.parse('原始文本')
-  assert.ok(parsed)
-  assert.equal(parsed.message, 'BD5XXX 呼叫 CQ，杭州')
-  assert.equal(parsed.Callsign, 'BD5XXX')
-  assert.deepEqual(parsed.risk, { level: 1, reason: '正常' })
-
-  const call = calls[0]
-  assert.ok(call)
-  assert.equal(call.url, 'https://llm.example/v1/chat/completions')
-  assert.equal(call.body.messages[0]?.role, 'system')
-  assert.equal(call.body.messages[1]?.role, 'user')
-  assert.ok(call.body.messages[1]?.content.startsWith('原始文本'))
-  assert.equal(call.body.response_format?.type, 'json_object')
-  assert.equal(call.body.enable_thinking, undefined)
-})
-
-test('passes conversation history to the model', async () => {
-  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())))
-
-  await parser.parse('当前文本', 'BG5XXX: 上一条消息')
-  const user = calls[0]?.body.messages[1]?.content
-  assert.ok(user)
-  assert.ok(user.includes('最近对话历史'))
-  assert.ok(user.includes('BG5XXX: 上一条消息'))
-  assert.ok(user.includes('当前语音识别文本：\n当前文本'))
-})
-
-test('passes guarded common callsign similarity hints to the model', async () => {
-  const { calls, parser } = makeParser(
-    () => Promise.resolve(completion(okResult())),
-    {},
-    { callsignHintsEnabled: true, callsignsFile: fixtureCallsigns },
-  )
-
-  await parser.parse('这里是 BG5FVT', undefined, '这里是 BG5FVT')
-  const system = calls[0]?.body.messages[0]?.content
-  const user = calls[0]?.body.messages[1]?.content
-  assert.ok(system?.includes('候选列表不是白名单'))
-  assert.ok(system?.includes('字母解释法、紧凑呼号原文及通联语义为最高依据'))
-  assert.ok(system?.includes('历史数据库的检索结果'))
-  assert.ok(user?.includes('常见呼号相似度候选'))
-  assert.ok(user?.includes('原文片段“BG5FVT”'))
-  assert.ok(user?.includes('BG5FAT（距离 1）'))
-  assert.ok(user?.includes('BG5FBT（距离 1）'))
-})
-
-test('sends a changed Bravo correction beside the raw ASR text', async () => {
-  const { calls, parser } = makeParser(
-    () => Promise.resolve(completion(okResult())),
-    {},
-    { callsignHintsEnabled: true, callsignsFile: fixtureCallsigns },
-  )
-
-  await parser.parse('补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈', undefined, 'Bravo Golf Five Foxtrot Victor Tango')
-  const user = calls[0]?.body.messages[1]?.content
-  assert.ok(user?.includes('补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈'))
-  assert.equal(user?.split('\n\n')[0], '补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈')
-  assert.ok(user?.includes('音素纠错辅助文本（仅供判断）：\nBravo Golf Five Foxtrot Victor Tango'))
-  assert.ok(user?.includes('BG5FBT（距离 1）'))
-})
-
-test('sends a changed Boston correction beside the raw ASR text', async () => {
-  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())))
-
-  await parser.parse('Bosten Golf Five', undefined, 'Boston Golf Five')
-  const user = calls[0]?.body.messages[1]?.content
-  assert.ok(user?.includes('Bosten Golf Five'))
-  assert.ok(user?.includes('音素纠错辅助文本（仅供判断）：\nBoston Golf Five'))
-})
-
-test('does not send corrected text unless it changes the transcript to include Bravo or Boston', async () => {
-  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())))
-
-  await parser.parse('B 原始文本', undefined, 'B 修正文本')
-  const user = calls[0]?.body.messages[1]?.content
-  assert.equal(user, 'B 原始文本')
-})
-
-test('sends thinking parameters when enabled', async () => {
-  const { calls, parser } = makeParser(
-    () => Promise.resolve(completion(okResult({ Callsign: undefined }))),
-    {},
-    { enableThinking: true, thinkingBudget: 1024 },
-  )
-  await parser.parse('x')
-  assert.equal(calls[0]?.body.enable_thinking, true)
-  assert.equal(calls[0]?.body.thinking_budget, 1024)
-})
-
-test('uses DeepSeek thinking and JSON output parameters', async () => {
-  const { calls, parser } = makeParser(
-    () => Promise.resolve(completion(okResult())),
-    {},
-    { baseUrl: 'https://api.deepseek.com', enableThinking: false, thinkingBudget: 1024 },
-  )
-  await parser.parse('x')
-  assert.deepEqual(calls[0]?.body.thinking, { type: 'disabled' })
+  const parsed = await parser.parse(TRANSCRIPT)
+  assert.deepEqual(parsed, { callsign: 'BD5XXX', message: 'BD5XXX 呼叫 CQ，杭州', risk: { level: 1, reason: '正常' } })
+  assert.equal(calls[0]?.url, 'https://llm.example/v1/chat/completions')
+  assert.equal(calls[0]?.body.response_format?.type, 'json_object')
   assert.equal(calls[0]?.body.enable_thinking, undefined)
-  assert.equal(calls[0]?.body.thinking_budget, undefined)
-  assert.deepEqual(calls[0]?.body.response_format, { type: 'json_object' })
+  const payload = JSON.parse(calls[0]!.body.messages[1]!.content)
+  assert.equal(payload.current.text, TRANSCRIPT)
+  assert.equal(payload.candidates[0].callsign, 'BD5XXX')
 })
 
-test('ignores responses that violate the schema', async () => {
-  const bodies = [
-    JSON.stringify({ message: '只有文本' }),
-    JSON.stringify({ message: 'x', risk: { level: '高', reason: 'r' } }),
-    JSON.stringify({ message: 'x', risk: { level: 6, reason: 'r' } }),
-    JSON.stringify({ extra: true, ...JSON.parse(okResult()) }),
-  ]
-  for (const body of bodies) {
-    const { parser } = makeParser(() => Promise.resolve(completion(body)))
-    assert.deepEqual(await parser.parse('x'), {})
+test('normalizes callsign values without accepting the old Callsign key', async () => {
+  const { parser } = makeParser(() => Promise.resolve(completion(okResult({ callsign: ' bd5xxx ' }))))
+  assert.equal((await parser.parse(TRANSCRIPT))?.callsign, 'BD5XXX')
+  const old = makeParser(() => Promise.resolve(completion(okResult({ callsign: undefined, Callsign: 'BD5XXX' }))))
+  assert.deepEqual(await old.parser.parse(TRANSCRIPT), {})
+})
+
+test('skips callsign-only requests without explanation evidence', async () => {
+  const { calls, parser } = makeParser(() => Promise.resolve(completion('{}')), { schemaFile: fixtureSimpleSchema })
+  for (const text of ['这里是 BG5ATV', '这里是 B G 五 A T V', '这里是 BD1ESL'])
+    assert.deepEqual(await parser.parse(text), {})
+  assert.equal(calls.length, 0)
+})
+
+test('still runs full text and risk analysis without callsign evidence', async () => {
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(JSON.stringify({ speaker: 'unknown', message: '无呼号', risk: { level: 1, reason: '正常' } }))))
+  assert.deepEqual(await parser.parse('只有普通对话'), { message: '无呼号', risk: { level: 1, reason: '正常' } })
+  assert.equal(calls.length, 1)
+})
+
+test('never publishes a bare callsign invented by the model', async () => {
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ callsign: 'BD1ESL', quote: '这里是 BD1ESL' }))))
+  const parsed = await parser.parse('这里是 BD1ESL')
+  assert.equal(parsed?.callsign, undefined)
+  assert.equal(calls.length, 1)
+})
+
+test('does not recheck invalid self claims while the code switch is off', async () => {
+  for (const response of [okResult({ evidence: 99 }), okResult({ evidence: null }), okResult({ quote: '模型编造的自报' })]) {
+    const { calls, parser } = makeParser(() => Promise.resolve(completion(response)))
+    assert.equal((await parser.parse(TRANSCRIPT))?.callsign, undefined)
+    assert.equal(calls.length, 1)
   }
 })
 
-test('ignores non-JSON model output', async () => {
-  const { parser } = makeParser(() => Promise.resolve(completion('不是 JSON')))
-  assert.deepEqual(await parser.parse('x'), {})
+test('rejects confirmation and a callee before the current self-introduction', async () => {
+  const other = 'Bravo Golf Five Alpha Tango Victor'
+  for (const text of [`我抄收您的呼号是 ${other}，是否正确？`, `${other}，这里是 BG5TOX`]) {
+    const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ callsign: 'BG5ATV', quote: text }))))
+    assert.equal((await parser.parse(text))?.callsign, undefined)
+    assert.equal(calls.length, 1)
+  }
 })
 
-test('ignores empty content from JSON mode', async () => {
-  const { parser } = makeParser(() => Promise.resolve(completion('')))
-  assert.deepEqual(await parser.parse('x'), {})
+test('links a current explicit self-identification to raw historical spelling', async () => {
+  const current = '你抄收正确，这里是 BG5ATV'
+  const history = [{ id: 'prior', text: 'Bravo Golf Five Alpha Tango Victor，我抄收是否正确？' }]
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ callsign: 'BG5ATV', quote: '这里是 BG5ATV' }))))
+  assert.equal((await parser.parse(current, history))?.callsign, 'BG5ATV')
+  assert.deepEqual(JSON.parse(calls[0]!.body.messages[1]!.content).history, history)
+})
+
+test('allows only adjacent chunks of the same transmission to complete spelling', async () => {
+  const current = 'X-ray X-ray X-ray'
+  const history = [{ id: 'first', text: '这里是 Bravo Delta Five', transmissionId: 'tx', partIndex: 0 }]
+  const response = okResult({ quote: current })
+  const yes = makeParser(() => Promise.resolve(completion(response)), { schemaFile: fixtureSimpleSchema })
+  // Use the full schema response for analysis, so configure full mode below.
+  const full = makeParser(() => Promise.resolve(completion(response)))
+  assert.equal((await full.parser.parse(current, history, current, { id: 'second', transmissionId: 'tx', partIndex: 1 }))?.callsign, 'BD5XXX')
+  assert.deepEqual(await yes.parser.parse(current, history, current, { id: 'second', transmissionId: 'different', partIndex: 1 }), {})
+  assert.equal(yes.calls.length, 0)
+})
+
+test('similarity hints cannot override actual explanation evidence', async () => {
+  const text = '这里是 Bravo Golf Five Foxtrot Victor Tango'
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ callsign: 'BG5FBT', quote: text }))), {}, { callsignHintsEnabled: true, callsignsFile: fixtureCallsigns })
+  assert.equal((await parser.parse(text))?.callsign, undefined)
+  const payload = JSON.parse(calls[0]!.body.messages[1]!.content)
+  assert.equal(payload.candidates[0].callsign, 'BG5FVT')
+  assert.ok(payload.similarityHints.includes('BG5FBT'))
+  assert.ok(calls[0]!.body.messages[0]!.content.includes('数据库相似提示不能新增证据候选'))
+})
+
+test('preserves raw current evidence beside an optional corrected transcript', async () => {
+  const raw = '这里是 补拉窝 高尔夫 五 福克斯特罗特 维克托 探戈'
+  const corrected = '这里是 Bravo Golf Five Foxtrot Victor Tango'
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ callsign: 'BG5FVT', quote: raw }))))
+  assert.equal((await parser.parse(raw, undefined, corrected))?.callsign, 'BG5FVT')
+  const payload = JSON.parse(calls[0]!.body.messages[1]!.content)
+  assert.equal(payload.current.text, raw)
+  assert.equal(payload.corrected.text, corrected)
+})
+
+test('sends provider-specific thinking settings', async () => {
+  const qwen = makeParser(() => Promise.resolve(completion(okResult())), {}, { enableThinking: true, thinkingBudget: 1024 })
+  await qwen.parser.parse(TRANSCRIPT)
+  assert.equal(qwen.calls[0]?.body.enable_thinking, true)
+  assert.equal(qwen.calls[0]?.body.thinking_budget, 1024)
+  const deepseek = makeParser(() => Promise.resolve(completion(okResult())), {}, { baseUrl: 'https://api.deepseek.com', enableThinking: false, thinkingBudget: 1024 })
+  await deepseek.parser.parse(TRANSCRIPT)
+  assert.deepEqual(deepseek.calls[0]?.body.thinking, { type: 'disabled' })
+  assert.equal(deepseek.calls[0]?.body.thinking_budget, undefined)
+})
+
+test('ignores invalid JSON and schemas without retrying semantic refusals', async () => {
+  for (const content of ['', '不是JSON', JSON.stringify({ speaker: 'unknown', callsign: 'BD5XXX' }), okResult({ risk: { level: 6, reason: 'r' } }), okResult({ extra: true })]) {
+    const { calls, parser } = makeParser(() => Promise.resolve(completion(content)))
+    assert.deepEqual(await parser.parse(TRANSCRIPT), {})
+    assert.equal(calls.length, 1)
+  }
 })
 
 test('parses JSON wrapped in a markdown fence', async () => {
   const { parser } = makeParser(() => Promise.resolve(completion(`\`\`\`json\n${okResult()}\n\`\`\``)))
-  const parsed = await parser.parse('x')
-  assert.ok(parsed)
-  assert.equal(parsed.Callsign, 'BD5XXX')
+  assert.equal((await parser.parse(TRANSCRIPT))?.callsign, 'BD5XXX')
 })
 
-test('retries on server errors', async () => {
-  let attempt = 0
-  const { calls, parser } = makeParser(() => {
-    attempt++
-    if (attempt === 1)
-      return Promise.resolve(new Response('busy', { status: 503 }))
-    return Promise.resolve(completion(okResult({ risk: { level: 4, reason: '测试' } })))
-  })
-
-  const parsed = await parser.parse('x')
-  assert.ok(parsed)
-  assert.equal(parsed.risk?.level, 4)
+test('retries transport errors independently of semantic rechecking', async () => {
+  let attempts = 0
+  const { calls, parser } = makeParser(() => Promise.resolve(++attempts === 1 ? new Response('busy', { status: 503 }) : completion(okResult())))
+  assert.equal((await parser.parse(TRANSCRIPT))?.callsign, 'BD5XXX')
   assert.equal(calls.length, 2)
 })
 
-test('parses a callsign-only response (simple example schema)', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'iaxweb-llm-'))
-  try {
-    const promptFile = join(dir, 'prompt-simple.example.txt')
-    const schemaFile = join(dir, 'schema-simple.example.json')
-    writeFileSync(promptFile, '只提取呼号')
-    writeFileSync(schemaFile, JSON.stringify({
-      additionalProperties: false,
-      properties: {
-        Callsign: { pattern: '^B[ADGHIY][0-9][A-Z]{2,3}$', type: 'string' },
-      },
-      required: [],
-      type: 'object',
-    }))
-    const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ message: undefined, risk: undefined }))), { promptFile, schemaFile })
-
-    const parsed = await parser.parse('这里是 BG5ATV')
-    assert.ok(parsed)
-    assert.equal(parsed.Callsign, 'BD5XXX')
-    assert.equal(parsed.message, undefined)
-    assert.equal(parsed.risk, undefined)
-    assert.equal(calls[0]?.body.messages[0]?.content.includes('只提取呼号'), true)
-  }
-  finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
+test('uses the versioned simple schema without analysis fields', async () => {
+  const { parser } = makeParser(() => Promise.resolve(completion(okResult({ message: undefined, risk: undefined }))), { schemaFile: fixtureSimpleSchema })
+  assert.deepEqual(await parser.parse(TRANSCRIPT), { callsign: 'BD5XXX' })
 })
 
-test('skips parsing when prompt or schema files are missing', async () => {
-  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())), {
-    promptFile: '/nonexistent/prompt.txt',
-    schemaFile: '/nonexistent/schema.json',
-  })
-
-  assert.equal(await parser.parse('x'), undefined)
+test('skips missing prompt or schema files', async () => {
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())), { promptFile: '/missing/prompt.txt', schemaFile: '/missing/schema.json' })
+  assert.equal(await parser.parse(TRANSCRIPT), undefined)
   assert.equal(calls.length, 0)
 })
 
-test('hot-reloads prompt and schema files', async (t) => {
-  t.mock.method(console, 'warn', () => {})
-  const dir = mkdtempSync(join(tmpdir(), 'iaxweb-llm-'))
+test('hot-reloads prompt and schema files', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iaxweb-reload-'))
   try {
     const promptFile = join(dir, 'prompt.txt')
     const schemaFile = join(dir, 'schema.json')
-    writeFileSync(promptFile, '第一版提示词')
-    writeFileSync(schemaFile, JSON.stringify({
-      additionalProperties: false,
-      properties: {
-        Callsign: { type: 'string' },
-        message: { type: 'string' },
-        risk: {
-          additionalProperties: false,
-          properties: {
-            level: { maximum: 5, minimum: 1, type: 'integer' },
-            reason: { type: 'string' },
-          },
-          required: ['level', 'reason'],
-          type: 'object',
-        },
-      },
-      required: ['message', 'risk'],
-      type: 'object',
-    }))
-
+    writeFileSync(promptFile, '第一版JSON')
+    writeFileSync(schemaFile, JSON.stringify(fullSchema))
     const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult())), { promptFile, schemaFile })
-    await parser.parse('x')
-    assert.ok(calls[0]?.body.messages[0]?.content.includes('第一版提示词'))
-
-    // Edits apply to the next call without a restart; the edited schema
-    // requires a new field, so the same model response now fails validation.
-    writeFileSync(promptFile, '第二版提示词')
-    writeFileSync(schemaFile, JSON.stringify({
-      additionalProperties: false,
-      properties: { message: { type: 'string' }, qth: { type: 'string' }, risk: { type: 'object' } },
-      required: ['message', 'risk', 'qth'],
-      type: 'object',
-    }))
-    await assert.deepEqual(await parser.parse('x'), {})
-    assert.ok(calls[1]?.body.messages[0]?.content.includes('第二版提示词'))
+    assert.equal((await parser.parse(TRANSCRIPT))?.callsign, 'BD5XXX')
+    writeFileSync(promptFile, '第二版JSON')
+    writeFileSync(schemaFile, JSON.stringify({ type: 'object', required: ['qth'], properties: { qth: { type: 'string' } } }))
+    assert.deepEqual(await parser.parse(TRANSCRIPT), {})
+    assert.ok(calls[1]?.body.messages[0]?.content.includes('第二版JSON'))
   }
-  finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
+  finally { rmSync(dir, { force: true, recursive: true }) }
 })
 
-test('validateAgainstSchema accepts optional absent properties', () => {
-  const risk = {
-    additionalProperties: false,
-    properties: {
-      level: { maximum: 5, minimum: 1, type: 'integer' },
-      reason: { type: 'string' },
-    },
-    required: ['level', 'reason'],
-    type: 'object',
-  }
-  const schema = {
-    additionalProperties: false,
-    properties: { Callsign: { type: 'string' }, message: { type: 'string' }, risk },
-    required: ['message', 'risk'],
-    type: 'object',
-  }
-  assert.equal(validateAgainstSchema({ message: 'x', risk: { level: 1, reason: '正常' } }, schema), undefined)
-  assert.equal(validateAgainstSchema({ Callsign: 'BD5XXX', message: 'x', risk: { level: 1, reason: '正常' } }, schema), undefined)
-  assert.ok(validateAgainstSchema({ message: 'x', risk: { level: 6, reason: 'r' } }, schema))
-  assert.ok(validateAgainstSchema({ message: 'x', risk: { level: 1 } }, schema))
-  assert.ok(validateAgainstSchema('text', schema))
-  assert.ok(validateAgainstSchema(null, schema))
-})
-
-test('validateAgainstSchema enforces string patterns', () => {
-  const schema = {
-    additionalProperties: false,
-    properties: { Callsign: { pattern: '^B[ADGHIY][0-9][A-Z]{2,3}$', type: 'string' } },
-    required: [],
-    type: 'object',
-  }
-  assert.equal(validateAgainstSchema({ Callsign: 'BG5ATV' }, schema), undefined)
-  assert.match(validateAgainstSchema({ Callsign: 'BG55ATV' }, schema) ?? '', /不匹配格式/)
+test('validates mutually exclusive self and reject schema branches', () => {
+  assert.equal(validateAgainstSchema({ speaker: 'other' }, simpleSchema), undefined)
+  assert.equal(validateAgainstSchema({ speaker: 'unknown' }, simpleSchema), undefined)
+  assert.equal(validateAgainstSchema({ speaker: 'self', quote: '这里是 BG5ATV', callsign: 'BG5ATV', evidence: 1 }, simpleSchema), undefined)
+  for (const value of [{}, { speaker: 'self' }, { speaker: 'unknown', callsign: 'BG5ATV' }, { speaker: 'self', quote: '', callsign: 'BG5ATV', evidence: 1 }, { speaker: 'other', extra: true }])
+    assert.ok(validateAgainstSchema(value, simpleSchema))
+  assert.ok(validateAgainstSchema({ speaker: 'self', quote: '这里是', callsign: 'BG55ATV', evidence: 1 }, simpleSchema))
 })

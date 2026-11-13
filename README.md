@@ -100,27 +100,43 @@ LLM 后处理：每条识别结果再调用文本模型，对识别文本做结�
 
 脚本使用 SQLite 的 `.backup`，会生成单个独立的 `.sqlite` 文件并执行完整性检查；不需要复制 `-wal` 或 `-shm`。它只备份数据库，不含 `data/rec/` 录音、`sessions.json` 或其他运行数据。
 
-提示词与输出 schema 决定解析行为，有两套可选（每次调用前重新读取，保存后立即生效）：
+提示词与输出 schema 每次调用前重新读取。仓库提供两套示例：
 
-- 完整版：`config/example/full/`，规范化文本到 `revise`、提取发言人呼号到 `Callsign`（识别不出或不一致时省略）、风控判断到 `risk`；
-- 简化版：`config/example/simple/`，只提取发言人呼号到 `Callsign`，`revise` 和 `risk` 永远为空（控制台仍打印原始识别文本）。
+- 简化版：`examples/ai/simple/`，识别当前说话人呼号；
+- 完整版：`examples/ai/full/`，同时输出规范化 `message` 和 `risk`，数据库将 `message` 保存为 `revise`。
 
-两套底层管线完全一致，切换模式只需把对应示例复制到默认位置（默认使用 `config/prompt.txt` + `config/schema.json`，当前为简化版）：
+首次配置或升级呼号提取协议时，将对应示例复制到宿主机配置目录。代码和配置需要一起升级，旧版 `Callsign` schema 不再适用：
 
 ```bash
-# 启用简化版
-cp config/example/simple/prompt.txt config/prompt.txt
-cp config/example/simple/schema.json config/schema.json
-# 切回完整版
-cp config/example/full/prompt.txt config/prompt.txt
-cp config/example/full/schema.json config/schema.json
+# 简化版
+cp examples/ai/simple/prompt.txt config/prompt.txt
+cp examples/ai/simple/schema.json config/schema.json
+# 完整版
+cp examples/ai/full/prompt.txt config/prompt.txt
+cp examples/ai/full/schema.json config/schema.json
 ```
 
-也可用 `AI_LLM_PROMPT_FILE`/`AI_LLM_SCHEMA_FILE` 直接指定任意路径而不复制。两个默认文件任一缺失时 LLM 后处理不生效（等同 `AI_LLM_ENABLED=false`），此时输出原始识别文本。
+也可通过已有的 `AI_LLM_PROMPT_FILE` / `AI_LLM_SCHEMA_FILE` 指向其他文件。任一文件缺失时 LLM 后处理不生效。
 
-识别到呼号时默认发布到 AI Spot 面板（见下节）；`AI_LLM_PUBLISH_SPOT=false` 可关闭，此时只记日志、不发布呼号。
+呼号模型接受时返回四个字段，例如：
 
-可选的常见呼号相似度提示默认关闭。设置 `AI_CALLSIGN_HINTS_ENABLED=true` 后，系统从 `config/callsigns.txt` 读取常见呼号（每行一个，支持 `#` 注释），从当前 ASR 文本提取紧凑形式、逐字拼读或字母解释法片段。ASR 原文会保存为 `recognition`，独立的闭集音素纠错结果保存为 `corrected`；ASR 上下文始终使用原文，呼号候选及省钱短路则使用 `corrected`。LLM 的当前文本和历史都遵循同一规则：始终保留 ASR 原文；仅当 `corrected` 与原文不同且含有 `Bravo` 或 `Boston` 时，才紧随其后附带一段简短标注的音素纠错辅助文本，避免无意义的 token 消耗。英文通过 CMUdict 取无重音 ARPABET 音素（例如 `alfa` → `alpha`），中文通过 `pinyin-pro` 取无声调拼音（例如“补拉窝” →“布拉沃” → `Bravo`），然后将音素/音节 token 编码后使用 `fastest-levenshtein` 比较。中文仅在无声调拼音序列完全一致时纠正；英文只有最佳候选距离不大于 1 且没有同分字母时才纠正。对字母解释语境中连续的 2–3 个英文词，系统还会以清浊/元音/鼻音等音素类别做滑动窗口比对；因此 `thank you` 在这类语境中可纠正为 `Tango`，但普通致谢不会被改写。`flower` → `Bravo` 仍作为 ASR 专属混淆表保留。归一化后再以位置敏感的 Levenshtein 距离选出已知呼号候选供 LLM 纠错。每个原文片段独立保留自己的最小距离候选，只有距离恰为 1 的候选会进入 LLM hint；距离 0 的库内命中不会提示，避免把紧凑形式误当成拼读证据。长粘连串只保留具有完整字母后缀的窗口，避免半截呼号污染候选。候选只是历史数据库检索结果；LLM 必须以原文字母解释法、紧凑呼号和通联语义为最高依据，不能用候选覆盖原文证据。呼号表在每次 LLM 调用前重读，保存后无需重启。
+```json
+{"speaker":"self","quote":"这里是 Bravo Golf Five Bravo Juliet Oscar","callsign":"BG5BJO","evidence":2}
+```
+
+`speaker` 表示该呼号与当前发言人的关系，`quote` 必须是当前语音识别文本中的逐字自报片段，`evidence` 引用程序提取的字母解释法证据。明确是对方时返回 `{"speaker":"other"}`，缺证据或身份不明时返回 `{"speaker":"unknown"}`。完整版在这些结果中仍必须包含 `message` 和 `risk`。字段名 `callsign` 小写，呼号值统一为大写。
+
+程序先从当前及有效历史的原始 ASR 提取解释法证据，再核验模型的呼号、证据编号与当前自报引用。裸呼号、直接报单字母、模型先前生成的呼号以及规范化文本都不能创建拼读证据；紧凑前缀及数字可以配合相邻的完整解释法后缀。被叫、复述确认和第三方呼号不作为当前说话人发布。没有证据或无法确定身份时宁可漏识别。
+
+LLM 历史按节点保留原始转写、分段 ID 与发射分段关系，按 `AI_CONTEXT_WINDOW_MS` 过期，超预算时删除完整旧轮次。同一次长发射拆出的相邻片段可共同提供拼读证据；普通轮次间的半截拼读不能直接拼接。ASR 历史的使用方式保持原有行为。
+
+呼号复核默认关闭，开关直接写在 `apps/backend/src/ai/llm-parser.ts` 的 `CALLSIGN_RECHECK_ENABLED` 常量里，不增加环境配置。以后启用时，也只对模型声称 `self`、候选或引用核验失败、且程序独立找到解释法与当前自报依据的情况最多复核一次。正常 `other` / `unknown`、没有证据的结果不复核；复核失败仍留空。网络请求的原有重试与这次语义复核分开处理。
+
+只有通过核验的呼号才保存和发布到 AI Spot；已有 `AI_LLM_PUBLISH_SPOT=false` 可以关闭发布。
+
+`recognition` 保留原始 ASR，`corrected` 保留现有音素纠错辅助文本。本次仅修复完整解释词 `X Ray` 被拆开后误改为 `Echo Ray`；其他音素词表、距离阈值和混淆规则保持原有行为。辅助文本不会取代原始拼读证据。
+
+可选的 `AI_CALLSIGN_HINTS_ENABLED=true` 会从 `config/callsigns.txt` 检索相似呼号，规则和热更新方式保持不变。相似度提示只供参考，不能扩充解释法证据候选，不能覆盖原文拼读，也不能证明当前说话人身份。仅凭库中的相似呼号不会输出呼号。
 
 不调用 LLM 即可手动检查片段提取和相似度候选：
 
@@ -166,8 +182,8 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 | `AI_LLM_ENABLE_THINKING` | `qwen*` 模型为 `false`，其他模型不发送 | 思考模式；DeepSeek 映射为 `thinking.type`，Qwen 映射为 `enable_thinking` |
 | `AI_LLM_THINKING_BUDGET` | 未设置 | 思考 token 预算（仅 Qwen 系使用），开启思考时限制思考量 |
 | `AI_LLM_TIMEOUT_MS` | `30000` | 单次请求超时 |
-| `AI_LLM_PROMPT_FILE` | `config/prompt.txt` | LLM 提示词文件路径（切换简化版：复制 `config/example/simple/prompt.txt` 覆盖之） |
-| `AI_LLM_SCHEMA_FILE` | `config/schema.json` | LLM 输出 JSON Schema 路径（切换简化版：复制 `config/example/simple/schema.json` 覆盖之） |
+| `AI_LLM_PROMPT_FILE` | `config/prompt.txt` | LLM 提示词文件路径（示例见 `examples/ai/simple/prompt.txt`） |
+| `AI_LLM_SCHEMA_FILE` | `config/schema.json` | LLM 输出 JSON Schema 路径（示例见 `examples/ai/simple/schema.json`） |
 | `AI_CALLSIGN_HINTS_ENABLED` | `false` | 是否向 LLM 提供常见呼号相似度候选 |
 | `AI_CALLSIGNS_FILE` | `config/callsigns.txt` | 常见呼号表路径，每行一个呼号 |
 

@@ -1,9 +1,12 @@
+import { randomUUID } from 'node:crypto'
 import { decodeMuLaw, rmsOfPcm, SAMPLE_RATE } from './mulaw.js'
 
 export interface ClosedSegment {
   durationMs: number
   payloads: Uint8Array[]
   voicedMs: number
+  transmissionId?: string | undefined
+  partIndex?: number | undefined
 }
 
 export type DiscardReason = 'offline' | 'reset' | 'short'
@@ -64,6 +67,8 @@ export class NodeSegmenter {
   private recording: Frame[] | null = null
   private lastTimestamp: number | null = null
   private lastActivityAt: number | null = null
+  private transmissionId: string | undefined
+  private partIndex = 0
 
   constructor(options: SegmenterOptions) {
     this.options = options
@@ -105,8 +110,11 @@ export class NodeSegmenter {
   // voiced frame. State snapshots with speaking=true also use this path when
   // the gateway joins a transmission already in progress.
   start(): void {
-    if (!this.recording)
+    if (!this.recording) {
+      this.transmissionId = randomUUID()
+      this.partIndex = 0
       this.recording = this.seedFromPreRoll()
+    }
   }
 
   // Transmission end, announced by iaxmon's `stop` event after hang_ms of
@@ -122,6 +130,8 @@ export class NodeSegmenter {
     // silently instead of being logged as a discarded segment.
     if (frames.length > 0)
       this.emitSegment(frames, durationMs)
+    this.transmissionId = undefined
+    this.partIndex = 0
   }
 
   // Speaking field of a state event. Primary transmission boundaries are the
@@ -142,6 +152,8 @@ export class NodeSegmenter {
   }
 
   private discardRecording(reason: 'offline' | 'reset'): void {
+    this.transmissionId = undefined
+    this.partIndex = 0
     if (!this.recording || this.recording.length === 0) {
       this.recording = null
       return
@@ -183,6 +195,8 @@ export class NodeSegmenter {
         durationMs: segmentDuration(trimmed),
         payloads: trimmed.map(frame => frame.payload),
         voicedMs: voicedDuration(trimmed),
+        transmissionId: this.transmissionId,
+        partIndex: this.partIndex,
       })
     }
     // Only a transmission long enough to count as real activity (cold
@@ -190,6 +204,9 @@ export class NodeSegmenter {
     // must not switch it into hot start.
     if (totalMs >= this.options.coldMinMs)
       this.lastActivityAt = this.now()
+    // Count discarded chunks too, so missing audio can never be stitched as
+    // if it were adjacent to a later chunk.
+    this.partIndex++
   }
 
   // Cold start (no recent activity, typically a first CQ call) uses the
