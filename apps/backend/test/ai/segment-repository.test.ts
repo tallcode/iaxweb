@@ -36,10 +36,12 @@ test('persists ASR and later LLM results in one row', () => {
     effectiveRiskLevel: null,
     id: segment.id,
     manualCallsign: null,
+    manualRecognition: null,
     manualNote: null,
     manualRiskLevel: null,
     nodeId: '1900',
     recognition: segment.recognition,
+    reviewed: false,
     revise: null,
     riskLevel: null,
     riskReason: null,
@@ -87,6 +89,57 @@ test('manual review takes precedence without overwriting AI results', () => {
   assert.equal(cleared?.effectiveCallsign, 'BG5XXX')
   assert.equal(cleared?.effectiveRiskLevel, 4)
   repository.close()
+})
+
+test('keeps manual text and review status independent of AI analysis', () => {
+  const repository = new SegmentRepository(':memory:')
+  const segment = record({ callsign: 'BG5AAA' })
+  repository.insert('1900', segment)
+  repository.updateManualReview(segment.id, { recognition: ' 人工复听文本 ', reviewed: true })
+  repository.updateAnalysis(segment)
+  assert.equal(repository.find(segment.id)?.recognition, segment.recognition)
+  assert.equal(repository.find(segment.id)?.manualRecognition, '人工复听文本')
+  assert.equal(repository.list(1, 50).items[0]?.reviewed, true)
+  repository.updateManualReview(segment.id, { reviewed: false })
+  assert.equal(repository.find(segment.id)?.reviewed, false)
+  assert.equal(repository.find(segment.id)?.manualRecognition, '人工复听文本')
+  repository.updateManualReview(segment.id, { recognition: '   ' })
+  assert.equal(repository.find(segment.id)?.manualRecognition, null)
+  repository.close()
+})
+
+test('migrates old databases without losing AI or manual callsign evidence', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-review-migration-'))
+  t.after(() => rmSync(directory, { force: true, recursive: true }))
+  const databaseFile = join(directory, 'old.sqlite')
+  const old = new DatabaseSync(databaseFile)
+  old.exec(`
+    CREATE TABLE ai_segments (
+      id TEXT PRIMARY KEY, node_id TEXT, captured_at TEXT, duration_ms INTEGER,
+      voiced_ms INTEGER, recognition TEXT, corrected TEXT, revise TEXT,
+      callsign TEXT, risk_level INTEGER, risk_reason TEXT, manual_callsign TEXT,
+      callee_callsign TEXT, manual_risk_level INTEGER, manual_note TEXT, created_at TEXT
+    );
+    CREATE VIEW ai_segments_effective AS SELECT *,
+      COALESCE(manual_callsign, callsign) AS effective_callsign,
+      COALESCE(manual_risk_level, risk_level) AS effective_risk_level FROM ai_segments;
+    INSERT INTO ai_segments (id, node_id, captured_at, duration_ms, voiced_ms,
+      recognition, callsign, manual_callsign, created_at)
+    VALUES ('old', '1900', '2026-11-14T00:00:00Z', 1000, 900,
+      'AI 原文', 'BG5AAA', 'BG5BBB', '2026-11-14T00:00:00Z');
+  `)
+  old.close()
+  const repository = new SegmentRepository(databaseFile)
+  assert.equal(repository.find('old')?.recognition, 'AI 原文')
+  assert.equal(repository.find('old')?.effectiveCallsign, 'BG5BBB')
+  assert.equal(repository.find('old')?.manualRecognition, null)
+  assert.equal(repository.find('old')?.reviewed, false)
+  repository.updateManualReview('old', { recognition: '人工文本', reviewed: true })
+  repository.close()
+  const reopened = new SegmentRepository(databaseFile)
+  assert.equal(reopened.find('old')?.manualRecognition, '人工文本')
+  assert.equal(reopened.find('old')?.reviewed, true)
+  reopened.close()
 })
 
 test('persists a manually reviewed callee callsign without changing AI analysis', () => {

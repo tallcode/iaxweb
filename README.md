@@ -82,7 +82,7 @@ AI 按节点独立启用，与网关其余功能互不影响；未启用的节�
 
 LLM 后处理：每条识别结果再调用文本模型，对识别文本做结构化解析。ASR 与 LLM 的 Key、端点和模型完全独立，LLM 可以换成任意 OpenAI 兼容供应商（例如 DeepSeek、OpenAI），只需配置 `AI_LLM_BASE_URL`/`AI_LLM_API_KEY`/`AI_LLM_MODEL`，不影响语音识别。调用时附带最近 `AI_CONTEXT_WINDOW_MS` 内的解析历史作为对话上下文。输出按 schema 文件严格校验，不合规记警告。`AI_LLM_ENABLED=false` 可关闭：
 
-默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中同时预留 `manual_callsign`、`manual_risk_level`、`manual_note` 三个人工复核字段。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。
+默认只进行实时识别，不持久化数据。设 `AI_PERSISTENCE_ENABLED=true` 后，识别成功的音频段会写入 SQLite（默认 `data/ai.sqlite`），并保存原始 WAV 到 `data/rec/YYYYMMDD/<segmentId>.wav`（按 UTC 日期分目录，便于按天清理）。ASR 完成后立即写入原始文本和录音，LLM 成功后更新同一行的 `revise`、`callsign` 和 `risk` 结果；LLM 失败不会丢失 ASR 数据。表中分别保留人工呼号 `manual_callsign`、被叫 `callee_callsign`、人工文本 `manual_recognition`、人工风险 `manual_risk_level` 和备注 `manual_note`；`reviewed` 表示识别文本、主叫与被叫均已人工复核，可用于训练，默认值为 `0`。升级时会自动在事务内为旧数据库补充人工文本和复核状态字段，原有数据保持不变。读取最终呼号和风险等级时使用 `ai_segments_effective` 视图，其中人工复核值优先，AI 原始结果保持不变。可通过 `AI_DATABASE_FILE` 和 `AI_RECORDINGS_DIR` 指定位置。
 
 `config/` 和整个 `data/` 目录均被 Git 与 Docker 构建上下文忽略。Compose 将 `./config` 只读挂载到 `/app/config`，其中的节点定义、提示词、schema、热词、背景文本、呼号表和管理员账号由宿主机维护；容器进程不能改写这些配置。`./data` 则以可写方式挂载到 `/app/data`，保存 SQLite、WAL、录音和持久化的管理会话。请把部署用户的 UID/GID 配置为 `PUID`/`PGID`（默认 `1000:1000`），确保 `data/` 可读写且 `config/` 可读。
 
@@ -232,7 +232,7 @@ npm start
 
 ### 管理页面
 
-启用 `AI_PERSISTENCE_ENABLED=true` 后，访问 `/admin/` 查看已持久化的识别记录。页面按时间倒序分页展示中国时区的记录，可播放录音，并可编辑人工复核呼号；留空会撤销人工覆盖，`N0CALL` 表示人工确认无呼号。
+启用 `AI_PERSISTENCE_ENABLED=true` 后，访问 `/admin/` 查看已持久化的识别记录。页面按时间倒序分页展示中国时区的记录，可播放录音，并可点击编辑识别文本、主叫和被叫呼号。人工文本优先展示，清空后恢复原始 AI 文本；Enter 保存、Shift+Enter 换行、Esc 取消。人工文本和主叫使用绿色，逐字差异以淡黄色背景标出，删除的 AI 文字不显示，悬停可查看 AI 原文；未人工修改时使用白色。呼号留空会撤销人工覆盖，人工主叫设为 `N0CALL` 时显示原 AI 呼号，使用白字、淡黄色背景和删除线。播放后方的“已标注”复选框可保存或取消整条记录的复核状态，勾选后的行或卡片以淡绿色背景区分；编辑字段本身不会自动勾选。
 
 管理账号文件默认是 `config/admin.json`，不提交到 Git。先生成密码哈希：
 

@@ -27,6 +27,14 @@ interface ManualCallsignBody {
   callsign?: unknown
 }
 
+interface ManualRecognitionBody {
+  recognition?: unknown
+}
+
+interface ReviewBody {
+  reviewed?: unknown
+}
+
 interface SegmentParams {
   id: string
 }
@@ -157,6 +165,35 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
       if (!segment)
         return reply.code(404).send('Not Found')
       return reply.header('cache-control', 'no-store').send(segment)
+    },
+  )
+
+  app.patch<{ Body: ManualRecognitionBody, Params: SegmentParams }>(
+    '/segments/:id/manual-recognition',
+    { preHandler: requireAuthentication },
+    async (request, reply) => {
+      const body = request.body
+      if (!body || !Object.hasOwn(body, 'recognition')
+        || (body.recognition !== null && typeof body.recognition !== 'string')
+        || (typeof body.recognition === 'string' && body.recognition.length > 20_000)) {
+        return reply.code(400).send('Invalid recognition text')
+      }
+      const recognition = typeof body.recognition === 'string' ? body.recognition.trim() || null : null
+      if (!segmentRepository.updateManualReview(request.params.id, { recognition }))
+        return reply.code(404).send('Not Found')
+      return reply.header('cache-control', 'no-store').send(segmentRepository.find(request.params.id))
+    },
+  )
+
+  app.patch<{ Body: ReviewBody, Params: SegmentParams }>(
+    '/segments/:id/manual-review',
+    { preHandler: requireAuthentication },
+    async (request, reply) => {
+      if (typeof request.body?.reviewed !== 'boolean')
+        return reply.code(400).send('Invalid review status')
+      if (!segmentRepository.updateManualReview(request.params.id, { reviewed: request.body.reviewed }))
+        return reply.code(404).send('Not Found')
+      return reply.header('cache-control', 'no-store').send(segmentRepository.find(request.params.id))
     },
   )
 
