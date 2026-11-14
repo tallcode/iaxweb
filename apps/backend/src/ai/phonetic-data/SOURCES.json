@@ -1,0 +1,43 @@
+{
+  "generator": "experiments/callsign-phonetics/export-near-data.py",
+  "note": "MIT source notices included. Lexicon uses the existing @lunarisapp/cmudict dependency. No ASR corpus text or callsign lists are shipped.",
+  "resources": [
+    {
+      "file": "cmn-Latn.csv",
+      "url": "https://raw.githubusercontent.com/dmort27/epitran/master/epitran/data/map/cmn-Latn.csv",
+      "sha256": "499b91e9a541150c988c801fa6ee8eab6ee1e2f7dc01f2ef4c85d7fac5ce56d1",
+      "bytes": 1584
+    },
+    {
+      "file": "ipa_all.csv",
+      "url": "https://raw.githubusercontent.com/dmort27/panphon/master/panphon/data/ipa_all.csv",
+      "sha256": "0ec0052edf4e58c8c23eda10c0195687eb167ce9bd206cf9a85b9cce8b181f0a",
+      "bytes": 356894
+    },
+    {
+      "file": "feature_weights.csv",
+      "url": "https://raw.githubusercontent.com/dmort27/panphon/master/panphon/data/feature_weights.csv",
+      "sha256": "03e80a6489e4993de6f17e063eaa74eb59c1d9ba9bc0dec9bec6ffce0cb8080d",
+      "bytes": 209
+    },
+    {
+      "file": "panphon-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/dmort27/panphon/master/LICENSE.txt",
+      "sha256": "3b1fb30693f359509d028738dd6d19b131256a125604e9021a6512f098445523",
+      "bytes": 1070
+    },
+    {
+      "file": "epitran-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/dmort27/epitran/master/LICENSE.txt",
+      "sha256": "bd46b34e5bc6a0b5042a7fb115058213b7ffa112a864124b0a67ecb92cf040d5",
+      "bytes": 1082
+    }
+  ],
+  "templates": 92,
+  "phones": 71,
+  "existingDependency": {
+    "package": "@lunarisapp/cmudict",
+    "notice": "cmudict-wrapper-LICENSE.txt",
+    "upstreamDictionary": "https://github.com/cmusphinx/cmudict"
+  }
+}
