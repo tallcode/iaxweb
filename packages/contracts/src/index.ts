@@ -42,10 +42,12 @@ export interface PersistedSegment {
   effectiveRiskLevel: number | null
   id: string
   manualCallsign: string | null
+  manualRecognition: string | null
   manualNote: string | null
   manualRiskLevel: number | null
   nodeId: string
   recognition: string
+  reviewed: boolean
   revise: string | null
   riskLevel: number | null
   riskReason: string | null

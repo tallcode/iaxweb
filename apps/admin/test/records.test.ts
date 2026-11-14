@@ -76,7 +76,7 @@ describe('record callsign editing', () => {
     expect(wrapper.text()).toContain('共 1 条记录')
     expect(wrapper.get('nav').classes()).toEqual(expect.arrayContaining(['sticky', 'bottom-0']))
     const callsign = wrapper.findAll('button').find(button => button.text() === 'BG5AAA')
-    expect(callsign?.classes()).toContain('text-cyan-300')
+    expect(callsign?.classes()).toContain('text-slate-100')
 
     await callsign!.trigger('click')
     const editor = wrapper.get<HTMLInputElement>('input[aria-label="编辑主叫呼号"]')
@@ -283,10 +283,12 @@ function segment(): PersistedSegment {
     effectiveRiskLevel: null,
     id: 'segment-1',
     manualCallsign: null,
+    manualRecognition: null,
     manualNote: null,
     manualRiskLevel: null,
     nodeId: '1900',
     recognition: '这里是 BG5AAA',
+    reviewed: false,
     revise: null,
     riskLevel: null,
     riskReason: null,

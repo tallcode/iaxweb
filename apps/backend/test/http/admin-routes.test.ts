@@ -112,6 +112,28 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   })
   assert.equal(calleeUpdate.statusCode, 200)
   assert.equal(calleeUpdate.json().calleeCallsign, 'BG5BBB')
+  const headers = { cookie: cookie!.split(';', 1)[0] }
+  const manualText = await app.inject({ headers, method: 'PATCH', payload: { recognition: ' 人工确认文本 ' }, url: '/api/admin/segments/matching-segment/manual-recognition' })
+  assert.equal(manualText.statusCode, 200)
+  assert.equal(manualText.json().manualRecognition, '人工确认文本')
+  assert.equal(manualText.json().recognition, segment.recognition)
+  assert.equal(manualText.json().reviewed, false)
+  for (const reviewed of [true, false]) {
+    const review = await app.inject({ headers, method: 'PATCH', payload: { reviewed }, url: '/api/admin/segments/matching-segment/manual-review' })
+    assert.equal(review.statusCode, 200)
+    assert.equal(review.json().reviewed, reviewed)
+    assert.equal(review.json().manualRecognition, '人工确认文本')
+  }
+  for (const payload of [{}, { reviewed: 'false' }, { reviewed: null }, { reviewed: 1 }]) {
+    const invalid = await app.inject({ headers, method: 'PATCH', payload, url: '/api/admin/segments/matching-segment/manual-review' })
+    assert.equal(invalid.statusCode, 400)
+  }
+  const clearText = await app.inject({ headers, method: 'PATCH', payload: { recognition: '' }, url: '/api/admin/segments/matching-segment/manual-recognition' })
+  assert.equal(clearText.json().manualRecognition, null)
+  const unauthenticated = await app.inject({ method: 'PATCH', payload: { reviewed: true }, url: '/api/admin/segments/matching-segment/manual-review' })
+  assert.equal(unauthenticated.statusCode, 401)
+  const missing = await app.inject({ headers, method: 'PATCH', payload: { reviewed: true }, url: '/api/admin/segments/missing/manual-review' })
+  assert.equal(missing.statusCode, 404)
   const partialSearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
     url: '/api/admin/segments?callsign=BG5AA',

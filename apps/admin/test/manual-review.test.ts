@@ -1,0 +1,102 @@
+// @vitest-environment jsdom
+import type { PersistedSegment } from '@iaxweb/contracts'
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, expect, it, vi } from 'vitest'
+import CallsignText from '../src/components/CallsignText.vue'
+import RecordsPage from '../src/pages/RecordsPage.vue'
+
+vi.mock('vue-router', () => ({ useRouter: () => ({ replace: vi.fn() }) }))
+
+afterEach(() => vi.unstubAllGlobals())
+
+function segment(): PersistedSegment {
+  return {
+    id: 'review-row',
+    nodeId: '1900',
+    capturedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    durationMs: 1000,
+    voicedMs: 900,
+    recognition: '这里是 BG5AAA',
+    corrected: null,
+    revise: null,
+    callsign: 'BG5AAA',
+    effectiveCallsign: 'BG5AAA',
+    manualCallsign: null,
+    calleeCallsign: null,
+    manualRecognition: null,
+    reviewed: false,
+    manualNote: null,
+    manualRiskLevel: null,
+    riskLevel: null,
+    effectiveRiskLevel: null,
+    riskReason: null,
+  }
+}
+
+function setup(row: PersistedSegment, ...responses: Response[]) {
+  vi.stubGlobal('Audio', class extends EventTarget {
+    load(): void {}
+    pause(): void {}
+    removeAttribute(): void {}
+  })
+  const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ items: [row], total: 1, page: 1, pageSize: 50 }))
+  for (const response of responses)
+    fetchMock.mockResolvedValueOnce(response)
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+it('saves human text separately and clears it back to the white AI display', async () => {
+  const row = segment()
+  const edited = { ...row, manualRecognition: '这里是 BG5BBB' }
+  const fetchMock = setup(row, Response.json(edited), Response.json(row))
+  const wrapper = mount(RecordsPage)
+  await flushPromises()
+  await wrapper.get('button[aria-label="编辑识别文本"]').trigger('click')
+  await wrapper.get('textarea').setValue(edited.manualRecognition)
+  await wrapper.get('textarea').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  const display = wrapper.get('button[aria-label="编辑识别文本"]')
+  expect(display.text()).toBe(edited.manualRecognition)
+  expect(display.classes()).toContain('text-emerald-400')
+  expect(display.findAll('span').some(span => span.classes().includes('bg-yellow-200/25'))).toBe(true)
+  expect(fetchMock.mock.calls[1]?.[1].body).toBe(JSON.stringify({ recognition: edited.manualRecognition }))
+  expect(wrapper.get<HTMLInputElement>('tbody input[aria-label="已标注"]').element.checked).toBe(false)
+  await display.trigger('click')
+  await wrapper.get('textarea').setValue('')
+  await wrapper.get('textarea').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(wrapper.get('button[aria-label="编辑识别文本"]').text()).toBe(row.recognition)
+  expect(wrapper.get('button[aria-label="编辑识别文本"]').classes()).toContain('text-slate-100')
+  expect(fetchMock.mock.calls[2]?.[1].body).toBe(JSON.stringify({ recognition: null }))
+  wrapper.unmount()
+})
+
+it('persists review and cancel actions and rolls back a failed save', async () => {
+  const row = segment()
+  const fetchMock = setup(row, Response.json({ ...row, reviewed: true }), new Response('failed', { status: 500 }), Response.json(row))
+  const wrapper = mount(RecordsPage)
+  await flushPromises()
+  const checkbox = wrapper.get<HTMLInputElement>('tbody input[aria-label="已标注"]')
+  await checkbox.setValue(true)
+  await flushPromises()
+  expect(checkbox.element.checked).toBe(true)
+  expect(wrapper.get('tbody tr').classes()).toContain('bg-emerald-950/40')
+  await checkbox.setValue(false)
+  await flushPromises()
+  expect(checkbox.element.checked).toBe(true)
+  await checkbox.setValue(false)
+  await flushPromises()
+  expect(checkbox.element.checked).toBe(false)
+  expect(wrapper.get('tbody tr').classes()).not.toContain('bg-emerald-950/40')
+  expect(fetchMock.mock.calls.slice(1).map(call => JSON.parse(call[1].body))).toEqual([{ reviewed: true }, { reviewed: false }, { reviewed: false }])
+  wrapper.unmount()
+})
+
+it('renders a manually rejected AI callsign in white with a strike and yellow background', () => {
+  const wrapper = mount(CallsignText, { props: { original: 'BD1ESL', manual: 'N0CALL' } })
+  expect(wrapper.get('del').text()).toBe('BD1ESL')
+  expect(wrapper.get('del').classes()).toEqual(expect.arrayContaining(['text-slate-100', 'bg-yellow-200/25']))
+  wrapper.unmount()
+})

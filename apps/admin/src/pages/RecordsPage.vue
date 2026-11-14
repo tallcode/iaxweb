@@ -2,6 +2,8 @@
 import type { PersistedSegment, SegmentPage } from '@iaxweb/contracts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import CallsignText from '../components/CallsignText.vue'
+import RecognitionEditor from '../components/RecognitionEditor.vue'
 import { useConditionalAutoRefresh } from '../composables/use-conditional-auto-refresh'
 
 const PAGE_SIZE = 50
@@ -19,6 +21,8 @@ const manualOnly = ref(false)
 const aiOnly = ref(false)
 type CallsignRole = 'callee' | 'caller'
 const editingCallsign = ref<{ id: string, role: CallsignRole } | null>(null)
+const textEditors = ref(0)
+const savingSegments = ref(new Set<string>())
 const playingSegmentId = ref<string | null>(null)
 const isLoading = ref(false)
 const audioPlayer = new Audio()
@@ -28,6 +32,8 @@ const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE))
 const { markRefreshed } = useConditionalAutoRefresh({
   canRefresh: () => currentPage.value === 1
     && editingCallsign.value === null
+    && textEditors.value === 0
+    && savingSegments.value.size === 0
     && searchInput.value === ''
     && callsignFilter.value === ''
     && !manualOnly.value
@@ -186,6 +192,64 @@ function isEditingCallsign(segment: PersistedSegment, role: CallsignRole): boole
   return editingCallsign.value?.id === segment.id && editingCallsign.value.role === role
 }
 
+function onTextEditing(editing: boolean): void {
+  textEditors.value += editing ? 1 : -1
+  if (editing)
+    segmentRequest?.abort()
+}
+
+async function patchSegment(segment: PersistedSegment, endpoint: string, body: unknown): Promise<PersistedSegment | undefined> {
+  if (savingSegments.value.has(segment.id))
+    return undefined
+  savingSegments.value.add(segment.id)
+  segmentRequest?.abort()
+  try {
+    const response = await fetch(`/api/admin/segments/${encodeURIComponent(segment.id)}/${endpoint}`, {
+      body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json' },
+      method: 'PATCH',
+    })
+    if (response.status === 401) {
+      await router.replace('/')
+      return undefined
+    }
+    if (!response.ok) {
+      statusMessage.value = response.status === 404 ? '保存失败：记录不存在' : '保存失败，请检查输入后重试'
+      return undefined
+    }
+    const updated = await response.json() as PersistedSegment
+    segmentRequest?.abort()
+    Object.assign(segment, updated)
+    const visible = segments.value.find(row => row.id === segment.id)
+    if (visible && visible !== segment)
+      Object.assign(visible, updated)
+    statusMessage.value = callsignFilter.value || manualOnly.value || aiOnly.value
+      ? `共 ${total.value} 条匹配记录`
+      : `共 ${total.value} 条记录`
+    return updated
+  }
+  catch {
+    statusMessage.value = '保存失败：无法连接服务器'
+    return undefined
+  }
+  finally {
+    savingSegments.value.delete(segment.id)
+  }
+}
+
+async function saveRecognition(segment: PersistedSegment, recognition: string | null): Promise<boolean> {
+  return !!await patchSegment(segment, 'manual-recognition', { recognition })
+}
+
+async function setReviewed(segment: PersistedSegment, event: Event): Promise<void> {
+  const checkbox = event.currentTarget as HTMLInputElement
+  const requested = checkbox.checked
+  // Keep the checkbox authoritative to persisted state until saving succeeds.
+  checkbox.checked = segment.reviewed
+  const updated = await patchSegment(segment, 'manual-review', { reviewed: requested })
+  checkbox.checked = updated?.reviewed ?? segment.reviewed
+}
+
 async function saveCallsign(segment: PersistedSegment, role: CallsignRole, input: HTMLInputElement): Promise<boolean> {
   const callsign = input.value.trim().toUpperCase()
   if (callsign && !CALLSIGN_PATTERN.test(callsign)) {
@@ -195,47 +259,30 @@ async function saveCallsign(segment: PersistedSegment, role: CallsignRole, input
     return false
   }
   input.setCustomValidity('')
-  try {
-    const endpoint = role === 'callee' ? 'manual-callee-callsign' : 'manual-callsign'
-    const response = await fetch(`/api/admin/segments/${encodeURIComponent(segment.id)}/${endpoint}`, {
-      body: JSON.stringify({ callsign: callsign || null }),
-      headers: { 'content-type': 'application/json' },
-      method: 'PATCH',
-    })
-    if (!response.ok) {
-      if (response.status === 401) {
-        await router.replace('/')
-        return false
-      }
-      statusMessage.value = '保存失败：呼号必须是规范呼号或 N0CALL'
-      input.value = callsignFor(segment, role) ?? ''
-      return false
-    }
-    const updatedSegment = await response.json() as PersistedSegment
-    Object.assign(segment, updatedSegment)
-    if (role === 'caller') {
-      const searchColumn = manualOnly.value && !aiOnly.value
-        ? updatedSegment.manualCallsign
-        : aiOnly.value && !manualOnly.value
-          ? updatedSegment.callsign
-          : updatedSegment.effectiveCallsign
-      if ((callsignFilter.value && searchColumn !== callsignFilter.value)
-        || (manualOnly.value && updatedSegment.manualCallsign === null)
-        || (aiOnly.value && updatedSegment.callsign === null)) {
-        await loadSegments()
-        return true
-      }
-    }
-    return true
-  }
-  catch {
-    statusMessage.value = '保存失败：无法连接服务器'
-    input.value = callsignFor(segment, role) ?? ''
+  const endpoint = role === 'callee' ? 'manual-callee-callsign' : 'manual-callsign'
+  const updatedSegment = await patchSegment(segment, endpoint, { callsign: callsign || null })
+  if (!updatedSegment)
     return false
+  if (role === 'caller') {
+    const searchColumn = manualOnly.value && !aiOnly.value
+      ? updatedSegment.manualCallsign
+      : aiOnly.value && !manualOnly.value
+        ? updatedSegment.callsign
+        : updatedSegment.effectiveCallsign
+    if ((callsignFilter.value && searchColumn !== callsignFilter.value)
+      || (manualOnly.value && updatedSegment.manualCallsign === null)
+      || (aiOnly.value && updatedSegment.callsign === null)) {
+      await loadSegments()
+      return true
+    }
   }
+  return true
 }
 
 function beginCallsignEdit(event: MouseEvent, segment: PersistedSegment, role: CallsignRole): void {
+  if (savingSegments.value.has(segment.id))
+    return
+  segmentRequest?.abort()
   const container = (event.currentTarget as HTMLElement).parentElement
   editingCallsign.value = { id: segment.id, role }
   void nextTick(() => {
@@ -303,36 +350,39 @@ function formatTime(iso: string): string {
         </form>
       </header>
       <div class="space-y-3 md:hidden">
-        <article v-for="segment in segments" :key="segment.id" class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-xl shadow-black/20">
-          <div class="flex items-start justify-between gap-3">
-            <div>
+        <article v-for="segment in segments" :key="segment.id" class="rounded-xl border p-4 shadow-xl shadow-black/20" :class="segment.reviewed ? 'border-emerald-800/60 bg-emerald-950/40' : 'border-slate-800 bg-slate-900/70'">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
               <p class="text-sm font-medium text-slate-200">
                 {{ formatTime(segment.capturedAt) }}<span class="ml-3 text-xs font-normal text-slate-500">{{ (segment.durationMs / 1_000).toFixed(1) }}s</span>
               </p>
-            </div><button v-if="canPlay(segment.capturedAt)" class="shrink-0 rounded-md border border-slate-700 px-3 py-1.5 text-xs transition hover:bg-slate-700" @click="togglePlayback(segment.id)">
-              {{ playingSegmentId === segment.id ? '停止' : '播放' }}
-            </button><span v-else class="shrink-0 text-xs text-slate-600">已过期</span>
+            </div><div class="flex shrink-0 items-center gap-3">
+              <button v-if="canPlay(segment.capturedAt)" class="shrink-0 rounded-md border border-slate-700 px-3 py-1.5 text-xs transition hover:bg-slate-700" @click="togglePlayback(segment.id)">
+                {{ playingSegmentId === segment.id ? '停止' : '播放' }}
+              </button><span v-else class="shrink-0 text-xs text-slate-600">已过期</span>
+              <label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-slate-300"><input type="checkbox" :checked="segment.reviewed" :disabled="savingSegments.has(segment.id) || textEditors > 0 || editingCallsign !== null" class="size-4 cursor-pointer accent-emerald-500 disabled:cursor-wait disabled:opacity-50" aria-label="已标注" title="识别文本、主叫呼号和被叫呼号均已人工复核，可用于训练" @change="setReviewed(segment, $event)"> 已标注</label>
+            </div>
           </div>
-          <p class="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">
-            {{ segment.recognition }}
-          </p>
+          <div class="mt-3">
+            <RecognitionEditor :original="segment.recognition" :manual="segment.manualRecognition" :disabled="savingSegments.has(segment.id)" :save="value => saveRecognition(segment, value)" @editing="onTextEditing" />
+          </div>
           <div class="mt-4 flex gap-4 text-sm">
             <div class="min-w-0 flex-1 text-left">
-              <span class="mr-2 text-xs text-slate-500">被叫</span><input v-if="isEditingCallsign(segment, 'callee')" :value="segment.calleeCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑被叫呼号" spellcheck="false" @blur="cancelCallsignEdit(segment, 'callee', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, segment, 'callee')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono hover:underline focus:outline-none focus:underline" :class="segment.calleeCallsign !== null ? 'text-emerald-400' : 'text-slate-500'" @click="beginCallsignEdit($event, segment, 'callee')">
+              <span class="mr-2 text-xs text-slate-500">被叫</span><input v-if="isEditingCallsign(segment, 'callee')" :value="segment.calleeCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑被叫呼号" spellcheck="false" @blur="cancelCallsignEdit(segment, 'callee', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, segment, 'callee')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono hover:underline focus:outline-none focus:underline" :class="segment.calleeCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="savingSegments.has(segment.id)" aria-label="编辑被叫呼号" @click="beginCallsignEdit($event, segment, 'callee')">
                 {{ segment.calleeCallsign ?? '—' }}
               </button>
             </div>
             <div class="min-w-0 flex-1 text-left">
-              <span class="mr-2 text-xs text-slate-500">主叫</span><input v-if="isEditingCallsign(segment, 'caller')" :value="segment.effectiveCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑主叫呼号" spellcheck="false" @blur="cancelCallsignEdit(segment, 'caller', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, segment, 'caller')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono hover:underline focus:outline-none focus:underline" :class="segment.manualCallsign !== null ? 'text-emerald-400' : segment.effectiveCallsign !== null ? 'text-cyan-300' : 'text-slate-500'" @click="beginCallsignEdit($event, segment, 'caller')">
-                {{ segment.effectiveCallsign ?? '—' }}
+              <span class="mr-2 text-xs text-slate-500">主叫</span><input v-if="isEditingCallsign(segment, 'caller')" :value="segment.effectiveCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑主叫呼号" spellcheck="false" @blur="cancelCallsignEdit(segment, 'caller', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, segment, 'caller')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono hover:underline focus:outline-none focus:underline" :class="segment.manualCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="savingSegments.has(segment.id)" aria-label="编辑主叫呼号" @click="beginCallsignEdit($event, segment, 'caller')">
+                <CallsignText :original="segment.callsign" :manual="segment.manualCallsign" />
               </button>
             </div>
           </div>
         </article>
       </div>
       <div class="hidden overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/70 shadow-xl shadow-black/20 md:block">
-        <table class="min-w-[49rem] w-full table-fixed divide-y divide-slate-800 text-left text-sm leading-6">
-          <colgroup><col class="w-44"><col class="w-16"><col><col class="hidden w-32 min-[1200px]:table-column"><col class="w-32"><col class="w-24"></colgroup><thead class="bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
+        <table class="min-w-[54rem] w-full table-fixed divide-y divide-slate-800 text-left text-sm leading-6">
+          <colgroup><col class="w-44"><col class="w-16"><col><col class="hidden w-32 min-[1200px]:table-column"><col class="w-32"><col class="w-24"><col class="w-20"></colgroup><thead class="bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
             <tr>
               <th class="whitespace-nowrap px-4 py-3">
                 时间
@@ -346,28 +396,32 @@ function formatTime(iso: string): string {
                 主叫
               </th><th class="whitespace-nowrap px-4 py-3">
                 播放
+              </th><th class="whitespace-nowrap px-4 py-3">
+                已标注
               </th>
             </tr>
           </thead><tbody class="divide-y divide-slate-800/80">
-            <tr v-for="segment in segments" :key="segment.id" class="align-top transition hover:bg-slate-800/40">
+            <tr v-for="segment in segments" :key="segment.id" class="align-top transition" :class="segment.reviewed ? 'bg-emerald-950/40 hover:bg-emerald-900/30' : 'hover:bg-slate-800/40'">
               <td class="whitespace-nowrap px-4 py-3 text-slate-400">
                 {{ formatTime(segment.capturedAt) }}
               </td><td class="whitespace-nowrap px-4 py-3">
                 {{ (segment.durationMs / 1_000).toFixed(1) }}s
               </td><td class="px-4 py-3">
-                {{ segment.recognition }}
+                <RecognitionEditor :original="segment.recognition" :manual="segment.manualRecognition" :disabled="savingSegments.has(segment.id)" :save="value => saveRecognition(segment, value)" @editing="onTextEditing" />
               </td><td class="hidden px-4 py-3 min-[1200px]:table-cell">
-                <input v-if="isEditingCallsign(segment, 'callee')" :value="segment.calleeCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none focus:border-cyan-500" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑被叫呼号" spellcheck="false" @blur="cancelCallsignEdit(segment, 'callee', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, segment, 'callee')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono hover:underline focus:outline-none focus:underline" :class="segment.calleeCallsign !== null ? 'text-emerald-400' : 'text-slate-500'" @click="beginCallsignEdit($event, segment, 'callee')">
+                <input v-if="isEditingCallsign(segment, 'callee')" :value="segment.calleeCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none focus:border-cyan-500" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑被叫呼号" spellcheck="false" @blur="cancelCallsignEdit(segment, 'callee', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, segment, 'callee')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono hover:underline focus:outline-none focus:underline" :class="segment.calleeCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="savingSegments.has(segment.id)" aria-label="编辑被叫呼号" @click="beginCallsignEdit($event, segment, 'callee')">
                   {{ segment.calleeCallsign ?? '—' }}
                 </button>
               </td><td class="px-4 py-3">
-                <input v-if="isEditingCallsign(segment, 'caller')" :value="segment.effectiveCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none focus:border-cyan-500" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑主叫呼号" spellcheck="false" @blur="cancelCallsignEdit(segment, 'caller', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, segment, 'caller')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono hover:underline focus:outline-none focus:underline" :class="segment.manualCallsign !== null ? 'text-emerald-400' : segment.effectiveCallsign !== null ? 'text-cyan-300' : 'text-slate-500'" @click="beginCallsignEdit($event, segment, 'caller')">
-                  {{ segment.effectiveCallsign ?? '—' }}
+                <input v-if="isEditingCallsign(segment, 'caller')" :value="segment.effectiveCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none focus:border-cyan-500" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑主叫呼号" spellcheck="false" @blur="cancelCallsignEdit(segment, 'caller', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, segment, 'caller')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono hover:underline focus:outline-none focus:underline" :class="segment.manualCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="savingSegments.has(segment.id)" aria-label="编辑主叫呼号" @click="beginCallsignEdit($event, segment, 'caller')">
+                  <CallsignText :original="segment.callsign" :manual="segment.manualCallsign" />
                 </button>
               </td><td class="px-4 py-3">
                 <button v-if="canPlay(segment.capturedAt)" class="rounded-md border border-slate-700 px-3 py-1.5 text-xs transition hover:bg-slate-700" @click="togglePlayback(segment.id)">
                   {{ playingSegmentId === segment.id ? '停止' : '播放' }}
                 </button><span v-else class="text-xs text-slate-600">已过期</span>
+              </td><td class="px-4 py-3">
+                <input type="checkbox" :checked="segment.reviewed" :disabled="savingSegments.has(segment.id) || textEditors > 0 || editingCallsign !== null" class="size-4 cursor-pointer accent-emerald-500 disabled:cursor-wait disabled:opacity-50" aria-label="已标注" title="识别文本、主叫呼号和被叫呼号均已人工复核，可用于训练" @change="setReviewed(segment, $event)">
               </td>
             </tr>
           </tbody>

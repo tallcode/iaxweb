@@ -14,6 +14,8 @@ export interface StoredSpot {
 export interface ManualReviewPatch {
   calleeCallsign?: string | null
   callsign?: string | null
+  recognition?: string | null
+  reviewed?: boolean
   note?: string | null
   riskLevel?: number | null
 }
@@ -37,6 +39,8 @@ const SCHEMA = `
     risk_reason       TEXT,
 
     manual_callsign   TEXT COLLATE NOCASE,
+    manual_recognition TEXT,
+    reviewed          INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0, 1)),
     callee_callsign   TEXT COLLATE NOCASE,
     manual_risk_level INTEGER CHECK (manual_risk_level BETWEEN 1 AND 5),
     manual_note       TEXT,
@@ -72,6 +76,8 @@ const SELECT_EFFECTIVE = `
     risk_level,
     risk_reason,
     manual_callsign,
+    manual_recognition,
+    reviewed,
     callee_callsign,
     manual_risk_level,
     manual_note,
@@ -92,7 +98,22 @@ export class SegmentRepository {
       mkdirSync(dirname(databaseFile), { recursive: true })
     this.database = new DatabaseSync(databaseFile, { timeout: 5_000 })
     this.database.exec('PRAGMA journal_mode = WAL')
-    this.database.exec(SCHEMA)
+    // Existing databases are upgraded in place; AI evidence is never rewritten.
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      this.database.exec(SCHEMA)
+      const columns = new Set(this.database.prepare('PRAGMA table_info(ai_segments)').all().map(row => row.name))
+      if (!columns.has('manual_recognition'))
+        this.database.exec('ALTER TABLE ai_segments ADD COLUMN manual_recognition TEXT')
+      if (!columns.has('reviewed'))
+        this.database.exec('ALTER TABLE ai_segments ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0, 1))')
+      this.database.exec('COMMIT')
+    }
+    catch (error) {
+      this.database.exec('ROLLBACK')
+      this.database.close()
+      throw error
+    }
   }
 
   close(): void {
@@ -139,6 +160,14 @@ export class SegmentRepository {
     if (patch.callsign !== undefined) {
       assignments.push('manual_callsign = ?')
       values.push(patch.callsign)
+    }
+    if (patch.recognition !== undefined) {
+      assignments.push('manual_recognition = ?')
+      values.push(patch.recognition?.trim() || null)
+    }
+    if (patch.reviewed !== undefined) {
+      assignments.push('reviewed = ?')
+      values.push(patch.reviewed ? 1 : 0)
     }
     if (patch.calleeCallsign !== undefined) {
       assignments.push('callee_callsign = ?')
@@ -194,7 +223,7 @@ export class SegmentRepository {
       SELECT
         id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected,
         revise, callsign, risk_level, risk_reason, manual_callsign, callee_callsign,
-        manual_risk_level, manual_note, created_at, effective_callsign,
+        manual_recognition, reviewed, manual_risk_level, manual_note, created_at, effective_callsign,
         effective_risk_level
       FROM ai_segments_effective
       ${whereClause}
@@ -249,10 +278,12 @@ function mapRow(row: Record<string, unknown>): PersistedSegment {
     effectiveRiskLevel: nullableNumber(row.effective_risk_level),
     id: requiredString(row.id),
     manualCallsign: nullableString(row.manual_callsign),
+    manualRecognition: nullableString(row.manual_recognition),
     manualNote: nullableString(row.manual_note),
     manualRiskLevel: nullableNumber(row.manual_risk_level),
     nodeId: requiredString(row.node_id),
     recognition: requiredString(row.recognition),
+    reviewed: requiredNumber(row.reviewed) === 1,
     revise: nullableString(row.revise),
     riskLevel: nullableNumber(row.risk_level),
     riskReason: nullableString(row.risk_reason),
