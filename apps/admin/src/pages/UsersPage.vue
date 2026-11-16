@@ -2,11 +2,11 @@
 import type { AdminRole, AdminSession, AdminUsersPage } from '@iaxweb/contracts'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import { adminSession as currentUser } from '../admin-session'
 import AdminPageHeader from '../components/AdminPageHeader.vue'
 
 const router = useRouter()
 const users = ref<AdminSession[]>([])
-const currentUser = ref<AdminSession | null>(null)
 const search = ref('')
 const status = ref('')
 const loading = ref(false)
@@ -73,7 +73,6 @@ async function loadUsers(): Promise<void> {
     if (activeRequest.signal.aborted)
       return
     users.value = page.items
-    currentUser.value = page.user
   }
   catch {
     if (!activeRequest.signal.aborted)
@@ -237,18 +236,20 @@ async function deleteUser(): Promise<void> {
         记录管理
       </RouterLink>
     </AdminPageHeader>
-    <main :inert="loggingOut" class="mx-auto w-full max-w-screen-2xl px-4 pt-16 pb-6 sm:px-6 lg:px-8">
-      <div class="sticky top-16 z-20 -mx-4 flex h-16 flex-nowrap items-center gap-3 bg-slate-950/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-        <p class="shrink-0 whitespace-nowrap text-sm text-slate-400">
-          <span class="sm:hidden">{{ filteredUsers.length }}人</span>
-          <span class="hidden sm:inline">共 {{ filteredUsers.length }} 个用户</span>
-        </p>
-        <div class="ml-auto flex items-center gap-2">
-          <input v-model="search" type="search" maxlength="64" aria-label="搜索用户名" placeholder="用户名" autocomplete="off" class="w-[calc(16ch+1.5rem+2px)] flex-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm outline-none focus:border-cyan-500">
-          <button ref="addButton" type="button" aria-label="新增用户" :disabled="loading || saving || loggingOut" class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-cyan-600 px-3 py-2 text-sm text-white transition hover:bg-cyan-500 focus:outline-none disabled:opacity-50" @click="openEditor(undefined, $event)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="size-4" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-            <span>新增用户</span>
-          </button>
+    <main :inert="loggingOut" class="mx-auto w-full max-w-screen-2xl px-4 pt-32 pb-6 sm:px-6 lg:px-8">
+      <div class="fixed inset-x-0 top-16 z-20 h-16 min-w-[380px] bg-slate-950" aria-label="筛选工具栏">
+        <div class="mx-auto flex h-full max-w-screen-2xl flex-nowrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <p class="shrink-0 whitespace-nowrap text-sm text-slate-400">
+            <span class="sm:hidden">{{ filteredUsers.length }}人</span>
+            <span class="hidden sm:inline">共 {{ filteredUsers.length }} 个用户</span>
+          </p>
+          <div class="ml-auto flex items-center gap-2">
+            <input v-model="search" type="search" maxlength="64" aria-label="搜索用户名" placeholder="用户名" autocomplete="off" class="w-[calc(16ch+1.5rem+2px)] flex-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm outline-none focus:border-cyan-500">
+            <button ref="addButton" type="button" aria-label="新增用户" :disabled="loading || saving || loggingOut" class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-cyan-600 px-3 py-2 text-sm text-white transition hover:bg-cyan-500 focus:outline-none disabled:opacity-50" @click="openEditor(undefined, $event)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="size-4" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              <span>新增用户</span>
+            </button>
+          </div>
         </div>
       </div>
       <p v-if="status" role="alert" class="mb-3 text-sm text-red-400">

@@ -16,11 +16,8 @@ interface UserParams {
 type RequireAdministrator = (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | undefined>
 
 export function registerUserRoutes(app: FastifyInstance, auth: AdminAuth, requireAdministrator: RequireAdministrator): void {
-  app.get('/users', { preHandler: requireAdministrator }, async (request, reply) => {
-    const user = auth.getUser(request.cookies.admin_token)
-    if (!user)
-      return reply.code(401).send('Unauthorized')
-    const page: AdminUsersPage = { items: auth.listUsers(), user }
+  app.get('/users', { preHandler: requireAdministrator }, async (_request, reply) => {
+    const page: AdminUsersPage = { items: auth.listUsers() }
     return reply.header('cache-control', 'no-store').send(page)
   })
 

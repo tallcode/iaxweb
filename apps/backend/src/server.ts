@@ -13,7 +13,7 @@ import { config as loadEnv } from 'dotenv'
 import Fastify from 'fastify'
 import { AdminAuth } from './admin/auth.js'
 import { LoginRateLimiter } from './admin/login-rate-limiter.js'
-import { SegmentRepository } from './ai/segment-repository.js'
+import { RecordRepository } from './ai/record-repository.js'
 import { AiService } from './ai/service.js'
 import { SpotStore } from './ai/spot-store.js'
 import { Allmon3StatusService, parseNodeDefinitions, publicStatusSnapshot } from './allmon3/index.js'
@@ -41,8 +41,8 @@ if (aiNodeIds.length > 0 && !aiConfig.asr.apiKey)
 if (aiNodeIds.length > 0 && aiConfig.llm.enabled && !aiConfig.llm.apiKey)
   throw new Error(`AI_LLM_API_KEY is required when AI_LLM_ENABLED=true for nodes: ${aiNodeIds.join(', ')}`)
 
-const segmentRepository = aiConfig.persistenceEnabled ? new SegmentRepository(aiConfig.databaseFile) : undefined
-const adminAuth = segmentRepository ? new AdminAuth(aiConfig.adminFile, aiConfig.sessionsFile) : undefined
+const recordRepository = aiConfig.persistenceEnabled ? new RecordRepository(aiConfig.databaseFile) : undefined
+const adminAuth = recordRepository ? new AdminAuth(aiConfig.adminFile, aiConfig.sessionsFile) : undefined
 const audioClients = new Set<WebSocket>()
 const statusClients = new Set<WebSocket>()
 const audioClientNodes = new WeakMap<WebSocket, string>()
@@ -67,7 +67,7 @@ const aiService = aiNodeIds.length > 0
       config: aiConfig,
       nodeIds: aiNodeIds,
       onSpot: spot => spotStore.publish(spot),
-      ...(segmentRepository ? { repository: segmentRepository } : {}),
+      ...(recordRepository ? { repository: recordRepository } : {}),
     })
   : undefined
 
@@ -118,14 +118,14 @@ app.get('/healthz', async () => ({
 }))
 
 app.get('/api/spots', async (_request, reply) =>
-  reply.header('cache-control', 'no-store').send(segmentRepository?.recentSpots() ?? []))
+  reply.header('cache-control', 'no-store').send(recordRepository?.recentSpots() ?? []))
 
 app.register(registerAdminRoutes, {
   adminAuth,
   loginRateLimiter,
   prefix: '/api/admin',
   recordingsDirectory: aiConfig.recordingsDirectory,
-  segmentRepository,
+  recordRepository,
   sessionMaxAgeSeconds: AdminAuth.sessionMaxAgeSeconds,
   spotStore,
 })
@@ -231,7 +231,7 @@ async function shutdown(signal: string): Promise<void> {
   await Promise.all([...natsAudio.values()].map(service => service.stop()))
   await spotStore.close()
   if (!aiService)
-    segmentRepository?.close()
+    recordRepository?.close()
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

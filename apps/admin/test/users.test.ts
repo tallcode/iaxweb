@@ -1,16 +1,20 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { adminSession } from '../src/admin-session'
 import UsersPage from '../src/pages/UsersPage.vue'
 
 const replace = vi.fn()
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace }), RouterLink: 'a' }))
+beforeEach(() => {
+  adminSession.value = { username: 'admin', role: 'admin', system: true }
+})
 afterEach(() => {
+  adminSession.value = null
   replace.mockReset()
   vi.unstubAllGlobals()
 })
 
-const administrator = { username: 'admin', role: 'admin', system: true }
 const guest = { username: 'guest', role: 'viewer' }
 
 function stubDialogs(wrapper: ReturnType<typeof mount>): void {
@@ -28,9 +32,9 @@ function stubDialogs(wrapper: ReturnType<typeof mount>): void {
 it('filters users by name and creates a new user from the dialog', async () => {
   const editor = { username: 'BG5ATV', role: 'editor' }
   const fetchMock = vi.fn()
-    .mockResolvedValueOnce(Response.json({ items: [guest], user: administrator }))
+    .mockResolvedValueOnce(Response.json({ items: [guest] }))
     .mockResolvedValueOnce(Response.json(editor, { status: 201 }))
-    .mockResolvedValueOnce(Response.json({ items: [guest, editor], user: administrator }))
+    .mockResolvedValueOnce(Response.json({ items: [guest, editor] }))
   vi.stubGlobal('fetch', fetchMock)
   const wrapper = mount(UsersPage)
   await flushPromises()
@@ -57,7 +61,7 @@ it('filters users by name and creates a new user from the dialog', async () => {
 
 it('omits an unchanged password and shows a save error without closing the editor', async () => {
   const fetchMock = vi.fn()
-    .mockResolvedValueOnce(Response.json({ items: [guest], user: administrator }))
+    .mockResolvedValueOnce(Response.json({ items: [guest] }))
     .mockResolvedValueOnce(Response.json({ message: '用户名已存在' }, { status: 409 }))
   vi.stubGlobal('fetch', fetchMock)
   const wrapper = mount(UsersPage)
@@ -75,9 +79,9 @@ it('omits an unchanged password and shows a save error without closing the edito
 
 it('requires confirmation before deleting a user and reloads the list afterwards', async () => {
   const fetchMock = vi.fn()
-    .mockResolvedValueOnce(Response.json({ items: [guest], user: administrator }))
+    .mockResolvedValueOnce(Response.json({ items: [guest] }))
     .mockResolvedValueOnce(new Response(null, { status: 204 }))
-    .mockResolvedValueOnce(Response.json({ items: [], user: administrator }))
+    .mockResolvedValueOnce(Response.json({ items: [] }))
   vi.stubGlobal('fetch', fetchMock)
   const wrapper = mount(UsersPage)
   await flushPromises()

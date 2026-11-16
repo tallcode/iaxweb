@@ -1,5 +1,5 @@
-import type { AdminSession } from '@iaxweb/contracts'
 import { createRouter, createWebHistory } from 'vue-router'
+import { refreshAdminSession } from './admin-session'
 import LoginPage from './pages/LoginPage.vue'
 import RecordsPage from './pages/RecordsPage.vue'
 import UsersPage from './pages/UsersPage.vue'
@@ -15,16 +15,13 @@ export const router = createRouter({
 
 router.beforeEach(async (to) => {
   try {
-    const response = await fetch('/api/admin/session')
-    const authenticated = response.ok
+    const user = await refreshAdminSession()
+    const authenticated = user !== null
 
     if (to.meta.requiresAuth && !authenticated)
       return { path: '/' }
-    if (to.meta.requiresAdmin && authenticated) {
-      const user = await response.json() as AdminSession
-      if (user.role !== 'admin')
-        return { path: '/records' }
-    }
+    if (to.meta.requiresAdmin && authenticated && user.role !== 'admin')
+      return { path: '/records' }
     if (to.path === '/' && authenticated)
       return { path: '/records' }
   }

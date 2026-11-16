@@ -1,11 +1,12 @@
-import type { AdminRole, AdminSegmentPage } from '@iaxweb/contracts'
+import type { AdminRecordPage, AdminRole } from '@iaxweb/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
 import type { LoginRateLimiter } from '../admin/login-rate-limiter.js'
-import type { SegmentRepository } from '../ai/segment-repository.js'
+import type { RecordRepository } from '../ai/record-repository.js'
 import type { SpotStore } from '../ai/spot-store.js'
 import { readFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { RecordingStore } from '../ai/recording-store.js'
 import { registerUserRoutes } from './user-routes.js'
 
@@ -16,7 +17,7 @@ interface AdminRoutesOptions {
   adminAuth: AdminAuth | undefined
   loginRateLimiter: LoginRateLimiter
   recordingsDirectory: string
-  segmentRepository: SegmentRepository | undefined
+  recordRepository: RecordRepository | undefined
   sessionMaxAgeSeconds: number
   spotStore: Pick<SpotStore, 'publishReview'>
 }
@@ -38,11 +39,11 @@ interface ReviewBody {
   reviewed?: unknown
 }
 
-interface SegmentParams {
+interface RecordParams {
   id: string
 }
 
-interface SegmentQuery {
+interface RecordQuery {
   callsign?: string
   editedOnly?: string
   reviewedOnly?: string
@@ -51,9 +52,9 @@ interface SegmentQuery {
 }
 
 export async function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOptions): Promise<void> {
-  const { adminAuth, segmentRepository } = options
+  const { adminAuth, recordRepository } = options
 
-  if (!adminAuth || !segmentRepository) {
+  if (!adminAuth || !recordRepository) {
     app.all('/*', async (_request, reply) => reply.code(503).send('Persistence is disabled'))
     return
   }
@@ -114,10 +115,7 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
     return reply.header('cache-control', 'no-store').send(adminAuth.getUser(request.cookies[ADMIN_COOKIE]))
   })
 
-  app.get<{ Querystring: SegmentQuery }>('/segments', { preHandler: requireAuthentication }, async (request, reply) => {
-    const user = adminAuth.getUser(request.cookies[ADMIN_COOKIE])
-    if (!user)
-      return reply.code(401).send('Unauthorized')
+  app.get<{ Querystring: RecordQuery }>('/records', { preHandler: requireAuthentication }, async (request, reply) => {
     const page = parsePage(request.query.page, 1)
     const pageSize = parsePage(request.query.pageSize, 50)
     const callsign = request.query.callsign?.trim().toUpperCase()
@@ -126,16 +124,28 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
     if (callsign !== undefined && !CALLSIGN_PATTERN.test(callsign))
       return reply.code(400).send('Invalid callsign')
     let result
+    const queryStarted = performance.now()
     try {
-      result = segmentRepository.list(page, pageSize, callsign, editedOnly, reviewedOnly)
+      result = recordRepository.list(page, pageSize, callsign, editedOnly, reviewedOnly)
     }
     catch {
       return reply.code(400).send('Invalid pagination')
     }
+    const queryDuration = performance.now() - queryStarted
     try {
-      const recordingDates = await recordings.availableDates()
-      const page: AdminSegmentPage = { ...result, recordingDates, user }
-      return reply.header('cache-control', 'no-store').send(page)
+      const recordingStarted = performance.now()
+      const recordingDates = new Set(await recordings.availableDates())
+      const recordingDuration = performance.now() - recordingStarted
+      const page: AdminRecordPage = {
+        ...result,
+        items: result.items.map(item => ({
+          ...item,
+          hasAudio: recordingDates.has(item.capturedAt.slice(0, 10).replaceAll('-', '')),
+        })),
+      }
+      return reply.header('cache-control', 'no-store')
+        .header('server-timing', `db;dur=${queryDuration.toFixed(2)}, recordings;dur=${recordingDuration.toFixed(2)}`)
+        .send(page)
     }
     catch (error) {
       request.log.error({ err: error }, 'Failed to scan recording dates')
@@ -143,8 +153,8 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
     }
   })
 
-  app.patch<{ Body: ManualCallsignBody, Params: SegmentParams }>(
-    '/segments/:id/manual-callsign',
+  app.patch<{ Body: ManualCallsignBody, Params: RecordParams }>(
+    '/records/:id/manual-callsign',
     { preHandler: requireEditor },
     async (request, reply) => {
       if (!Object.hasOwn(request.body ?? {}, 'callsign')
@@ -157,25 +167,25 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
         : null
       if (callsign !== null && !CALLSIGN_PATTERN.test(callsign))
         return reply.code(400).send('Invalid callsign')
-      if (!segmentRepository.updateManualReview(request.params.id, { callsign }))
+      if (!recordRepository.updateManualReview(request.params.id, { callsign }))
         return reply.code(404).send('Not Found')
 
-      const segment = segmentRepository.find(request.params.id)
-      if (!segment)
+      const record = recordRepository.find(request.params.id)
+      if (!record)
         return reply.code(404).send('Not Found')
 
       options.spotStore.publishReview({
-        at: segment.capturedAt,
-        callsign: segment.effectiveCallsign ?? 'N0CALL',
-        id: segment.id,
-        node: segment.nodeId,
+        at: record.capturedAt,
+        callsign: record.effectiveCallsign ?? 'N0CALL',
+        id: record.id,
+        node: record.nodeId,
       })
-      return reply.header('cache-control', 'no-store').send(segment)
+      return reply.header('cache-control', 'no-store').send(record)
     },
   )
 
-  app.patch<{ Body: ManualCallsignBody, Params: SegmentParams }>(
-    '/segments/:id/manual-callee-callsign',
+  app.patch<{ Body: ManualCallsignBody, Params: RecordParams }>(
+    '/records/:id/manual-callee-callsign',
     { preHandler: requireEditor },
     async (request, reply) => {
       if (!Object.hasOwn(request.body ?? {}, 'callsign')
@@ -188,18 +198,18 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
         : null
       if (callsign !== null && !CALLSIGN_PATTERN.test(callsign))
         return reply.code(400).send('Invalid callsign')
-      if (!segmentRepository.updateManualReview(request.params.id, { calleeCallsign: callsign }))
+      if (!recordRepository.updateManualReview(request.params.id, { calleeCallsign: callsign }))
         return reply.code(404).send('Not Found')
 
-      const segment = segmentRepository.find(request.params.id)
-      if (!segment)
+      const record = recordRepository.find(request.params.id)
+      if (!record)
         return reply.code(404).send('Not Found')
-      return reply.header('cache-control', 'no-store').send(segment)
+      return reply.header('cache-control', 'no-store').send(record)
     },
   )
 
-  app.patch<{ Body: ManualRecognitionBody, Params: SegmentParams }>(
-    '/segments/:id/manual-recognition',
+  app.patch<{ Body: ManualRecognitionBody, Params: RecordParams }>(
+    '/records/:id/manual-recognition',
     { preHandler: requireEditor },
     async (request, reply) => {
       const body = request.body
@@ -209,58 +219,58 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
         return reply.code(400).send('Invalid recognition text')
       }
       const recognition = typeof body.recognition === 'string' ? body.recognition.trim() || null : null
-      if (!segmentRepository.updateManualReview(request.params.id, { recognition }))
+      if (!recordRepository.updateManualReview(request.params.id, { recognition }))
         return reply.code(404).send('Not Found')
-      return reply.header('cache-control', 'no-store').send(segmentRepository.find(request.params.id))
+      return reply.header('cache-control', 'no-store').send(recordRepository.find(request.params.id))
     },
   )
 
-  app.patch<{ Body: ReviewBody, Params: SegmentParams }>(
-    '/segments/:id/manual-review',
+  app.patch<{ Body: ReviewBody, Params: RecordParams }>(
+    '/records/:id/manual-review',
     { preHandler: requireAdministrator },
     async (request, reply) => {
       if (typeof request.body?.reviewed !== 'boolean')
         return reply.code(400).send('Invalid review status')
-      if (!segmentRepository.updateManualReview(request.params.id, { reviewed: request.body.reviewed }))
+      if (!recordRepository.updateManualReview(request.params.id, { reviewed: request.body.reviewed }))
         return reply.code(404).send('Not Found')
-      return reply.header('cache-control', 'no-store').send(segmentRepository.find(request.params.id))
+      return reply.header('cache-control', 'no-store').send(recordRepository.find(request.params.id))
     },
   )
 
-  app.delete<{ Params: SegmentParams }>(
-    '/segments/:id',
+  app.delete<{ Params: RecordParams }>(
+    '/records/:id',
     { preHandler: requireAdministrator },
     async (request, reply) => {
-      const segment = segmentRepository.find(request.params.id)
-      if (!segment)
+      const record = recordRepository.find(request.params.id)
+      if (!record)
         return reply.code(404).send('Not Found')
       try {
-        if (!segmentRepository.delete(segment.id, () => recordings.remove(segment.id, segment.capturedAt)))
+        if (!recordRepository.delete(record.id, () => recordings.remove(record.id, record.capturedAt)))
           return reply.code(404).send('Not Found')
       }
       catch (error) {
-        request.log.error({ err: error, segmentId: segment.id }, 'Failed to delete segment and recording')
-        return reply.code(500).send('Failed to delete segment and recording')
+        request.log.error({ err: error, recordId: record.id }, 'Failed to delete record and recording')
+        return reply.code(500).send('Failed to delete record and recording')
       }
       options.spotStore.publishReview({
-        at: segment.capturedAt,
+        at: record.capturedAt,
         callsign: 'N0CALL',
-        id: segment.id,
-        node: segment.nodeId,
+        id: record.id,
+        node: record.nodeId,
       })
       return reply.header('cache-control', 'no-store').code(204).send()
     },
   )
 
-  app.get<{ Params: SegmentParams }>(
-    '/segments/:id/audio',
+  app.get<{ Params: RecordParams }>(
+    '/records/:id/audio',
     { preHandler: requireAuthentication },
     async (request, reply) => {
-      const segment = segmentRepository.find(request.params.id)
-      if (!segment)
+      const record = recordRepository.find(request.params.id)
+      if (!record)
         return reply.code(404).send('Not Found')
 
-      const day = segment.capturedAt.slice(0, 10).replaceAll('-', '')
+      const day = record.capturedAt.slice(0, 10).replaceAll('-', '')
       const recordingsRoot = resolve(options.recordingsDirectory)
       const file = resolve(recordingsRoot, day, `${request.params.id}.wav`)
       if (!file.startsWith(`${recordingsRoot}${sep}`))

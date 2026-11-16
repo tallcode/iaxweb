@@ -10,8 +10,8 @@ import { correctExplanationText } from './corrected-transcript.js'
 import { LlmParser } from './llm-parser.js'
 import { decodeMuLaw } from './mulaw.js'
 import { SerialQueue } from './queue.js'
+import { RecordRepository } from './record-repository.js'
 import { RecordingStore } from './recording-store.js'
-import { SegmentRepository } from './segment-repository.js'
 import { SegmentStore } from './segment-store.js'
 import { NodeSegmenter } from './segmenter.js'
 import { encodeWav } from './wav.js'
@@ -28,7 +28,7 @@ export interface AiServiceOptions {
   config: AiConfig
   nodeIds: string[]
   onSpot?: (spot: SpotEvent) => void
-  repository?: SegmentRepository
+  repository?: RecordRepository
 }
 
 // AI 值机员：监听节点音频，按发射分段送百炼识别，输出到控制台。
@@ -39,7 +39,7 @@ export class AiService {
   private readonly asr: AsrClient
   private readonly llm: LlmParser | undefined
   private readonly onSpot: ((spot: SpotEvent) => void) | undefined
-  private readonly repository: SegmentRepository | undefined
+  private readonly repository: RecordRepository | undefined
   private readonly recordings: RecordingStore | undefined
   private readonly nodes = new Map<string, NodeAiRuntime>()
   private stopped = false
@@ -48,7 +48,7 @@ export class AiService {
     const { config, nodeIds } = options
     this.config = config
     this.asrContextFiles = new AsrContextFiles(config.hotwordsFile, config.backgroundFile)
-    this.repository = options.repository ?? (config.persistenceEnabled ? new SegmentRepository(config.databaseFile) : undefined)
+    this.repository = options.repository ?? (config.persistenceEnabled ? new RecordRepository(config.databaseFile) : undefined)
     this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
     this.onSpot = options.onSpot
     this.asr = new AsrClient({

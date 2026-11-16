@@ -1,15 +1,19 @@
 // @vitest-environment jsdom
-import type { PersistedSegment } from '@iaxweb/contracts'
+import type { PersistedRecord } from '@iaxweb/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
+import { adminSession } from '../src/admin-session'
 import CallsignText from '../src/components/CallsignText.vue'
 import RecordsPage from '../src/pages/RecordsPage.vue'
 
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace: vi.fn() }), RouterLink: 'a' }))
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  adminSession.value = null
+  vi.unstubAllGlobals()
+})
 
-function segment(): PersistedSegment {
+function record(): PersistedRecord {
   return {
     id: 'review-row',
     nodeId: '1900',
@@ -34,13 +38,14 @@ function segment(): PersistedSegment {
   }
 }
 
-function setup(row: PersistedSegment, ...responses: Response[]) {
+function setup(row: PersistedRecord, ...responses: Response[]) {
+  adminSession.value = { role: 'admin', username: 'admin' }
   vi.stubGlobal('Audio', class extends EventTarget {
     load(): void {}
     pause(): void {}
     removeAttribute(): void {}
   })
-  const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ items: [row], total: 1, page: 1, pageSize: 50, user: { role: 'admin', username: 'admin' } }))
+  const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ items: [row], total: 1, page: 1, pageSize: 50 }))
   for (const response of responses)
     fetchMock.mockResolvedValueOnce(response)
   vi.stubGlobal('fetch', fetchMock)
@@ -48,7 +53,7 @@ function setup(row: PersistedSegment, ...responses: Response[]) {
 }
 
 it('saves human text separately and clears it back to the white AI display', async () => {
-  const row = segment()
+  const row = record()
   const edited = { ...row, manualRecognition: '这里是 BG5BBB' }
   const fetchMock = setup(row, Response.json(edited), Response.json(row))
   const wrapper = mount(RecordsPage)
@@ -74,7 +79,7 @@ it('saves human text separately and clears it back to the white AI display', asy
 })
 
 it('persists review and cancel actions and rolls back a failed save', async () => {
-  const row = segment()
+  const row = record()
   const fetchMock = setup(row, Response.json({ ...row, reviewed: true }), new Response('failed', { status: 500 }), Response.json(row))
   const wrapper = mount(RecordsPage)
   await flushPromises()

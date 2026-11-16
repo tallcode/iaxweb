@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import type { PersistedSegment, SegmentPage } from '@iaxweb/contracts'
+import type { PersistedRecord, RecordPage } from '@iaxweb/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { adminSession } from '../src/admin-session'
 
 const replace = vi.fn()
 
@@ -11,10 +12,12 @@ vi.mock('vue-router', () => ({
 }))
 
 beforeEach(() => {
+  adminSession.value = { role: 'admin', username: 'admin' }
   vi.stubGlobal('scrollTo', vi.fn())
 })
 
 afterEach(() => {
+  adminSession.value = null
   replace.mockReset()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -28,7 +31,7 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [segment()], page: 1, pageSize: 50, total: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 1 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
@@ -37,6 +40,7 @@ describe('record callsign editing', () => {
     expect(wrapper.get('h1').text()).toBe('记录管理')
     expect(wrapper.get('header [aria-label="当前用户"]').text()).toBe('admin')
     expect(wrapper.get('thead').classes()).toEqual(expect.arrayContaining(['sticky', 'top-32']))
+    expect(wrapper.get('[aria-label="筛选工具栏"]').classes()).toEqual(expect.arrayContaining(['fixed', 'top-16', 'bg-slate-950']))
     expect(wrapper.get('header').classes()).toEqual(expect.arrayContaining(['fixed', 'top-0']))
     await wrapper.get('header button').trigger('click')
     await flushPromises()
@@ -47,13 +51,14 @@ describe('record callsign editing', () => {
   })
 
   it('keeps the account and records visible when logout fails and permits retrying', async () => {
+    adminSession.value = { username: 'BG5ATV', role: 'editor' }
     vi.stubGlobal('Audio', class extends EventTarget {
       load(): void {}
       pause(): void {}
       removeAttribute(): void {}
     })
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [segment()], page: 1, pageSize: 50, total: 1, user: { username: 'BG5ATV', role: 'editor' } }))
+      .mockResolvedValueOnce(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 1 }))
       .mockResolvedValueOnce(new Response('failed', { status: 500 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
@@ -80,7 +85,7 @@ describe('record callsign editing', () => {
       pause(): void {}
       removeAttribute(): void {}
     })
-    const page = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const page = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page))
       .mockResolvedValueOnce(jsonResponse(page))
@@ -107,12 +112,12 @@ describe('record callsign editing', () => {
       pause(): void {}
       removeAttribute(): void {}
     })
+    adminSession.value = role ? { username: 'user', role: role === 'editor' ? 'editor' : 'viewer' } : null
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({
-      items: [segment()],
+      items: [record()],
       page: 1,
       pageSize: 50,
       total: 1,
-      user: { username: 'user', role },
     })))
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
     const wrapper = mount(RecordsPage)
@@ -140,9 +145,9 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [segment()], page: 1, pageSize: 50, recordingDates: [], total: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 1 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(jsonResponse({ items: [], page: 1, pageSize: 50, recordingDates: [], total: 0 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [], page: 1, pageSize: 50, total: 0 }))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
     const wrapper = mount(RecordsPage)
@@ -162,7 +167,7 @@ describe('record callsign editing', () => {
     await remove.trigger('click')
     await dialog.get('form').trigger('submit')
     await flushPromises()
-    expect(fetchMock.mock.calls[1]).toEqual(['/api/admin/segments/segment-1', { method: 'DELETE' }])
+    expect(fetchMock.mock.calls[1]).toEqual(['/api/admin/records/record-1', { method: 'DELETE' }])
     expect(wrapper.findAll('tbody tr')).toHaveLength(0)
     expect(wrapper.text()).toContain('共 0 条记录')
     wrapper.unmount()
@@ -175,7 +180,7 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [segment()], page: 1, pageSize: 50, total: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 1 }))
       .mockResolvedValueOnce(new Response('failed', { status: 500 }))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
@@ -200,11 +205,11 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [segment()], page: 1, pageSize: 50, total: 51 }))
-      .mockResolvedValueOnce(jsonResponse({ items: [{ ...segment(), id: 'last-row' }], page: 2, pageSize: 50, total: 51 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 51 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ ...record(), id: 'last-row' }], page: 2, pageSize: 50, total: 51 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(jsonResponse({ items: [], page: 2, pageSize: 50, total: 50 }))
-      .mockResolvedValueOnce(jsonResponse({ items: [segment()], page: 1, pageSize: 50, total: 50 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 50 }))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
     const wrapper = mount(RecordsPage)
@@ -217,26 +222,25 @@ describe('record callsign editing', () => {
     await flushPromises()
     expect(wrapper.get<HTMLInputElement>('input[aria-label="页码"]').element.value).toBe('1')
     expect(wrapper.text()).toContain('共 50 条记录')
-    expect(fetchMock.mock.calls[4]?.[0]).toBe('/api/admin/segments?page=1&pageSize=50')
+    expect(fetchMock.mock.calls[4]?.[0]).toBe('/api/admin/records?page=1&pageSize=50')
     wrapper.unmount()
   })
 
-  it('uses available recording dates instead of age or the browser clock for playback', async () => {
+  it('uses the backend audio availability flag instead of age or the browser clock for playback', async () => {
     vi.stubGlobal('Audio', class extends EventTarget {
       load(): void {}
       pause(): void {}
       removeAttribute(): void {}
     })
     const items = [
-      { ...segment(), id: 'old-available', capturedAt: '2020-08-12T23:30:00.000Z' },
-      { ...segment(), id: 'missing', capturedAt: new Date().toISOString() },
-      { ...segment(), id: 'future-available', capturedAt: '2099-08-13T00:30:00.000Z' },
+      { ...record(), id: 'old-available', capturedAt: '2020-08-12T23:30:00.000Z', hasAudio: true },
+      { ...record(), id: 'missing', capturedAt: new Date().toISOString(), hasAudio: false },
+      { ...record(), id: 'future-available', capturedAt: '2099-08-13T00:30:00.000Z', hasAudio: true },
     ]
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({
       items,
       page: 1,
       pageSize: 50,
-      recordingDates: ['20200812', '20990813'],
       total: 3,
     })))
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
@@ -262,7 +266,7 @@ describe('record callsign editing', () => {
     const oldPage = new Promise<Response>(resolve => resolveOldPage = resolve)
     const newPage = new Promise<Response>(resolve => resolveNewPage = resolve)
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [segment()], page: 1, pageSize: 50, total: 150 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 150 }))
       .mockReturnValueOnce(oldPage)
       .mockReturnValueOnce(newPage)
     vi.stubGlobal('fetch', fetchMock)
@@ -275,9 +279,9 @@ describe('record callsign editing', () => {
     await next.trigger('click')
     expect(oldSignal.aborted).toBe(true)
 
-    resolveNewPage(jsonResponse({ items: [{ ...segment(), id: 'new', recognition: 'Page three' }], page: 3, pageSize: 50, total: 150 }))
+    resolveNewPage(jsonResponse({ items: [{ ...record(), id: 'new', recognition: 'Page three' }], page: 3, pageSize: 50, total: 150 }))
     await flushPromises()
-    resolveOldPage(jsonResponse({ items: [{ ...segment(), id: 'old', recognition: 'Page two' }], page: 2, pageSize: 50, total: 150 }))
+    resolveOldPage(jsonResponse({ items: [{ ...record(), id: 'old', recognition: 'Page two' }], page: 2, pageSize: 50, total: 150 }))
     await flushPromises()
     expect(wrapper.text()).toContain('Page three')
     expect(wrapper.text()).not.toContain('Page two')
@@ -295,12 +299,12 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
 
-    const aiSegment = segment()
-    const reviewedSegment = { ...aiSegment, effectiveCallsign: 'BG5BBB', manualCallsign: 'BG5BBB' }
-    const page: SegmentPage = { items: [aiSegment], page: 1, pageSize: 50, total: 1 }
+    const aiRecord = record()
+    const reviewedRecord = { ...aiRecord, effectiveCallsign: 'BG5BBB', manualCallsign: 'BG5BBB' }
+    const page: RecordPage = { items: [aiRecord], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page))
-      .mockResolvedValueOnce(jsonResponse(reviewedSegment))
+      .mockResolvedValueOnce(jsonResponse(reviewedRecord))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
 
@@ -338,11 +342,11 @@ describe('record callsign editing', () => {
       play(): Promise<void> { return Promise.resolve() }
       removeAttribute(): void {}
     })
-    const aiSegment = segment()
-    const reviewedSegment = { ...aiSegment, calleeCallsign: 'BG5BBB' }
+    const aiRecord = record()
+    const reviewedRecord = { ...aiRecord, calleeCallsign: 'BG5BBB' }
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [aiSegment], page: 1, pageSize: 50, total: 1 }))
-      .mockResolvedValueOnce(jsonResponse(reviewedSegment))
+      .mockResolvedValueOnce(jsonResponse({ items: [aiRecord], page: 1, pageSize: 50, total: 1 }))
+      .mockResolvedValueOnce(jsonResponse(reviewedRecord))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
 
@@ -373,8 +377,8 @@ describe('record callsign editing', () => {
     const scrollTo = vi.fn()
     vi.stubGlobal('scrollTo', scrollTo)
 
-    const firstPage: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 51 }
-    const secondPage: SegmentPage = { items: [{ ...segment(), id: 'segment-2' }], page: 2, pageSize: 50, total: 51 }
+    const firstPage: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 51 }
+    const secondPage: RecordPage = { items: [{ ...record(), id: 'record-2' }], page: 2, pageSize: 50, total: 51 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(firstPage))
       .mockResolvedValueOnce(jsonResponse(secondPage))
@@ -402,7 +406,7 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
 
-    const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const page: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page))
       .mockResolvedValueOnce(jsonResponse(page))
@@ -429,7 +433,7 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
 
-    const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const page: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(page))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
@@ -452,7 +456,7 @@ describe('record callsign editing', () => {
       play(): Promise<void> { return Promise.resolve() }
       removeAttribute(): void {}
     })
-    const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const page: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(page)))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
@@ -483,7 +487,7 @@ describe('record callsign editing', () => {
     expect(fetchMock.mock.calls[4]?.[0]).toContain('reviewedOnly=true')
     await wrapper.findAll('button').find(button => button.text() === '清除')!.trigger('click')
     await flushPromises()
-    expect(fetchMock.mock.calls[5]?.[0]).toBe('/api/admin/segments?page=1&pageSize=50')
+    expect(fetchMock.mock.calls[5]?.[0]).toBe('/api/admin/records?page=1&pageSize=50')
     wrapper.unmount()
   })
 
@@ -499,7 +503,7 @@ describe('record callsign editing', () => {
     })
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
 
-    const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
+    const page: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page))
       .mockResolvedValueOnce(jsonResponse(page))
@@ -521,7 +525,7 @@ describe('record callsign editing', () => {
   })
 })
 
-function segment(): PersistedSegment {
+function record(): PersistedRecord {
   return {
     calleeCallsign: null,
     callsign: 'BG5AAA',
@@ -531,7 +535,7 @@ function segment(): PersistedSegment {
     durationMs: 1_000,
     effectiveCallsign: 'BG5AAA',
     effectiveRiskLevel: null,
-    id: 'segment-1',
+    id: 'record-1',
     manualCallsign: null,
     manualRecognition: null,
     manualNote: null,
@@ -558,10 +562,7 @@ function stubDialog(dialog: HTMLDialogElement): void {
 }
 
 function jsonResponse(value: unknown): Response {
-  const data = value && typeof value === 'object' && 'items' in value
-    ? { user: { role: 'admin', username: 'admin' }, ...value }
-    : value
-  return new Response(JSON.stringify(data), {
+  return new Response(JSON.stringify(value), {
     headers: { 'content-type': 'application/json' },
     status: 200,
   })

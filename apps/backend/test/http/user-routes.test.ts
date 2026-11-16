@@ -7,7 +7,7 @@ import fastifyCookie from '@fastify/cookie'
 import Fastify from 'fastify'
 import { AdminAuth, hashPassword } from '../../src/admin/auth.js'
 import { LoginRateLimiter } from '../../src/admin/login-rate-limiter.js'
-import { SegmentRepository } from '../../src/ai/segment-repository.js'
+import { RecordRepository } from '../../src/ai/record-repository.js'
 import { registerAdminRoutes } from '../../src/http/admin-routes.js'
 
 test('all administrators can manage users without exposing or editing system accounts', async (t) => {
@@ -21,7 +21,7 @@ test('all administrators can manage users without exposing or editing system acc
   for (const role of ['admin', 'editor', 'viewer'] as const)
     await auth.createUser(role, 'secret', role)
   const app = Fastify()
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   t.after(() => repository.close())
   t.after(() => app.close())
   await app.register(fastifyCookie)
@@ -30,7 +30,7 @@ test('all administrators can manage users without exposing or editing system acc
     adminAuth: auth,
     loginRateLimiter: new LoginRateLimiter(),
     recordingsDirectory: directory,
-    segmentRepository: repository,
+    recordRepository: repository,
     sessionMaxAgeSeconds: AdminAuth.sessionMaxAgeSeconds,
     spotStore: { publishReview() {} },
   })
@@ -42,6 +42,7 @@ test('all administrators can manage users without exposing or editing system acc
     const list = await app.inject({ headers, url: '/api/admin/users' })
     assert.equal(list.statusCode, allowed ? 200 : 403)
     if (allowed) {
+      assert.equal(Object.hasOwn(list.json(), 'user'), false)
       assert.equal(list.json().items.some((user: { username: string }) => user.username === 'system'), false)
       assert.equal(list.body.includes('passwordHash'), false)
       assert.equal(list.body.includes('scrypt$'), false)

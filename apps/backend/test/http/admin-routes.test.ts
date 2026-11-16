@@ -8,8 +8,8 @@ import fastifyCookie from '@fastify/cookie'
 import Fastify from 'fastify'
 import { AdminAuth, hashPassword } from '../../src/admin/auth.js'
 import { LoginRateLimiter } from '../../src/admin/login-rate-limiter.js'
+import { RecordRepository } from '../../src/ai/record-repository.js'
 import { RecordingStore } from '../../src/ai/recording-store.js'
-import { SegmentRepository } from '../../src/ai/segment-repository.js'
 import { registerAdminRoutes } from '../../src/http/admin-routes.js'
 
 test('admin routes use hardened Fastify cookies and tolerate malformed cookies', async (context) => {
@@ -22,7 +22,7 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   }))
   mkdirSync(join(directory, '20260814'))
 
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   context.after(() => repository.close())
   const app = Fastify()
   context.after(() => app.close())
@@ -32,7 +32,7 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
     loginRateLimiter: new LoginRateLimiter(),
     prefix: '/api/admin',
     recordingsDirectory: directory,
-    segmentRepository: repository,
+    recordRepository: repository,
     sessionMaxAgeSeconds: AdminAuth.sessionMaxAgeSeconds,
     spotStore: { publishReview() {} },
   })
@@ -53,10 +53,11 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
 
   const authenticated = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments',
+    url: '/api/admin/records',
   })
   assert.equal(authenticated.statusCode, 200)
-  assert.deepEqual(authenticated.json(), { items: [], page: 1, pageSize: 50, recordingDates: ['20260814'], total: 0, user: { role: 'admin', username: 'admin', system: true } })
+  assert.deepEqual(authenticated.json(), { items: [], page: 1, pageSize: 50, total: 0 })
+  assert.match(String(authenticated.headers['server-timing']), /^db;dur=\d+\.\d{2}, recordings;dur=\d+\.\d{2}$/)
 
   const session = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
@@ -78,71 +79,74 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   repository.updateAnalysis(segment)
   const exactSearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?callsign=bg5aaa',
+    url: '/api/admin/records?callsign=bg5aaa',
   })
   assert.equal(exactSearch.statusCode, 200)
+  assert.equal(exactSearch.json().items[0].hasAudio, true)
+  assert.equal(Object.hasOwn(exactSearch.json(), 'recordingDates'), false)
+  assert.equal(Object.hasOwn(exactSearch.json(), 'user'), false)
   assert.equal(exactSearch.json().total, 1)
   const editedOnlySearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?callsign=bg5aaa&editedOnly=true',
+    url: '/api/admin/records?callsign=bg5aaa&editedOnly=true',
   })
   assert.equal(editedOnlySearch.statusCode, 200)
   assert.equal(editedOnlySearch.json().total, 0)
   const reviewedOnlySearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?reviewedOnly=true',
+    url: '/api/admin/records?reviewedOnly=true',
   })
   assert.equal(reviewedOnlySearch.statusCode, 200)
   assert.equal(reviewedOnlySearch.json().total, 0)
   repository.updateManualReview(segment.id, { callsign: 'BG5AAA' })
   const reviewedSearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?callsign=bg5aaa&editedOnly=true',
+    url: '/api/admin/records?callsign=bg5aaa&editedOnly=true',
   })
   assert.equal(reviewedSearch.json().total, 1)
   const calleeUpdate = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
     method: 'PATCH',
     payload: { callsign: 'bg5bbb' },
-    url: '/api/admin/segments/matching-segment/manual-callee-callsign',
+    url: '/api/admin/records/matching-segment/manual-callee-callsign',
   })
   assert.equal(calleeUpdate.statusCode, 200)
   assert.equal(calleeUpdate.json().calleeCallsign, 'BG5BBB')
   const headers = { cookie: cookie!.split(';', 1)[0] }
-  const manualText = await app.inject({ headers, method: 'PATCH', payload: { recognition: ' 人工确认文本 ' }, url: '/api/admin/segments/matching-segment/manual-recognition' })
+  const manualText = await app.inject({ headers, method: 'PATCH', payload: { recognition: ' 人工确认文本 ' }, url: '/api/admin/records/matching-segment/manual-recognition' })
   assert.equal(manualText.statusCode, 200)
   assert.equal(manualText.json().manualRecognition, '人工确认文本')
   assert.equal(manualText.json().recognition, segment.recognition)
   assert.equal(manualText.json().reviewed, false)
   for (const reviewed of [true, false]) {
-    const review = await app.inject({ headers, method: 'PATCH', payload: { reviewed }, url: '/api/admin/segments/matching-segment/manual-review' })
+    const review = await app.inject({ headers, method: 'PATCH', payload: { reviewed }, url: '/api/admin/records/matching-segment/manual-review' })
     assert.equal(review.statusCode, 200)
     assert.equal(review.json().reviewed, reviewed)
     assert.equal(review.json().manualRecognition, '人工确认文本')
-    const filtered = await app.inject({ headers, url: '/api/admin/segments?editedOnly=true&reviewedOnly=true' })
+    const filtered = await app.inject({ headers, url: '/api/admin/records?editedOnly=true&reviewedOnly=true' })
     assert.equal(filtered.statusCode, 200)
     assert.equal(filtered.json().total, reviewed ? 1 : 0)
   }
   for (const payload of [{}, { reviewed: 'false' }, { reviewed: null }, { reviewed: 1 }]) {
-    const invalid = await app.inject({ headers, method: 'PATCH', payload, url: '/api/admin/segments/matching-segment/manual-review' })
+    const invalid = await app.inject({ headers, method: 'PATCH', payload, url: '/api/admin/records/matching-segment/manual-review' })
     assert.equal(invalid.statusCode, 400)
   }
-  const clearText = await app.inject({ headers, method: 'PATCH', payload: { recognition: '' }, url: '/api/admin/segments/matching-segment/manual-recognition' })
+  const clearText = await app.inject({ headers, method: 'PATCH', payload: { recognition: '' }, url: '/api/admin/records/matching-segment/manual-recognition' })
   assert.equal(clearText.json().manualRecognition, null)
-  const unauthenticated = await app.inject({ method: 'PATCH', payload: { reviewed: true }, url: '/api/admin/segments/matching-segment/manual-review' })
+  const unauthenticated = await app.inject({ method: 'PATCH', payload: { reviewed: true }, url: '/api/admin/records/matching-segment/manual-review' })
   assert.equal(unauthenticated.statusCode, 401)
-  const missing = await app.inject({ headers, method: 'PATCH', payload: { reviewed: true }, url: '/api/admin/segments/missing/manual-review' })
+  const missing = await app.inject({ headers, method: 'PATCH', payload: { reviewed: true }, url: '/api/admin/records/missing/manual-review' })
   assert.equal(missing.statusCode, 404)
   const partialSearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?callsign=BG5AA',
+    url: '/api/admin/records?callsign=BG5AA',
   })
   assert.equal(partialSearch.statusCode, 200)
   assert.equal(partialSearch.json().total, 0)
 
   const malformed = await app.inject({
     headers: { cookie: 'broken=%; admin_token=invalid' },
-    url: '/api/admin/segments',
+    url: '/api/admin/records',
   })
   assert.equal(malformed.statusCode, 401)
 
@@ -150,7 +154,7 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   repository.insert('1900', deletable)
   const recordings = new RecordingStore(directory)
   const wav = recordings.save(deletable.id, deletable.timestamp, new Uint8Array([82, 73, 70, 70]))
-  const deleteUrl = `/api/admin/segments/${deletable.id}`
+  const deleteUrl = `/api/admin/records/${deletable.id}`
   assert.equal((await app.inject({ method: 'DELETE', url: deleteUrl })).statusCode, 401)
   assert.ok(repository.find(deletable.id))
   assert.equal(existsSync(wav), true)
@@ -179,7 +183,7 @@ test('admin routes report disabled persistence without parsing a request body', 
     adminAuth: undefined,
     loginRateLimiter: new LoginRateLimiter(),
     recordingsDirectory: '.',
-    segmentRepository: undefined,
+    recordRepository: undefined,
     sessionMaxAgeSeconds: AdminAuth.sessionMaxAgeSeconds,
     spotStore: { publishReview() {} },
   })
@@ -202,7 +206,7 @@ test('editors can edit fields but only administrators can annotate or delete', a
     { username: 'empty-role', passwordHash, role: '' },
   ] }))
   const auth = new AdminAuth(usersFile, join(directory, 'sessions.json'))
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   context.after(() => repository.close())
   const segment: SegmentRecord = {
     id: 'a1b2c3d4-e5f6-7890-abcd-ef0123456789',
@@ -223,7 +227,7 @@ test('editors can edit fields but only administrators can annotate or delete', a
     prefix: '/api/admin',
     adminAuth: auth,
     loginRateLimiter: new LoginRateLimiter(),
-    segmentRepository: repository,
+    recordRepository: repository,
     recordingsDirectory: directory,
     sessionMaxAgeSeconds: AdminAuth.sessionMaxAgeSeconds,
     spotStore: { publishReview() {} },
@@ -235,21 +239,22 @@ test('editors can edit fields but only administrators can annotate or delete', a
     const role = username === 'editor' ? 'editor' : 'viewer'
     const session = await app.inject({ headers, url: '/api/admin/session' })
     assert.deepEqual(session.json(), { username, role })
-    const page = await app.inject({ headers, url: '/api/admin/segments' })
+    const page = await app.inject({ headers, url: '/api/admin/records' })
     assert.equal(page.statusCode, 200)
-    assert.deepEqual(page.json().user, { username, role })
-    assert.equal((await app.inject({ headers, url: `/api/admin/segments/${segment.id}/audio` })).statusCode, 200)
+    assert.equal(Object.hasOwn(page.json(), 'user'), false)
+    assert.equal(Object.hasOwn(page.json(), 'recordingDates'), false)
+    assert.equal((await app.inject({ headers, url: `/api/admin/records/${segment.id}/audio` })).statusCode, 200)
     for (const [endpoint, payload] of [
       ['manual-recognition', { recognition: '人工文本' }],
       ['manual-callsign', { callsign: 'BG5BBB' }],
       ['manual-callee-callsign', { callsign: 'BG5CCC' }],
     ] as const) {
-      const response = await app.inject({ headers, method: 'PATCH', payload, url: `/api/admin/segments/${segment.id}/${endpoint}` })
+      const response = await app.inject({ headers, method: 'PATCH', payload, url: `/api/admin/records/${segment.id}/${endpoint}` })
       assert.equal(response.statusCode, role === 'editor' ? 200 : 403)
     }
-    const review = await app.inject({ headers, method: 'PATCH', payload: { reviewed: true }, url: `/api/admin/segments/${segment.id}/manual-review` })
+    const review = await app.inject({ headers, method: 'PATCH', payload: { reviewed: true }, url: `/api/admin/records/${segment.id}/manual-review` })
     assert.equal(review.statusCode, 403)
-    assert.equal((await app.inject({ headers, method: 'DELETE', url: `/api/admin/segments/${segment.id}` })).statusCode, 403)
+    assert.equal((await app.inject({ headers, method: 'DELETE', url: `/api/admin/records/${segment.id}` })).statusCode, 403)
     assert.equal(repository.find(segment.id)?.reviewed, false)
     assert.equal(existsSync(wav), true)
   }

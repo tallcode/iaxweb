@@ -1,4 +1,4 @@
-import type { PersistedSegment, SegmentPage } from '@iaxweb/contracts'
+import type { PersistedRecord, RecordPage } from '@iaxweb/contracts'
 import type { SegmentRecord } from './segment-store.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -20,8 +20,9 @@ export interface ManualReviewPatch {
   riskLevel?: number | null
 }
 
-export type { PersistedSegment, SegmentPage } from '@iaxweb/contracts'
+export type { PersistedRecord, RecordPage } from '@iaxweb/contracts'
 
+// Keep persisted SQL names stable so existing recording history needs no rename migration.
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS ai_segments (
     id                TEXT PRIMARY KEY,
@@ -62,6 +63,18 @@ const SCHEMA = `
   FROM ai_segments;
 `
 
+const INDEXES = `
+  CREATE INDEX IF NOT EXISTS ai_segments_capture_order
+    ON ai_segments (captured_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS ai_segments_effective_callsign_order
+    ON ai_segments (COALESCE(manual_callsign, callsign) COLLATE NOCASE, captured_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS ai_segments_edited_order
+    ON ai_segments (captured_at DESC, id DESC)
+    WHERE manual_recognition IS NOT NULL OR manual_callsign IS NOT NULL OR callee_callsign IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS ai_segments_reviewed_order
+    ON ai_segments (captured_at DESC, id DESC) WHERE reviewed = 1;
+`
+
 const SELECT_EFFECTIVE = `
   SELECT
     id,
@@ -90,7 +103,7 @@ const SELECT_EFFECTIVE = `
 
 // SQLite-backed history of successful ASR segments. AI values are immutable
 // evidence; manual fields override them only through the effective view.
-export class SegmentRepository {
+export class RecordRepository {
   private readonly database: DatabaseSync
 
   constructor(databaseFile: string) {
@@ -107,6 +120,8 @@ export class SegmentRepository {
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN manual_recognition TEXT')
       if (!columns.has('reviewed'))
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0, 1))')
+      // Build after adding legacy columns used by the partial indexes.
+      this.database.exec(INDEXES)
       this.database.exec('COMMIT')
     }
     catch (error) {
@@ -190,7 +205,7 @@ export class SegmentRepository {
     return Number(result.changes) === 1
   }
 
-  find(id: string): PersistedSegment | undefined {
+  find(id: string): PersistedRecord | undefined {
     const row = this.database.prepare(SELECT_EFFECTIVE).get(id)
     return row ? mapRow(row) : undefined
   }
@@ -214,7 +229,7 @@ export class SegmentRepository {
     }
   }
 
-  list(page: number, pageSize: number, callsign?: string, editedOnly: boolean = false, reviewedOnly: boolean = false): SegmentPage {
+  list(page: number, pageSize: number, callsign?: string, editedOnly: boolean = false, reviewedOnly: boolean = false): RecordPage {
     if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
       throw new Error('Invalid segment page')
     const conditions: string[] = []
@@ -281,7 +296,7 @@ export class SegmentRepository {
   }
 }
 
-function mapRow(row: Record<string, unknown>): PersistedSegment {
+function mapRow(row: Record<string, unknown>): PersistedRecord {
   return {
     calleeCallsign: nullableString(row.callee_callsign),
     callsign: nullableString(row.callsign),

@@ -15,7 +15,7 @@ const CALLSIGN_PATTERN = /^B[ADGHIY]\d[A-Z]{2,3}$/
 export const NO_CALLSIGN = 'N0CALL'
 
 // Core-NATS-only live Spot relay. Historical spots are read from SQLite by
-// SegmentRepository, so NATS never acts as a second persistent data store.
+// RecordRepository, so NATS never acts as a second persistent data store.
 export class SpotStore {
   private readonly createConnection: () => Promise<NatsConnection>
   private readonly clearTimer: (timer: ReturnType<typeof setTimeout>) => void

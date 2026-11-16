@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
-import { SegmentRepository } from '../../src/ai/segment-repository.js'
+import { RecordRepository } from '../../src/ai/record-repository.js'
 
 function record(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
   return {
@@ -21,7 +21,7 @@ function record(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
 }
 
 test('persists ASR and later LLM results in one row', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const segment = record()
   repository.insert('1900', segment)
 
@@ -64,7 +64,7 @@ test('persists ASR and later LLM results in one row', () => {
 })
 
 test('manual review takes precedence without overwriting AI results', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5XXX', risk: { level: 4, reason: '明显不当' } })
   repository.insert('1900', segment)
   repository.updateAnalysis(segment)
@@ -92,7 +92,7 @@ test('manual review takes precedence without overwriting AI results', () => {
 })
 
 test('keeps manual text and review status independent of AI analysis', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5AAA' })
   repository.insert('1900', segment)
   repository.updateManualReview(segment.id, { recognition: ' 人工复听文本 ', reviewed: true })
@@ -129,21 +129,21 @@ test('migrates old databases without losing AI or manual callsign evidence', (t)
       'AI 原文', 'BG5AAA', 'BG5BBB', '2026-11-14T00:00:00Z');
   `)
   old.close()
-  const repository = new SegmentRepository(databaseFile)
+  const repository = new RecordRepository(databaseFile)
   assert.equal(repository.find('old')?.recognition, 'AI 原文')
   assert.equal(repository.find('old')?.effectiveCallsign, 'BG5BBB')
   assert.equal(repository.find('old')?.manualRecognition, null)
   assert.equal(repository.find('old')?.reviewed, false)
   repository.updateManualReview('old', { recognition: '人工文本', reviewed: true })
   repository.close()
-  const reopened = new SegmentRepository(databaseFile)
+  const reopened = new RecordRepository(databaseFile)
   assert.equal(reopened.find('old')?.manualRecognition, '人工文本')
   assert.equal(reopened.find('old')?.reviewed, true)
   reopened.close()
 })
 
 test('persists a manually reviewed callee callsign without changing AI analysis', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5AAA' })
   repository.insert('1900', segment)
   repository.updateAnalysis(segment)
@@ -155,30 +155,39 @@ test('persists a manually reviewed callee callsign without changing AI analysis'
   repository.close()
 })
 
-test('persists data across repository instances and creates no explicit indexes', (t) => {
+test('persists data across repository instances and indexes ordered history queries', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-sqlite-'))
   t.after(() => rmSync(directory, { force: true, recursive: true }))
   const databaseFile = join(directory, 'ai.sqlite')
 
-  const first = new SegmentRepository(databaseFile)
+  const first = new RecordRepository(databaseFile)
   first.insert('1999', record())
   first.close()
 
-  const second = new SegmentRepository(databaseFile)
+  const second = new RecordRepository(databaseFile)
   assert.equal(second.find('segment-1')?.nodeId, '1999')
   second.close()
 
   const database = new DatabaseSync(databaseFile, { readOnly: true })
-  const indexes = database.prepare(`
-    SELECT name FROM sqlite_schema
-    WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex_%'
-  `).all()
-  assert.deepEqual(indexes, [])
+  for (const condition of [
+    '',
+    'WHERE effective_callsign = ? COLLATE NOCASE',
+    'WHERE manual_recognition IS NOT NULL OR manual_callsign IS NOT NULL OR callee_callsign IS NOT NULL',
+    'WHERE reviewed = 1',
+  ]) {
+    const plan = database.prepare(`
+      EXPLAIN QUERY PLAN SELECT * FROM ai_segments_effective ${condition}
+      ORDER BY captured_at DESC, id DESC LIMIT 50
+    `).all(...(condition.includes('?') ? ['BG5XXX'] : []))
+    const details = plan.map(row => String(row.detail)).join('\n')
+    assert.match(details, /USING INDEX/)
+    assert.doesNotMatch(details, /TEMP B-TREE/)
+  }
   database.close()
 })
 
 test('enforces risk levels and rejects empty manual patches', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const segment = record()
   repository.insert('1900', segment)
 
@@ -195,7 +204,7 @@ test('enforces risk levels and rejects empty manual patches', () => {
 })
 
 test('returns the newest effective spot per callsign and excludes N0CALL', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const first = record({ callsign: 'BG5AAA', id: 'one', timestamp: '2026-08-10T12:00:00.000Z' })
   const second = record({ callsign: 'BG5AAA', id: 'two', timestamp: '2026-08-11T12:00:00.000Z' })
   const reviewed = record({ callsign: 'BG5BBB', id: 'three', timestamp: '2026-08-12T12:00:00.000Z' })
@@ -217,7 +226,7 @@ test('returns the newest effective spot per callsign and excludes N0CALL', () =>
 })
 
 test('lists segments newest first with pagination', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const old = record({ id: 'old', timestamp: '2026-08-10T12:00:00.000Z' })
   const latest = record({ id: 'latest', timestamp: '2026-08-12T12:00:00.000Z' })
   repository.insert('1900', old)
@@ -232,7 +241,7 @@ test('lists segments newest first with pagination', () => {
 })
 
 test('deletes records and rolls back when recording removal fails', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5AAA' })
   repository.insert('1900', segment)
   repository.updateAnalysis(segment)
@@ -255,7 +264,7 @@ test('deletes records and rolls back when recording removal fails', () => {
 })
 
 test('filters pages by exact effective callsign without case sensitivity', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   const firstMatch = record({ callsign: 'BG5AAA', id: 'first-match', timestamp: '2026-08-10T12:00:00.000Z' })
   const overridden = record({ callsign: 'BG5AAA', id: 'overridden', timestamp: '2026-08-11T12:00:00.000Z' })
   const latestMatch = record({ callsign: 'BG5AAA', id: 'latest-match', timestamp: '2026-08-12T12:00:00.000Z' })
@@ -274,7 +283,7 @@ test('filters pages by exact effective callsign without case sensitivity', () =>
 })
 
 test('filters edits across all editable fields independently from review status', () => {
-  const repository = new SegmentRepository(':memory:')
+  const repository = new RecordRepository(':memory:')
   for (const id of ['ai-only', 'text-edit', 'caller-edit', 'callee-edit', 'review-only', 'both', 'note-only']) {
     const segment = record({ callsign: 'BG5AAA', id })
     repository.insert('1900', segment)

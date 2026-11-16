@@ -11,7 +11,6 @@ export interface AdminSession {
 
 export interface AdminUsersPage {
   items: AdminSession[]
-  user: AdminSession
 }
 
 export interface PublicConnectionStatus {
@@ -44,7 +43,7 @@ export interface SpotEvent {
   type?: 'spot'
 }
 
-export interface PersistedSegment {
+export interface PersistedRecord {
   calleeCallsign: string | null
   callsign: string | null
   capturedAt: string
@@ -67,14 +66,17 @@ export interface PersistedSegment {
   voicedMs: number
 }
 
-export interface SegmentPage {
-  items: PersistedSegment[]
+export interface RecordPage {
+  items: PersistedRecord[]
   page: number
   pageSize: number
   total: number
 }
 
-export interface AdminSegmentPage extends SegmentPage {
-  recordingDates: string[]
-  user: AdminSession
+export interface AdminRecord extends PersistedRecord {
+  hasAudio: boolean
+}
+
+export interface AdminRecordPage extends RecordPage {
+  items: AdminRecord[]
 }
