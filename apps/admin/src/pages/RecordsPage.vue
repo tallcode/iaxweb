@@ -13,12 +13,11 @@ const PAGE_SIZE = 50
 const CALLSIGN_PATTERN = /^(?:B[ADGHIY]\d[A-Z]{2,3}|N0CALL)$/
 const CALLSIGN_HINT = '请输入 N0CALL，或 BA/BD/BG/BH/BI/BY + 数字 + 2–3 个字母'
 const router = useRouter()
-const statusMessage = ref('')
+const statusMessage = ref('共 0 条记录')
 const records = ref<AdminRecord[]>([])
 const userRole = computed(() => adminSession.value?.role ?? 'viewer')
 const username = computed(() => adminSession.value?.username ?? '')
 const loggingOut = ref(false)
-const canEdit = computed(() => userRole.value === 'admin' || userRole.value === 'editor')
 const isAdministrator = computed(() => userRole.value === 'admin')
 const currentPage = ref(1)
 const pageInput = ref('1')
@@ -45,8 +44,6 @@ let deleteTrigger: HTMLButtonElement | undefined
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const isRecordSummary = computed(() => /^共 \d+ 条(?:匹配)?记录$/.test(statusMessage.value))
 const compactStatus = computed(() => {
-  if (isLoading.value)
-    return '加载中'
   if (!isRecordSummary.value)
     return '提示'
   const count = total.value < 10_000 ? String(total.value) : `${Number((total.value / 10_000).toFixed(1))}万`
@@ -82,7 +79,6 @@ async function loadRecords(): Promise<void> {
   const request = new AbortController()
   recordRequest = request
   isLoading.value = true
-  statusMessage.value = '加载中…'
   try {
     const query = new URLSearchParams({ page: String(currentPage.value), pageSize: String(PAGE_SIZE) })
     if (callsignFilter.value)
@@ -201,6 +197,10 @@ async function applyFilters(): Promise<void> {
   pageInput.value = '1'
   await loadRecords()
   scrollToPageTop()
+}
+
+function canEditRecord(record: PersistedRecord): boolean {
+  return isAdministrator.value || (userRole.value === 'editor' && !record.reviewed)
 }
 
 function matchesFilters(record: PersistedRecord): boolean {
@@ -335,7 +335,7 @@ function onTextEditing(editing: boolean): void {
 }
 
 async function patchRecord(record: PersistedRecord, endpoint: string, body: unknown): Promise<PersistedRecord | undefined> {
-  if (!canEdit.value || savingRecords.value.has(record.id) || deletingRecordId.value !== null)
+  if (!canEditRecord(record) || savingRecords.value.has(record.id) || deletingRecordId.value !== null)
     return undefined
   savingRecords.value.add(record.id)
   recordRequest?.abort()
@@ -347,6 +347,19 @@ async function patchRecord(record: PersistedRecord, endpoint: string, body: unkn
     })
     if (response.status === 401) {
       await router.replace('/')
+      return undefined
+    }
+    if (response.status === 403) {
+      let message = '没有编辑权限，请刷新后重试'
+      try {
+        const error = await response.json() as { message?: unknown }
+        if (typeof error.message === 'string')
+          message = error.message
+      }
+      catch {}
+      editingCallsign.value = null
+      await loadRecords()
+      statusMessage.value = message
       return undefined
     }
     if (!response.ok) {
@@ -402,7 +415,7 @@ async function saveCallsign(record: PersistedRecord, role: CallsignRole, input: 
 }
 
 function beginCallsignEdit(event: MouseEvent, record: PersistedRecord, role: CallsignRole): void {
-  if (!canEdit.value || savingRecords.value.has(record.id) || deletingRecordId.value !== null)
+  if (!canEditRecord(record) || savingRecords.value.has(record.id) || deletingRecordId.value !== null)
     return
   recordRequest?.abort()
   const container = (event.currentTarget as HTMLElement).parentElement
@@ -459,7 +472,7 @@ function formatTime(iso: string): string {
         用户管理
       </RouterLink>
     </AdminPageHeader>
-    <main :inert="loggingOut" class="mx-auto w-full max-w-screen-2xl px-4 pt-32 pb-4 sm:px-6 lg:px-8">
+    <main :inert="loggingOut" class="mx-auto flex min-h-dvh w-full max-w-screen-2xl flex-col px-4 pt-32 sm:px-6 lg:px-8">
       <div class="fixed inset-x-0 top-16 z-20 h-16 min-w-[380px] bg-slate-950" aria-label="筛选工具栏">
         <div class="mx-auto flex h-full max-w-screen-2xl flex-nowrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <p class="shrink-0 whitespace-nowrap text-sm text-slate-400" :title="statusMessage" :aria-label="statusMessage">
@@ -473,11 +486,12 @@ function formatTime(iso: string): string {
             </div>
             <div class="flex items-center gap-2">
               <input ref="searchField" v-model="searchInput" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="w-[calc(8ch+1.5rem+2px)] flex-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 sm:w-[calc(16ch+1.5rem+2px)]" inputmode="text" :pattern="CALLSIGN_PATTERN.source" placeholder="呼号" aria-label="呼号搜索" spellcheck="false" @input="normalizeSearchInput">
-              <button v-if="searchInput || callsignFilter || editedOnly || reviewedOnly" type="button" aria-label="清除" title="清除搜索和筛选" class="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 focus:outline-none" @click="clearCallsignSearch">
+              <button v-if="searchInput || callsignFilter || editedOnly || reviewedOnly" type="button" aria-label="清除" title="清除搜索和筛选" class="hidden shrink-0 items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 focus:outline-none sm:inline-flex" @click="clearCallsignSearch">
                 清除
               </button>
-              <button type="submit" aria-label="搜索" title="搜索" class="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 focus:outline-none">
-                搜索
+              <button type="submit" aria-label="搜索" title="搜索" class="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-slate-700 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 focus:outline-none sm:h-auto sm:w-auto sm:px-4 sm:py-2">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="size-4 sm:hidden" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>
+                <span class="hidden sm:inline">搜索</span>
               </button>
             </div>
           </form>
@@ -486,7 +500,7 @@ function formatTime(iso: string): string {
           </p>
         </div>
       </div>
-      <div role="region" aria-label="识别记录">
+      <div role="region" aria-label="识别记录" class="flex-1">
         <div class="space-y-3 lg:hidden">
           <article v-for="record in records" :key="record.id" class="rounded-xl border p-4 shadow-xl shadow-black/20" :class="record.reviewed ? 'border-emerald-800/60 bg-emerald-950/40' : 'border-slate-800 bg-slate-900/70'">
             <div class="flex items-center justify-between gap-3">
@@ -502,23 +516,23 @@ function formatTime(iso: string): string {
               </div>
             </div>
             <div class="mt-3">
-              <RecognitionEditor :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEdit" :disabled="savingRecords.has(record.id) || deletingRecordId !== null" :save="value => saveRecognition(record, value)" @editing="onTextEditing" />
+              <RecognitionEditor :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="savingRecords.has(record.id) || deletingRecordId !== null" :save="value => saveRecognition(record, value)" @editing="onTextEditing" />
             </div>
             <div class="mt-4 flex gap-4 text-sm">
               <div class="flex min-w-0 flex-1 items-center gap-2 text-left">
-                <span class="shrink-0 text-xs text-slate-500">被叫</span><input v-if="isEditingCallsign(record, 'callee')" :value="record.calleeCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑被叫呼号" spellcheck="false" @blur="cancelCallsignEdit(record, 'callee', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, record, 'callee')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono enabled:hover:underline focus:outline-none focus:underline disabled:cursor-default" :class="record.calleeCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="!canEdit || savingRecords.has(record.id) || deletingRecordId !== null" aria-label="编辑被叫呼号" @click="beginCallsignEdit($event, record, 'callee')">
+                <span class="shrink-0 text-xs text-slate-500">被叫</span><input v-if="isEditingCallsign(record, 'callee')" :value="record.calleeCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑被叫呼号" spellcheck="false" @blur="cancelCallsignEdit(record, 'callee', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, record, 'callee')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono enabled:hover:underline focus:outline-none focus:underline disabled:cursor-default" :class="record.calleeCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="!canEditRecord(record) || savingRecords.has(record.id) || deletingRecordId !== null" aria-label="编辑被叫呼号" @click="beginCallsignEdit($event, record, 'callee')">
                   {{ record.calleeCallsign ?? '—' }}
                 </button>
               </div>
               <div class="flex min-w-0 flex-1 items-center gap-2 text-left">
-                <span class="shrink-0 text-xs text-slate-500">主叫</span><input v-if="isEditingCallsign(record, 'caller')" :value="record.effectiveCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑主叫呼号" spellcheck="false" @blur="cancelCallsignEdit(record, 'caller', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, record, 'caller')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono enabled:hover:underline focus:outline-none focus:underline disabled:cursor-default" :class="record.manualCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="!canEdit || savingRecords.has(record.id) || deletingRecordId !== null" aria-label="编辑主叫呼号" @click="beginCallsignEdit($event, record, 'caller')">
+                <span class="shrink-0 text-xs text-slate-500">主叫</span><input v-if="isEditingCallsign(record, 'caller')" :value="record.effectiveCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-[30px] w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑主叫呼号" spellcheck="false" @blur="cancelCallsignEdit(record, 'caller', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, record, 'caller')"><button v-else type="button" class="inline-flex h-[30px] cursor-text items-center font-mono enabled:hover:underline focus:outline-none focus:underline disabled:cursor-default" :class="record.manualCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="!canEditRecord(record) || savingRecords.has(record.id) || deletingRecordId !== null" aria-label="编辑主叫呼号" @click="beginCallsignEdit($event, record, 'caller')">
                   <CallsignText :original="record.callsign" :manual="record.manualCallsign" />
                 </button>
               </div>
             </div>
           </article>
         </div>
-        <div class="hidden rounded-xl border border-slate-800 bg-slate-900/70 shadow-xl shadow-black/20 lg:block">
+        <div class="hidden overflow-clip rounded-xl border border-slate-800 bg-slate-900/70 shadow-xl shadow-black/20 lg:block">
           <table class="w-full table-fixed divide-y divide-slate-800 text-left text-sm leading-6" :class="isAdministrator ? 'min-w-[55rem]' : 'min-w-[49rem]'">
             <colgroup><col class="w-44"><col class="w-16"><col><col class="hidden w-32 min-[1200px]:table-column"><col class="w-32"><col class="w-24"><col v-if="isAdministrator" class="w-24"></colgroup><thead class="sticky top-32 z-10 bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
               <tr>
@@ -545,13 +559,13 @@ function formatTime(iso: string): string {
                 </td><td class="whitespace-nowrap px-4 py-4">
                   {{ (record.durationMs / 1_000).toFixed(1) }}s
                 </td><td class="px-4 py-4">
-                  <RecognitionEditor :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEdit" :disabled="savingRecords.has(record.id) || deletingRecordId !== null" :save="value => saveRecognition(record, value)" @editing="onTextEditing" />
+                  <RecognitionEditor :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="savingRecords.has(record.id) || deletingRecordId !== null" :save="value => saveRecognition(record, value)" @editing="onTextEditing" />
                 </td><td class="hidden px-4 py-3 min-[1200px]:table-cell">
-                  <input v-if="isEditingCallsign(record, 'callee')" :value="record.calleeCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-8 w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none focus:border-cyan-500" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑被叫呼号" spellcheck="false" @blur="cancelCallsignEdit(record, 'callee', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, record, 'callee')"><button v-else type="button" class="inline-flex h-8 cursor-text items-center font-mono enabled:hover:underline focus:outline-none focus:underline disabled:cursor-default" :class="record.calleeCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="!canEdit || savingRecords.has(record.id) || deletingRecordId !== null" aria-label="编辑被叫呼号" @click="beginCallsignEdit($event, record, 'callee')">
+                  <input v-if="isEditingCallsign(record, 'callee')" :value="record.calleeCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-8 w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none focus:border-cyan-500" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑被叫呼号" spellcheck="false" @blur="cancelCallsignEdit(record, 'callee', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, record, 'callee')"><button v-else type="button" class="inline-flex h-8 cursor-text items-center font-mono enabled:hover:underline focus:outline-none focus:underline disabled:cursor-default" :class="record.calleeCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="!canEditRecord(record) || savingRecords.has(record.id) || deletingRecordId !== null" aria-label="编辑被叫呼号" @click="beginCallsignEdit($event, record, 'callee')">
                     {{ record.calleeCallsign ?? '—' }}
                   </button>
                 </td><td class="px-4 py-3">
-                  <input v-if="isEditingCallsign(record, 'caller')" :value="record.effectiveCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-8 w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none focus:border-cyan-500" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑主叫呼号" spellcheck="false" @blur="cancelCallsignEdit(record, 'caller', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, record, 'caller')"><button v-else type="button" class="inline-flex h-8 cursor-text items-center font-mono enabled:hover:underline focus:outline-none focus:underline disabled:cursor-default" :class="record.manualCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="!canEdit || savingRecords.has(record.id) || deletingRecordId !== null" aria-label="编辑主叫呼号" @click="beginCallsignEdit($event, record, 'caller')">
+                  <input v-if="isEditingCallsign(record, 'caller')" :value="record.effectiveCallsign ?? ''" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-8 w-28 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-0 font-mono uppercase outline-none focus:border-cyan-500" inputmode="text" :pattern="CALLSIGN_PATTERN.source" :title="CALLSIGN_HINT" aria-label="编辑主叫呼号" spellcheck="false" @blur="cancelCallsignEdit(record, 'caller', $event.currentTarget as HTMLInputElement)" @input="normalizeCallsignInput" @keydown="onCallsignKeydown($event, record, 'caller')"><button v-else type="button" class="inline-flex h-8 cursor-text items-center font-mono enabled:hover:underline focus:outline-none focus:underline disabled:cursor-default" :class="record.manualCallsign !== null ? 'text-emerald-400' : 'text-slate-100'" :disabled="!canEditRecord(record) || savingRecords.has(record.id) || deletingRecordId !== null" aria-label="编辑主叫呼号" @click="beginCallsignEdit($event, record, 'caller')">
                     <CallsignText :original="record.callsign" :manual="record.manualCallsign" />
                   </button>
                 </td><td class="px-4 py-3">

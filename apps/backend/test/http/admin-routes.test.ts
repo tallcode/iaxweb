@@ -258,4 +258,26 @@ test('editors can edit fields but only administrators can annotate or delete', a
     assert.equal(repository.find(segment.id)?.reviewed, false)
     assert.equal(existsSync(wav), true)
   }
+  const administrator = { cookie: `admin_token=${await auth.login('admin', 'secret')}` }
+  const editor = { cookie: `admin_token=${await auth.login('editor', 'secret')}` }
+  const reviewUrl = `/api/admin/records/${segment.id}/manual-review`
+  assert.equal((await app.inject({ headers: administrator, method: 'PATCH', payload: { reviewed: true }, url: reviewUrl })).statusCode, 200)
+  const locked = repository.find(segment.id)
+  const edits = [
+    ['manual-recognition', { recognition: '已标注后尝试编辑' }],
+    ['manual-callsign', { callsign: 'BG5DDD' }],
+    ['manual-callee-callsign', { callsign: 'BG5EEE' }],
+  ] as const
+  for (const [endpoint, payload] of edits) {
+    const response = await app.inject({ headers: editor, method: 'PATCH', payload, url: `/api/admin/records/${segment.id}/${endpoint}` })
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.json().message, '记录已标注，只有管理员可以编辑')
+  }
+  assert.deepEqual(repository.find(segment.id), locked)
+  for (const [endpoint, payload] of edits)
+    assert.equal((await app.inject({ headers: administrator, method: 'PATCH', payload, url: `/api/admin/records/${segment.id}/${endpoint}` })).statusCode, 200)
+  assert.equal(repository.find(segment.id)?.reviewed, true)
+  assert.equal((await app.inject({ headers: administrator, method: 'PATCH', payload: { reviewed: false }, url: reviewUrl })).statusCode, 200)
+  for (const [endpoint, payload] of edits)
+    assert.equal((await app.inject({ headers: editor, method: 'PATCH', payload, url: `/api/admin/records/${segment.id}/${endpoint}` })).statusCode, 200)
 })

@@ -138,6 +138,32 @@ describe('record callsign editing', () => {
     wrapper.unmount()
   })
 
+  it.each(['admin', 'editor'] as const)('restricts reviewed records to administrators for role %s', async (role) => {
+    adminSession.value = { username: 'user', role }
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({
+      items: [{ ...record(), reviewed: true }, { ...record(), id: 'unreviewed', reviewed: false }],
+      page: 1,
+      pageSize: 50,
+      total: 2,
+    })))
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows[0]!.find('button[aria-label="编辑识别文本"]').exists()).toBe(role === 'admin')
+    for (const label of ['编辑主叫呼号', '编辑被叫呼号']) {
+      expect(rows[0]!.get(`button[aria-label="${label}"]`).attributes('disabled') !== undefined).toBe(role !== 'admin')
+      expect(rows[1]!.get(`button[aria-label="${label}"]`).attributes('disabled')).toBeUndefined()
+    }
+    expect(rows[1]!.find('button[aria-label="编辑识别文本"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('confirms deletion before sending a request and only offers it in the desktop table', async () => {
     vi.stubGlobal('Audio', class extends EventTarget {
       load(): void {}

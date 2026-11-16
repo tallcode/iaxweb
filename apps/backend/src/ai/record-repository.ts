@@ -169,7 +169,7 @@ export class RecordRepository {
     return Number(result.changes) === 1
   }
 
-  updateManualReview(id: string, patch: ManualReviewPatch): boolean {
+  updateManualReview(id: string, patch: ManualReviewPatch, allowReviewed: boolean = true): boolean {
     const assignments: string[] = []
     const values: Array<number | string | null> = []
     if (patch.callsign !== undefined) {
@@ -200,7 +200,7 @@ export class RecordRepository {
       throw new Error('Manual review patch must contain at least one field')
 
     const result = this.database.prepare(`
-      UPDATE ai_segments SET ${assignments.join(', ')} WHERE id = ?
+      UPDATE ai_segments SET ${assignments.join(', ')} WHERE id = ? ${allowReviewed ? '' : 'AND reviewed = 0'}
     `).run(...values, id)
     return Number(result.changes) === 1
   }

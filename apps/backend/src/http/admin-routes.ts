@@ -2,7 +2,7 @@ import type { AdminRecordPage, AdminRole } from '@iaxweb/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
 import type { LoginRateLimiter } from '../admin/login-rate-limiter.js'
-import type { RecordRepository } from '../ai/record-repository.js'
+import type { ManualReviewPatch, RecordRepository } from '../ai/record-repository.js'
 import type { SpotStore } from '../ai/spot-store.js'
 import { readFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
@@ -109,6 +109,27 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
   const requireEditor = requireRoles('admin', 'editor')
   const requireAdministrator = requireRoles('admin')
 
+  const updateEditableRecord = (request: FastifyRequest<{ Params: RecordParams }>, reply: FastifyReply, patch: ManualReviewPatch): boolean => {
+    const user = adminAuth.getUser(request.cookies[ADMIN_COOKIE])
+    if (!user) {
+      reply.code(401).send('Unauthorized')
+      return false
+    }
+    if (user.role !== 'admin' && user.role !== 'editor') {
+      reply.code(403).send('Forbidden')
+      return false
+    }
+    // Check review status in the UPDATE itself so concurrent annotation cannot be bypassed.
+    if (recordRepository.updateManualReview(request.params.id, patch, user.role === 'admin'))
+      return true
+    const record = recordRepository.find(request.params.id)
+    if (record === undefined)
+      reply.code(404).send('Not Found')
+    else
+      reply.code(403).send({ message: '记录已标注，只有管理员可以编辑' })
+    return false
+  }
+
   registerUserRoutes(app, adminAuth, requireAdministrator)
 
   app.get('/session', { preHandler: requireAuthentication }, async (request, reply) => {
@@ -167,8 +188,8 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
         : null
       if (callsign !== null && !CALLSIGN_PATTERN.test(callsign))
         return reply.code(400).send('Invalid callsign')
-      if (!recordRepository.updateManualReview(request.params.id, { callsign }))
-        return reply.code(404).send('Not Found')
+      if (!updateEditableRecord(request, reply, { callsign }))
+        return reply
 
       const record = recordRepository.find(request.params.id)
       if (!record)
@@ -198,8 +219,8 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
         : null
       if (callsign !== null && !CALLSIGN_PATTERN.test(callsign))
         return reply.code(400).send('Invalid callsign')
-      if (!recordRepository.updateManualReview(request.params.id, { calleeCallsign: callsign }))
-        return reply.code(404).send('Not Found')
+      if (!updateEditableRecord(request, reply, { calleeCallsign: callsign }))
+        return reply
 
       const record = recordRepository.find(request.params.id)
       if (!record)
@@ -219,8 +240,8 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
         return reply.code(400).send('Invalid recognition text')
       }
       const recognition = typeof body.recognition === 'string' ? body.recognition.trim() || null : null
-      if (!recordRepository.updateManualReview(request.params.id, { recognition }))
-        return reply.code(404).send('Not Found')
+      if (!updateEditableRecord(request, reply, { recognition }))
+        return reply
       return reply.header('cache-control', 'no-store').send(recordRepository.find(request.params.id))
     },
   )

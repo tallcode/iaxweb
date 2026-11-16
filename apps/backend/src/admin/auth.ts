@@ -227,14 +227,14 @@ export function hashPassword(password: string, salt: Buffer = randomBytes(16)): 
 
 function validateUsername(username: string): string {
   const name = username.trim()
-  if (!name || name.length > 64)
-    throw new UserManagementError(400, '用户名长度应为 1–64 个字符')
+  if (!name || name.length > 18)
+    throw new UserManagementError(400, '用户名长度应为 1–18 个字符')
   return name
 }
 
 async function createPasswordHash(password: string): Promise<string> {
-  if (!password || password.length > 1024)
-    throw new UserManagementError(400, '密码长度应为 1–1024 个字符')
+  if (!password || password.length > 32)
+    throw new UserManagementError(400, '密码长度应为 1–32 个字符')
   const salt = randomBytes(16)
   const derived = await derivePassword(password, salt, 32)
   return `scrypt$${salt.toString('base64')}$${derived.toString('base64')}`

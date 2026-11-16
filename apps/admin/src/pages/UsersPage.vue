@@ -245,9 +245,9 @@ async function deleteUser(): Promise<void> {
           </p>
           <div class="ml-auto flex items-center gap-2">
             <input v-model="search" type="search" maxlength="64" aria-label="搜索用户名" placeholder="用户名" autocomplete="off" class="w-[calc(16ch+1.5rem+2px)] flex-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm outline-none focus:border-cyan-500">
-            <button ref="addButton" type="button" aria-label="新增用户" :disabled="loading || saving || loggingOut" class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-cyan-600 px-3 py-2 text-sm text-white transition hover:bg-cyan-500 focus:outline-none disabled:opacity-50" @click="openEditor(undefined, $event)">
+            <button ref="addButton" type="button" aria-label="新增用户" :disabled="loading || saving || loggingOut" class="inline-flex size-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-cyan-600 text-sm text-white transition hover:bg-cyan-500 focus:outline-none disabled:opacity-50 sm:h-auto sm:w-auto sm:px-3 sm:py-2" @click="openEditor(undefined, $event)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="size-4" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-              <span>新增用户</span>
+              <span class="hidden sm:inline">新增用户</span>
             </button>
           </div>
         </div>
@@ -255,7 +255,7 @@ async function deleteUser(): Promise<void> {
       <p v-if="status" role="alert" class="mb-3 text-sm text-red-400">
         {{ status }}
       </p>
-      <div class="rounded-xl border border-slate-800 bg-slate-900/70">
+      <div class="overflow-clip rounded-xl border border-slate-800 bg-slate-900/70">
         <table class="w-full table-fixed divide-y divide-slate-800 text-left text-sm">
           <colgroup><col><col class="w-24 sm:w-40"><col class="w-24"></colgroup>
           <thead class="sticky top-32 z-10 bg-slate-900 text-xs text-slate-400">
@@ -305,7 +305,7 @@ async function deleteUser(): Promise<void> {
         </h2>
         <label class="flex flex-col gap-2 text-sm text-slate-300">
           <span>用户名</span>
-          <input v-model="draft.username" required autofocus maxlength="64" autocomplete="off" :disabled="saving" class="block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 outline-none focus:border-cyan-500">
+          <input v-model="draft.username" required autofocus maxlength="18" autocomplete="off" :disabled="saving" class="block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 outline-none focus:border-cyan-500">
         </label>
         <label class="flex flex-col gap-2 text-sm text-slate-300">
           <span>角色</span>
@@ -319,7 +319,7 @@ async function deleteUser(): Promise<void> {
         </p>
         <label class="flex flex-col gap-2 text-sm text-slate-300">
           <span>{{ editorTarget === null ? '密码' : '新密码' }}</span>
-          <input v-model="draft.password" type="password" autocomplete="new-password" maxlength="1024" :required="editorTarget === null" :disabled="saving" :placeholder="editorTarget === null ? '请输入密码' : '留空则不修改密码'" class="block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 outline-none focus:border-cyan-500">
+          <input v-model="draft.password" type="password" autocomplete="new-password" maxlength="32" :required="editorTarget === null" :disabled="saving" :placeholder="editorTarget === null ? '请输入密码' : '留空则不修改密码'" class="block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 outline-none focus:border-cyan-500">
         </label>
         <p v-if="editorTarget === currentUser?.username" class="text-xs leading-5 text-amber-300">
           修改当前账号的用户名或密码后，需要重新登录。

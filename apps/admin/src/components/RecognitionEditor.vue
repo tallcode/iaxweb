@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import TextDiff from './TextDiff.vue'
 
 const props = defineProps<{
@@ -14,6 +14,13 @@ const editing = ref(false)
 const draft = ref('')
 const textarea = ref<HTMLTextAreaElement>()
 const saving = ref(false)
+
+watch(() => props.readOnly, (readOnly) => {
+  if (readOnly && editing.value) {
+    editing.value = false
+    emit('editing', false)
+  }
+})
 
 async function begin(): Promise<void> {
   if (props.disabled || props.readOnly)
