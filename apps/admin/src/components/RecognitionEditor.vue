@@ -7,6 +7,7 @@ const props = defineProps<{
   manual: string | null
   disabled: boolean
   readOnly?: boolean
+  requestEdit?: () => boolean
   save: (value: string | null) => Promise<boolean>
 }>()
 const emit = defineEmits<{ editing: [value: boolean] }>()
@@ -24,6 +25,8 @@ watch(() => props.readOnly, (readOnly) => {
 
 async function begin(): Promise<void> {
   if (props.disabled || props.readOnly)
+    return
+  if (props.requestEdit && !props.requestEdit())
     return
   draft.value = props.manual ?? props.original
   editing.value = true

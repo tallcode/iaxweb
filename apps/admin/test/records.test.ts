@@ -24,6 +24,76 @@ afterEach(() => {
 })
 
 describe('record callsign editing', () => {
+  it('allows only one field across records to edit and keeps callsign drafts on blur', async () => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({
+      items: [record(), { ...record(), id: 'record-2' }],
+      page: 1,
+      pageSize: 50,
+      total: 2,
+    })))
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    await wrapper.get('button[aria-label="编辑识别文本"]').trigger('click')
+    expect(wrapper.findAll('textarea')).toHaveLength(1)
+    for (const button of wrapper.findAll('button[aria-label="编辑主叫呼号"], button[aria-label="编辑被叫呼号"]'))
+      expect(button.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('input[aria-label="筛选已编辑"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('textarea').trigger('keydown', { key: 'Escape' })
+    const secondCard = wrapper.findAll('article')[1]!
+    await secondCard.get('button[aria-label="编辑主叫呼号"]').trigger('click')
+    expect(wrapper.findAll('input[aria-label="编辑主叫呼号"]')).toHaveLength(1)
+    const input = wrapper.get<HTMLInputElement>('input[aria-label="编辑主叫呼号"]')
+    await input.setValue('BG5ATV')
+    await input.trigger('blur')
+    expect(input.element.value).toBe('BG5ATV')
+    expect(wrapper.findAll('input[aria-label="编辑主叫呼号"]')).toHaveLength(1)
+    expect(secondCard.get('button[aria-label="编辑识别文本"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('button[aria-label="取消编辑主叫呼号"]').trigger('click')
+    expect(wrapper.findAll('input[aria-label="编辑主叫呼号"]')).toHaveLength(0)
+    expect(wrapper.get('input[aria-label="筛选已编辑"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps the editor locked while saving and after failure until a successful retry', async () => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+    let resolveSave!: (response: Response) => void
+    const pendingSave = new Promise<Response>((resolve) => {
+      resolveSave = resolve
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 1 }))
+      .mockReturnValueOnce(pendingSave)
+      .mockResolvedValueOnce(jsonResponse({ ...record(), manualCallsign: 'BG5ATV', effectiveCallsign: 'BG5ATV' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    await wrapper.get('button[aria-label="编辑主叫呼号"]').trigger('click')
+    await wrapper.get('input[aria-label="编辑主叫呼号"]').setValue('BG5ATV')
+    await wrapper.get('button[aria-label="保存主叫呼号"]').trigger('click')
+    expect(wrapper.get('button[aria-label="取消编辑主叫呼号"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button[aria-label="编辑被叫呼号"]').attributes('disabled')).toBeDefined()
+    resolveSave(new Response('failed', { status: 500 }))
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="编辑主叫呼号"]').element.value).toBe('BG5ATV')
+    expect(wrapper.get('button[aria-label="编辑被叫呼号"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('button[aria-label="保存主叫呼号"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('input[aria-label="编辑主叫呼号"]')).toHaveLength(0)
+    expect(wrapper.get('button[aria-label="编辑被叫呼号"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('shows the page title and current user and logs out through the server', async () => {
     vi.stubGlobal('Audio', class extends EventTarget {
       load(): void {}
