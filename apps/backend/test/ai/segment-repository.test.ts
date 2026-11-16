@@ -231,6 +231,29 @@ test('lists segments newest first with pagination', () => {
   repository.close()
 })
 
+test('deletes records and rolls back when recording removal fails', () => {
+  const repository = new SegmentRepository(':memory:')
+  const segment = record({ callsign: 'BG5AAA' })
+  repository.insert('1900', segment)
+  repository.updateAnalysis(segment)
+  repository.updateManualReview(segment.id, { recognition: '人工文本', reviewed: true })
+  assert.throws(() => repository.delete(segment.id, () => {
+    throw new Error('Recording permission denied')
+  }), /Recording permission denied/)
+  assert.equal(repository.find(segment.id)?.manualRecognition, '人工文本')
+  assert.equal(repository.list(1, 50).total, 1)
+  let removals = 0
+  assert.equal(repository.delete(segment.id, () => removals++), true)
+  assert.equal(removals, 1)
+  assert.equal(repository.find(segment.id), undefined)
+  assert.equal(repository.list(1, 50).total, 0)
+  assert.deepEqual(repository.recentSpots(), [])
+  assert.equal(repository.updateAnalysis(segment), false)
+  assert.equal(repository.delete(segment.id, () => removals++), false)
+  assert.equal(removals, 1)
+  repository.close()
+})
+
 test('filters pages by exact effective callsign without case sensitivity', () => {
   const repository = new SegmentRepository(':memory:')
   const firstMatch = record({ callsign: 'BG5AAA', id: 'first-match', timestamp: '2026-08-10T12:00:00.000Z' })

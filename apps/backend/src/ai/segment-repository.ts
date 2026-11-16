@@ -195,6 +195,25 @@ export class SegmentRepository {
     return row ? mapRow(row) : undefined
   }
 
+  delete(id: string, removeRecording: () => void): boolean {
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const result = this.database.prepare('DELETE FROM ai_segments WHERE id = ?').run(id)
+      if (Number(result.changes) === 0) {
+        this.database.exec('ROLLBACK')
+        return false
+      }
+      // Keep the database record when the recording cannot be removed.
+      removeRecording()
+      this.database.exec('COMMIT')
+      return true
+    }
+    catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+  }
+
   list(page: number, pageSize: number, callsign?: string, editedOnly: boolean = false, reviewedOnly: boolean = false): SegmentPage {
     if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
       throw new Error('Invalid segment page')

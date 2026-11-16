@@ -1,3 +1,4 @@
+import type { AdminRole, AdminSegmentPage } from '@iaxweb/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
 import type { LoginRateLimiter } from '../admin/login-rate-limiter.js'
@@ -5,6 +6,8 @@ import type { SegmentRepository } from '../ai/segment-repository.js'
 import type { SpotStore } from '../ai/spot-store.js'
 import { readFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
+import { RecordingStore } from '../ai/recording-store.js'
+import { registerUserRoutes } from './user-routes.js'
 
 const ADMIN_COOKIE = 'admin_token'
 const CALLSIGN_PATTERN = /^(?:B[ADGHIY]\d[A-Z]{2,3}|N0CALL)$/
@@ -55,6 +58,8 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
     return
   }
 
+  const recordings = new RecordingStore(options.recordingsDirectory)
+
   app.post<{ Body: LoginBody }>('/login', async (request, reply) => {
     const { password, username } = request.body ?? {}
     if (typeof username !== 'string' || typeof password !== 'string')
@@ -93,11 +98,26 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
       return reply.code(401).send('Unauthorized')
   }
 
-  app.get('/session', { preHandler: requireAuthentication }, async (_request, reply) => {
-    return reply.header('cache-control', 'no-store').code(204).send()
+  const requireRoles = (...roles: AdminRole[]) => async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = adminAuth.getUser(request.cookies[ADMIN_COOKIE])
+    if (!user)
+      return reply.code(401).send('Unauthorized')
+    if (!roles.includes(user.role))
+      return reply.code(403).send('Forbidden')
+  }
+  const requireEditor = requireRoles('admin', 'editor')
+  const requireAdministrator = requireRoles('admin')
+
+  registerUserRoutes(app, adminAuth, requireAdministrator)
+
+  app.get('/session', { preHandler: requireAuthentication }, async (request, reply) => {
+    return reply.header('cache-control', 'no-store').send(adminAuth.getUser(request.cookies[ADMIN_COOKIE]))
   })
 
   app.get<{ Querystring: SegmentQuery }>('/segments', { preHandler: requireAuthentication }, async (request, reply) => {
+    const user = adminAuth.getUser(request.cookies[ADMIN_COOKIE])
+    if (!user)
+      return reply.code(401).send('Unauthorized')
     const page = parsePage(request.query.page, 1)
     const pageSize = parsePage(request.query.pageSize, 50)
     const callsign = request.query.callsign?.trim().toUpperCase()
@@ -105,17 +125,27 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
     const reviewedOnly = request.query.reviewedOnly === 'true'
     if (callsign !== undefined && !CALLSIGN_PATTERN.test(callsign))
       return reply.code(400).send('Invalid callsign')
+    let result
     try {
-      return reply.header('cache-control', 'no-store').send(segmentRepository.list(page, pageSize, callsign, editedOnly, reviewedOnly))
+      result = segmentRepository.list(page, pageSize, callsign, editedOnly, reviewedOnly)
     }
     catch {
       return reply.code(400).send('Invalid pagination')
+    }
+    try {
+      const recordingDates = await recordings.availableDates()
+      const page: AdminSegmentPage = { ...result, recordingDates, user }
+      return reply.header('cache-control', 'no-store').send(page)
+    }
+    catch (error) {
+      request.log.error({ err: error }, 'Failed to scan recording dates')
+      return reply.code(500).send('Recording availability is unavailable')
     }
   })
 
   app.patch<{ Body: ManualCallsignBody, Params: SegmentParams }>(
     '/segments/:id/manual-callsign',
-    { preHandler: requireAuthentication },
+    { preHandler: requireEditor },
     async (request, reply) => {
       if (!Object.hasOwn(request.body ?? {}, 'callsign')
         || (request.body.callsign !== null && typeof request.body.callsign !== 'string')) {
@@ -146,7 +176,7 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
 
   app.patch<{ Body: ManualCallsignBody, Params: SegmentParams }>(
     '/segments/:id/manual-callee-callsign',
-    { preHandler: requireAuthentication },
+    { preHandler: requireEditor },
     async (request, reply) => {
       if (!Object.hasOwn(request.body ?? {}, 'callsign')
         || (request.body.callsign !== null && typeof request.body.callsign !== 'string')) {
@@ -170,7 +200,7 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
 
   app.patch<{ Body: ManualRecognitionBody, Params: SegmentParams }>(
     '/segments/:id/manual-recognition',
-    { preHandler: requireAuthentication },
+    { preHandler: requireEditor },
     async (request, reply) => {
       const body = request.body
       if (!body || !Object.hasOwn(body, 'recognition')
@@ -187,13 +217,38 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
 
   app.patch<{ Body: ReviewBody, Params: SegmentParams }>(
     '/segments/:id/manual-review',
-    { preHandler: requireAuthentication },
+    { preHandler: requireAdministrator },
     async (request, reply) => {
       if (typeof request.body?.reviewed !== 'boolean')
         return reply.code(400).send('Invalid review status')
       if (!segmentRepository.updateManualReview(request.params.id, { reviewed: request.body.reviewed }))
         return reply.code(404).send('Not Found')
       return reply.header('cache-control', 'no-store').send(segmentRepository.find(request.params.id))
+    },
+  )
+
+  app.delete<{ Params: SegmentParams }>(
+    '/segments/:id',
+    { preHandler: requireAdministrator },
+    async (request, reply) => {
+      const segment = segmentRepository.find(request.params.id)
+      if (!segment)
+        return reply.code(404).send('Not Found')
+      try {
+        if (!segmentRepository.delete(segment.id, () => recordings.remove(segment.id, segment.capturedAt)))
+          return reply.code(404).send('Not Found')
+      }
+      catch (error) {
+        request.log.error({ err: error, segmentId: segment.id }, 'Failed to delete segment and recording')
+        return reply.code(500).send('Failed to delete segment and recording')
+      }
+      options.spotStore.publishReview({
+        at: segment.capturedAt,
+        callsign: 'N0CALL',
+        id: segment.id,
+        node: segment.nodeId,
+      })
+      return reply.header('cache-control', 'no-store').code(204).send()
     },
   )
 

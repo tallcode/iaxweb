@@ -3,5 +3,6 @@ node_modules/
 dist/
 *.log
 data/
+/experiments/
 config/*
 .DS_Store

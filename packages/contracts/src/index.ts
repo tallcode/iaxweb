@@ -1,6 +1,19 @@
 export type TransmitSource = 'local' | 'remote' | 'system' | null
 export type NodeType = 'HUB' | 'REPEATER'
 
+export type AdminRole = 'admin' | 'editor' | 'viewer'
+
+export interface AdminSession {
+  role: AdminRole
+  username: string
+  system?: boolean
+}
+
+export interface AdminUsersPage {
+  items: AdminSession[]
+  user: AdminSession
+}
+
 export interface PublicConnectionStatus {
   CSTATE: 'ESTABLISHED'
 }
@@ -59,4 +72,9 @@ export interface SegmentPage {
   page: number
   pageSize: number
   total: number
+}
+
+export interface AdminSegmentPage extends SegmentPage {
+  recordingDates: string[]
+  user: AdminSession
 }

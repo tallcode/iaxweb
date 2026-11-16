@@ -6,6 +6,7 @@ const props = defineProps<{
   original: string
   manual: string | null
   disabled: boolean
+  readOnly?: boolean
   save: (value: string | null) => Promise<boolean>
 }>()
 const emit = defineEmits<{ editing: [value: boolean] }>()
@@ -15,7 +16,7 @@ const textarea = ref<HTMLTextAreaElement>()
 const saving = ref(false)
 
 async function begin(): Promise<void> {
-  if (props.disabled)
+  if (props.disabled || props.readOnly)
     return
   draft.value = props.manual ?? props.original
   editing.value = true
@@ -80,6 +81,9 @@ onBeforeUnmount(() => {
       <span class="text-slate-500">Enter 保存 · Shift+Enter 换行 · 清空恢复 AI 文本</span>
     </div>
   </form>
+  <div v-else-if="readOnly" class="whitespace-pre-wrap break-words text-sm leading-6" :class="manual !== null ? 'text-emerald-400' : 'text-slate-100'">
+    <TextDiff :original="original" :manual="manual" />
+  </div>
   <button v-else type="button" :disabled="disabled" aria-label="编辑识别文本" class="block w-full cursor-text whitespace-pre-wrap break-words text-left text-sm leading-6 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-wait" :class="manual !== null ? 'text-emerald-400' : 'text-slate-100'" @click="begin">
     <TextDiff :original="original" :manual="manual" />
   </button>

@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import CallsignText from '../src/components/CallsignText.vue'
 import RecordsPage from '../src/pages/RecordsPage.vue'
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ replace: vi.fn() }) }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ replace: vi.fn() }), RouterLink: 'a' }))
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -40,7 +40,7 @@ function setup(row: PersistedSegment, ...responses: Response[]) {
     pause(): void {}
     removeAttribute(): void {}
   })
-  const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ items: [row], total: 1, page: 1, pageSize: 50 }))
+  const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ items: [row], total: 1, page: 1, pageSize: 50, user: { role: 'admin', username: 'admin' } }))
   for (const response of responses)
     fetchMock.mockResolvedValueOnce(response)
   vi.stubGlobal('fetch', fetchMock)
@@ -62,7 +62,7 @@ it('saves human text separately and clears it back to the white AI display', asy
   expect(display.classes()).toContain('text-emerald-400')
   expect(display.findAll('span').some(span => span.classes().includes('bg-yellow-200/25'))).toBe(true)
   expect(fetchMock.mock.calls[1]?.[1].body).toBe(JSON.stringify({ recognition: edited.manualRecognition }))
-  expect(wrapper.get<HTMLInputElement>('tbody input[aria-label="已标注"]').element.checked).toBe(false)
+  expect(wrapper.get('tbody button[aria-label="标注记录"]').attributes('aria-pressed')).toBe('false')
   await display.trigger('click')
   await wrapper.get('textarea').setValue('')
   await wrapper.get('textarea').trigger('keydown', { key: 'Enter' })
@@ -78,17 +78,23 @@ it('persists review and cancel actions and rolls back a failed save', async () =
   const fetchMock = setup(row, Response.json({ ...row, reviewed: true }), new Response('failed', { status: 500 }), Response.json(row))
   const wrapper = mount(RecordsPage)
   await flushPromises()
-  const checkbox = wrapper.get<HTMLInputElement>('tbody input[aria-label="已标注"]')
-  await checkbox.setValue(true)
+  const star = wrapper.get('tbody button[aria-label="标注记录"]')
+  expect(star.get('svg').attributes('fill')).toBe('none')
+  await star.trigger('click')
   await flushPromises()
-  expect(checkbox.element.checked).toBe(true)
+  expect(star.attributes('aria-pressed')).toBe('true')
+  expect(star.get('svg').attributes('fill')).toBe('currentColor')
+  expect(star.classes()).toContain('text-emerald-400')
   expect(wrapper.get('tbody tr').classes()).toContain('bg-emerald-950/40')
-  await checkbox.setValue(false)
+  await star.trigger('click')
   await flushPromises()
-  expect(checkbox.element.checked).toBe(true)
-  await checkbox.setValue(false)
+  expect(star.attributes('aria-pressed')).toBe('true')
+  expect(star.get('svg').attributes('fill')).toBe('currentColor')
+  expect(star.classes()).toContain('text-emerald-400')
+  await star.trigger('click')
   await flushPromises()
-  expect(checkbox.element.checked).toBe(false)
+  expect(star.attributes('aria-pressed')).toBe('false')
+  expect(star.get('svg').attributes('fill')).toBe('none')
   expect(wrapper.get('tbody tr').classes()).not.toContain('bg-emerald-950/40')
   expect(fetchMock.mock.calls.slice(1).map(call => JSON.parse(call[1].body))).toEqual([{ reviewed: true }, { reviewed: false }, { reviewed: false }])
   wrapper.unmount()
