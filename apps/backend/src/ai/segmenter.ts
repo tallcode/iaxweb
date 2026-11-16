@@ -38,10 +38,9 @@ const FRAME_MIN_LENGTH = 11
 const FRAME_VERSION = 1
 const FRAME_TYPE = 1
 
-// Keep a short tail of recent frames so the voice attack is not lost when the
-// speaking state event trails the first audio frames.
-const PRE_ROLL_MS = 500
-const PRE_ROLL_FRAMES = 64
+// Reconstructed PCMU silence uses the same 20 ms cadence as iaxmon.
+const SILENCE_FRAME_SAMPLES = 160
+const SAMPLES_PER_MS = SAMPLE_RATE / 1000
 
 // The browser player resets its timeline on backward jumps beyond 1 s.
 const BACKWARD_JUMP_MS = -1_000
@@ -60,11 +59,29 @@ interface Frame {
   rms: number
 }
 
+interface TimedFrame extends Frame {
+  // Sample offset relative to this transmission's media clock origin.
+  at: number
+}
+
+interface PendingFrame {
+  timestamp: number
+  receivedAt: number
+  frame: Frame
+}
+
 export class NodeSegmenter {
   private readonly options: SegmenterOptions
   private readonly now: () => number
-  private preRoll: Array<{ at: number, frame: Frame }> = []
-  private recording: Frame[] | null = null
+  // Only unclaimed audio (for a gateway joining mid-transmission) lives here.
+  // Recorded frames must never be replayed into a subsequent transmission.
+  private pendingFrames: PendingFrame[] = []
+  private pendingSamples = 0
+  private recording: TimedFrame[] | null = null
+  private originTimestamp: number | null = null
+  private startTimestamp: number | undefined
+  private recordingEnd = 0
+  private emittedThrough = Number.NEGATIVE_INFINITY
   private lastTimestamp: number | null = null
   private lastActivityAt: number | null = null
   private transmissionId: string | undefined
@@ -85,35 +102,31 @@ export class NodeSegmenter {
 
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const timestamp = view.getUint32(6, false)
-    if (this.lastTimestamp !== null && signedDifference(timestamp, this.lastTimestamp) < BACKWARD_JUMP_MS) {
-      // The media clock restarted; the partial segment cannot be stitched
-      // together with what follows.
-      this.discardRecording('reset')
-      this.preRoll = []
-    }
-    this.lastTimestamp = timestamp
-
-    const payload = data.subarray(FRAME_HEADER_LENGTH)
-    const frame = decodeFrame(payload)
-
-    if (this.recording) {
-      this.recording.push(frame)
-      if (segmentDuration(this.recording) >= this.options.maxMs)
-        this.splitAtBoundary()
-    }
-    this.preRoll.push({ at: timestamp, frame })
-    if (this.preRoll.length > PRE_ROLL_FRAMES)
-      this.preRoll.shift()
+    const frame = decodeFrame(data.slice(FRAME_HEADER_LENGTH))
+    if (this.recording)
+      this.recordFrame(timestamp, frame)
+    else
+      this.bufferFrame(timestamp, frame)
   }
 
-  // Transmission start, announced by iaxmon's `start` event before the first
-  // voiced frame. State snapshots with speaking=true also use this path when
-  // the gateway joins a transmission already in progress.
-  start(): void {
-    if (!this.recording) {
-      this.transmissionId = randomUUID()
-      this.partIndex = 0
-      this.recording = this.seedFromPreRoll()
+  // iaxmon announces the media timestamp of the first voiced frame. A state
+  // snapshot has no timestamp and claims audio received since the last stop.
+  start(timestamp?: number): void {
+    if (this.recording)
+      return
+    const pending = this.pendingFrames
+    this.clearPending()
+    this.transmissionId = randomUUID()
+    this.partIndex = 0
+    this.originTimestamp = timestamp ?? null
+    this.startTimestamp = timestamp
+    this.lastTimestamp = null
+    this.recordingEnd = 0
+    this.emittedThrough = Number.NEGATIVE_INFINITY
+    this.recording = []
+    for (const entry of pending) {
+      if (this.now() - entry.receivedAt <= this.options.maxMs)
+        this.recordFrame(entry.timestamp, entry.frame)
     }
   }
 
@@ -121,11 +134,26 @@ export class NodeSegmenter {
   // silence. durationMs is iaxmon's authoritative transmission length (first
   // to last voiced frame, including gaps); it is preferred over the frame
   // byte count for the minimum-length rule.
-  stop(durationMs?: number): void {
+  stop(durationMs?: number, timestamp?: number): void {
+    // A gateway can join after start and receive stop before its snapshot.
+    // Those buffered frames still belong to the transmission being closed.
+    if (!this.recording && this.pendingFrames.length > 0
+      && (durationMs !== undefined || timestamp !== undefined)) {
+      this.start()
+    }
+    this.clearPending()
     if (!this.recording)
       return
-    const frames = this.recording
+    const end = timestamp !== undefined && this.originTimestamp !== null
+      ? signedDifference(timestamp, this.originTimestamp) * SAMPLES_PER_MS
+      : Number.POSITIVE_INFINITY
+    // Normal stops point to a suppressed silent frame. On disconnect iaxmon
+    // may instead point to the final audio frame; that whole frame belongs here.
+    const frames = renderTimeline(this.recording.filter(frame => frame.at <= end))
     this.recording = null
+    this.lastTimestamp = null
+    this.originTimestamp = null
+    this.startTimestamp = undefined
     // A key-up without any audio frames (e.g. a PTT blip) is dropped
     // silently instead of being logged as a discarded segment.
     if (frames.length > 0)
@@ -147,7 +175,7 @@ export class NodeSegmenter {
   // Called when the node goes offline (e.g. NATS disconnect).
   reset(): void {
     this.discardRecording('offline')
-    this.preRoll = []
+    this.clearPending()
     this.lastTimestamp = null
   }
 
@@ -158,27 +186,98 @@ export class NodeSegmenter {
       this.recording = null
       return
     }
-    const durationMs = segmentDuration(this.recording)
+    const durationMs = segmentDuration(renderTimeline(this.recording))
     this.recording = null
     this.options.onDiscard?.(reason, durationMs)
   }
 
-  private seedFromPreRoll(): Frame[] {
-    if (this.lastTimestamp === null)
-      return []
-    const latest = this.lastTimestamp
-    return this.preRoll
-      .filter(entry => latest >= entry.at && latest - entry.at <= PRE_ROLL_MS)
-      .map(entry => entry.frame)
+  private clearPending(): void {
+    this.pendingFrames = []
+    this.pendingSamples = 0
+  }
+
+  private bufferFrame(timestamp: number, frame: Frame): void {
+    const receivedAt = this.now()
+    this.pendingFrames.push({ timestamp, frame, receivedAt })
+    this.pendingSamples += frame.payload.length
+    // Snapshot requests may take longer than 500 ms. Retain unclaimed audio
+    // up to the normal segment limit, with both a sample and an age bound.
+    while (this.pendingFrames.length > 0
+      && (this.pendingSamples > this.options.maxMs * SAMPLES_PER_MS
+        || receivedAt - this.pendingFrames[0]!.receivedAt > this.options.maxMs)) {
+      this.pendingSamples -= this.pendingFrames.shift()!.frame.payload.length
+    }
+  }
+
+  private recordFrame(timestamp: number, frame: Frame): void {
+    if (this.startTimestamp !== undefined && signedDifference(timestamp, this.startTimestamp) < 0)
+      return
+    const frames = this.recording
+    if (!frames)
+      return
+    this.originTimestamp ??= timestamp
+    let at = signedDifference(timestamp, this.originTimestamp) * SAMPLES_PER_MS
+    if (at + frame.payload.length <= this.emittedThrough)
+      return
+    // An explicit start establishes the clock epoch, so earlier frames inside
+    // that transmission are reordered, not mistaken for a clock reset.
+    if (this.startTimestamp === undefined && this.lastTimestamp !== null
+      && signedDifference(timestamp, this.lastTimestamp) < BACKWARD_JUMP_MS
+      && !frames.some(entry => entry.at === at)) {
+      this.discardRecording('reset')
+      this.clearPending()
+      this.bufferFrame(timestamp, frame)
+      return
+    }
+    if (this.lastTimestamp === null || signedDifference(timestamp, this.lastTimestamp) > 0)
+      this.lastTimestamp = timestamp
+    if (at < this.emittedThrough) {
+      frame = decodeFrame(frame.payload.subarray(this.emittedThrough - at))
+      at = this.emittedThrough
+    }
+    const timed = { ...frame, at }
+    const last = frames.at(-1)
+    if (!last || last.at < at) {
+      frames.push(timed)
+    }
+    else {
+      const index = frames.findIndex(entry => entry.at >= at)
+      const existing = frames[index]
+      if (existing?.at === at) {
+        if (existing.payload.length >= frame.payload.length)
+          return
+        frames[index] = timed
+      }
+      else {
+        frames.splice(index, 0, timed)
+      }
+    }
+    this.recordingEnd = Math.max(this.recordingEnd, at + frame.payload.length)
+    while (this.recording && this.recording.length > 0
+      && this.recordingEnd - this.recording[0]!.at >= this.options.maxMs * SAMPLES_PER_MS) {
+      this.splitAtBoundary()
+    }
   }
 
   private splitAtBoundary(): void {
     const frames = this.recording
-    if (!frames)
+    const first = frames?.[0]
+    if (!frames || !first)
       return
-    const cutIndex = findCutIndex(frames, this.options.maxMs, Math.min(this.options.coldMinMs, this.options.hotMinMs))
-    const chunk = frames.slice(0, cutIndex)
-    this.recording = frames.slice(cutIndex)
+    // Bound reconstruction even if a corrupt timestamp jumps far forward.
+    const timeline = renderTimeline(frames, first.at + this.options.maxMs * SAMPLES_PER_MS)
+    const cutIndex = findCutIndex(timeline, this.options.maxMs, Math.min(this.options.coldMinMs, this.options.hotMinMs))
+    const chunk = timeline.slice(0, cutIndex)
+    const cutAt = first.at + chunk.reduce((samples, frame) => samples + frame.payload.length, 0)
+    this.emittedThrough = cutAt
+    this.recording = frames.flatMap((frame) => {
+      if (frame.at + frame.payload.length <= cutAt)
+        return []
+      if (frame.at >= cutAt)
+        return [frame]
+      return [{ ...decodeFrame(frame.payload.subarray(cutAt - frame.at)), at: cutAt }]
+    })
+    this.recordingEnd = this.recording.reduce((end, frame) => Math.max(end, frame.at + frame.payload.length), cutAt)
     if (chunk.length > 0)
       this.emitSegment(chunk)
   }
@@ -224,6 +323,34 @@ function decodeFrame(payload: Uint8Array): Frame {
     payload,
     rms: rmsOfPcm(decodeMuLaw(payload)),
   }
+}
+
+// Preserve media-clock gaps inside a transmission. Sort on insertion and
+// merge overlapping sample ranges so late/duplicate frames cannot replay audio.
+// No silence is added before the first frame or after the last voiced frame.
+function renderTimeline(frames: TimedFrame[], end = Number.POSITIVE_INFINITY): Frame[] {
+  const result: Frame[] = []
+  let cursor = frames[0]?.at ?? 0
+  for (const frame of frames) {
+    while (cursor < Math.min(frame.at, end)) {
+      const samples = Math.min(SILENCE_FRAME_SAMPLES, frame.at - cursor, end - cursor)
+      if (samples <= 0)
+        return result
+      result.push({ ms: samples / SAMPLES_PER_MS, payload: new Uint8Array(samples).fill(0xFF), rms: 0 })
+      cursor += samples
+    }
+    if (frame.at >= end)
+      break
+    const skip = Math.max(0, cursor - frame.at)
+    const samples = Math.min(frame.payload.length - skip, end - cursor)
+    if (samples <= 0)
+      continue
+    result.push(skip === 0 && samples === frame.payload.length
+      ? frame
+      : decodeFrame(frame.payload.subarray(skip, skip + samples)))
+    cursor += samples
+  }
+  return result
 }
 
 function segmentDuration(frames: Frame[]): number {

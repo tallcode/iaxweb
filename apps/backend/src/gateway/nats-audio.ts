@@ -1,4 +1,4 @@
-import type { ConnectionOptions, NatsConnection, Subscription } from '@nats-io/transport-node'
+import type { ConnectionOptions, NatsConnection } from '@nats-io/transport-node'
 import type { AppConfig } from '../config.js'
 import { randomUUID } from 'node:crypto'
 import { connect, RequestError, TimeoutError } from '@nats-io/transport-node'
@@ -22,6 +22,7 @@ export interface AudioStateEvent {
 
 interface NatsAudioServiceOptions {
   config: AppConfig['nats']
+  connect?: (options: ConnectionOptions) => Promise<NatsConnection>
   nodeId: string
   onAudio: (data: Uint8Array) => void
   onEvent: (text: string) => void
@@ -33,6 +34,8 @@ const OFFLINE_AUDIO_STATE: AudioStateEvent = { type: 'state', online: false, spe
 const LISTENER_HEARTBEAT_MS = 15_000
 
 export class NatsAudioService {
+  private readonly connect: (options: ConnectionOptions) => Promise<NatsConnection>
+  private eventRevision = 0
   private readonly config: AppConfig['nats']
   private readonly onAudio: (data: Uint8Array) => void
   private readonly onEvent: (text: string) => void
@@ -50,6 +53,7 @@ export class NatsAudioService {
   private listenerCount = 0
 
   constructor(options: NatsAudioServiceOptions) {
+    this.connect = options.connect ?? connect
     this.config = options.config
     this.subjectPrefix = `${options.config.subjectRoot}.${options.nodeId}`
     this.onAudio = options.onAudio
@@ -104,7 +108,7 @@ export class NatsAudioService {
 
   private async connectOnce(): Promise<void> {
     try {
-      const connection = await connect(createConnectionOptions(this.config))
+      const connection = await this.connect(createConnectionOptions(this.config))
       if (this.stopped) {
         await connection.close()
         return
@@ -114,8 +118,36 @@ export class NatsAudioService {
       this.retryAttempt = 0
       this.transportConnected = true
       const prefix = this.subjectPrefix
-      void this.relayAudio(connection.subscribe(`${prefix}.audio`))
-      void this.relayEvents(connection.subscribe(`${prefix}.events`))
+      // Synchronous callbacks preserve the publisher's order across subjects.
+      // Separate async iterators can process stop before queued audio frames.
+      connection.subscribe(`${prefix}.audio`, {
+        callback: (error, message) => {
+          if (error) {
+            console.warn('NATS audio subscription error:', error)
+            return
+          }
+          if (this.stopped || this.connection !== connection)
+            return
+          try {
+            this.onAudio(message.data)
+          }
+          catch (error) {
+            console.warn('NATS audio handler error:', error)
+          }
+        },
+      })
+      connection.subscribe(`${prefix}.events`, {
+        callback: (error, message) => {
+          if (error) {
+            console.warn('NATS event subscription error:', error)
+            return
+          }
+          if (this.stopped || this.connection !== connection)
+            return
+          this.eventRevision++
+          this.relayEvent(new TextDecoder().decode(message.data))
+        },
+      })
       void this.watchConnection(connection)
       await connection.flush()
       this.publishListeners(connection)
@@ -138,34 +170,38 @@ export class NatsAudioService {
     }, delay)
   }
 
-  private async relayAudio(subscription: Subscription): Promise<void> {
-    for await (const message of subscription)
-      this.onAudio(message.data)
-  }
-
-  private async relayEvents(subscription: Subscription): Promise<void> {
-    for await (const message of subscription) {
-      const text = new TextDecoder().decode(message.data)
-      try {
-        const event = JSON.parse(text) as unknown
-        if (isAudioStateEvent(event))
-          this.setState(event)
-        else
-          this.onEvent(text)
+  private relayEvent(text: string): void {
+    try {
+      const event = JSON.parse(text) as unknown
+      if (isAudioStateEvent(event)) {
+        this.setState(event)
       }
-      catch (error) {
-        console.warn('Ignoring invalid NATS event:', error)
+      else {
+        this.onEvent(text)
+        if (typeof event === 'object' && event !== null && 'type' in event
+          && (event.type === 'start' || event.type === 'stop')) {
+          // Keep the local state usable even when an older snapshot is ignored.
+          // Deliver the boundary first, so stop retains its reported duration.
+          this.setState({ ...this.state, online: true, speaking: event.type === 'start' })
+        }
       }
+    }
+    catch (error) {
+      console.warn('Ignoring invalid NATS event:', error)
     }
   }
 
   private async requestSnapshot(connection: NatsConnection): Promise<void> {
     const subject = `${this.subjectPrefix}.snapshot`
+    const revision = this.eventRevision
     try {
       const reply = await connection.request(subject, undefined, { timeout: 2_000 })
       const state = JSON.parse(new TextDecoder().decode(reply.data)) as unknown
-      if (isAudioStateEvent(state))
+      // A reply can resume after newer live boundaries have already arrived.
+      if (!this.stopped && this.connection === connection && this.transportConnected
+        && revision === this.eventRevision && isAudioStateEvent(state)) {
         this.setState(state)
+      }
     }
     catch (error) {
       if ((error instanceof RequestError && error.isNoResponders()) || error instanceof TimeoutError) {
@@ -189,7 +225,7 @@ export class NatsAudioService {
       else if (status.type === 'reconnect') {
         this.transportConnected = true
         this.publishListeners(connection)
-        await this.requestSnapshot(connection)
+        void this.requestSnapshot(connection)
       }
     }
 
@@ -203,6 +239,7 @@ export class NatsAudioService {
   }
 
   private setState(state: AudioStateEvent): void {
+    this.eventRevision++
     this.state = state
     this.onState(state)
   }

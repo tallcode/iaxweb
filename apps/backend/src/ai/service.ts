@@ -123,7 +123,7 @@ export class AiService {
     if (!runtime)
       return
 
-    let event: { duration_ms?: unknown, type?: unknown }
+    let event: { duration_ms?: unknown, timestamp?: unknown, type?: unknown }
     try {
       event = JSON.parse(text)
     }
@@ -132,12 +132,19 @@ export class AiService {
     }
 
     try {
+      const timestamp = typeof event.timestamp === 'number' && Number.isInteger(event.timestamp)
+        && event.timestamp >= 0 && event.timestamp <= 0xFFFF_FFFF
+        ? event.timestamp
+        : undefined
       if (event.type === 'start') {
-        runtime.segmenter.start()
+        runtime.segmenter.start(timestamp)
       }
       else if (event.type === 'stop') {
-        const durationMs = typeof event.duration_ms === 'number' ? event.duration_ms : undefined
-        runtime.segmenter.stop(durationMs)
+        const durationMs = typeof event.duration_ms === 'number' && Number.isFinite(event.duration_ms)
+          && event.duration_ms >= 0
+          ? event.duration_ms
+          : undefined
+        runtime.segmenter.stop(durationMs, timestamp)
       }
     }
     catch (error) {
