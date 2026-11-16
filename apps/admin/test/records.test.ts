@@ -209,7 +209,7 @@ describe('record callsign editing', () => {
     wrapper.unmount()
   })
 
-  it('requests only manually reviewed callsigns when the manual scope is selected', async () => {
+  it('applies edit and review filters immediately without a callsign and combines them with search', async () => {
     vi.stubGlobal('Audio', class extends EventTarget {
       src = ''
 
@@ -219,21 +219,37 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
     const page: SegmentPage = { items: [segment()], page: 1, pageSize: 50, total: 1 }
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse(page))
-      .mockResolvedValueOnce(jsonResponse(page))
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(page)))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
 
     const wrapper = mount(RecordsPage)
     await flushPromises()
-    await wrapper.get('input[type="checkbox"]').setValue(true)
+    expect(wrapper.get('form[role="search"]').text()).toContain('已编辑')
+    expect(wrapper.get('form[role="search"]').text()).not.toContain('AI识别')
+    await wrapper.get('input[aria-label="筛选已编辑"]').setValue(true)
+    await flushPromises()
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('editedOnly=true')
+    expect(fetchMock.mock.calls[1]?.[0]).not.toContain('callsign=')
+    await wrapper.get('input[aria-label="筛选已标注"]').setValue(true)
+    await flushPromises()
+    expect(fetchMock.mock.calls[2]?.[0]).toContain('editedOnly=true')
+    expect(fetchMock.mock.calls[2]?.[0]).toContain('reviewedOnly=true')
     await wrapper.get('input[aria-label="呼号搜索"]').setValue('BG5AAA')
     await wrapper.get('form[role="search"]').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock.mock.calls[1]?.[0]).toContain('callsign=BG5AAA')
-    expect(fetchMock.mock.calls[1]?.[0]).toContain('manualOnly=true')
+    expect(fetchMock.mock.calls[3]?.[0]).toContain('callsign=BG5AAA')
+    expect(fetchMock.mock.calls[3]?.[0]).toContain('editedOnly=true')
+    expect(fetchMock.mock.calls[3]?.[0]).toContain('reviewedOnly=true')
+    await wrapper.get('input[aria-label="筛选已编辑"]').setValue(false)
+    await flushPromises()
+    expect(fetchMock.mock.calls[4]?.[0]).toContain('callsign=BG5AAA')
+    expect(fetchMock.mock.calls[4]?.[0]).not.toContain('editedOnly=')
+    expect(fetchMock.mock.calls[4]?.[0]).toContain('reviewedOnly=true')
+    await wrapper.findAll('button').find(button => button.text() === '清除')!.trigger('click')
+    await flushPromises()
+    expect(fetchMock.mock.calls[5]?.[0]).toBe('/api/admin/segments?page=1&pageSize=50')
     wrapper.unmount()
   })
 

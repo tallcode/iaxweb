@@ -17,8 +17,8 @@ const pageInput = ref('1')
 const total = ref(0)
 const searchInput = ref('')
 const callsignFilter = ref('')
-const manualOnly = ref(false)
-const aiOnly = ref(false)
+const editedOnly = ref(false)
+const reviewedOnly = ref(false)
 type CallsignRole = 'callee' | 'caller'
 const editingCallsign = ref<{ id: string, role: CallsignRole } | null>(null)
 const textEditors = ref(0)
@@ -36,8 +36,8 @@ const { markRefreshed } = useConditionalAutoRefresh({
     && savingSegments.value.size === 0
     && searchInput.value === ''
     && callsignFilter.value === ''
-    && !manualOnly.value
-    && !aiOnly.value
+    && !editedOnly.value
+    && !reviewedOnly.value
     && !isLoading.value,
   refresh: loadSegments,
 })
@@ -62,10 +62,10 @@ async function loadSegments(): Promise<void> {
     const query = new URLSearchParams({ page: String(currentPage.value), pageSize: String(PAGE_SIZE) })
     if (callsignFilter.value)
       query.set('callsign', callsignFilter.value)
-    if (manualOnly.value)
-      query.set('manualOnly', 'true')
-    if (aiOnly.value)
-      query.set('aiOnly', 'true')
+    if (editedOnly.value)
+      query.set('editedOnly', 'true')
+    if (reviewedOnly.value)
+      query.set('reviewedOnly', 'true')
     const response = await fetch(`/api/admin/segments?${query}`, { signal: request.signal })
     if (request.signal.aborted)
       return
@@ -91,7 +91,7 @@ async function loadSegments(): Promise<void> {
     segments.value = data.items
     pageInput.value = String(currentPage.value)
     markRefreshed()
-    statusMessage.value = callsignFilter.value || manualOnly.value || aiOnly.value
+    statusMessage.value = callsignFilter.value || editedOnly.value || reviewedOnly.value
       ? `共 ${total.value} 条匹配记录`
       : `共 ${total.value} 条记录`
   }
@@ -141,11 +141,24 @@ async function searchCallsign(): Promise<void> {
   await loadSegments()
 }
 
+async function applyFilters(): Promise<void> {
+  currentPage.value = 1
+  pageInput.value = '1'
+  await loadSegments()
+}
+
+function matchesFilters(segment: PersistedSegment): boolean {
+  const edited = segment.manualRecognition !== null || segment.manualCallsign !== null || segment.calleeCallsign !== null
+  return (!callsignFilter.value || segment.effectiveCallsign === callsignFilter.value)
+    && (!editedOnly.value || edited)
+    && (!reviewedOnly.value || segment.reviewed)
+}
+
 async function clearCallsignSearch(): Promise<void> {
   searchInput.value = ''
   callsignFilter.value = ''
-  manualOnly.value = false
-  aiOnly.value = false
+  editedOnly.value = false
+  reviewedOnly.value = false
   currentPage.value = 1
   pageInput.value = '1'
   await loadSegments()
@@ -223,9 +236,11 @@ async function patchSegment(segment: PersistedSegment, endpoint: string, body: u
     const visible = segments.value.find(row => row.id === segment.id)
     if (visible && visible !== segment)
       Object.assign(visible, updated)
-    statusMessage.value = callsignFilter.value || manualOnly.value || aiOnly.value
+    statusMessage.value = callsignFilter.value || editedOnly.value || reviewedOnly.value
       ? `共 ${total.value} 条匹配记录`
       : `共 ${total.value} 条记录`
+    if (!matchesFilters(updated))
+      await loadSegments()
     return updated
   }
   catch {
@@ -263,19 +278,6 @@ async function saveCallsign(segment: PersistedSegment, role: CallsignRole, input
   const updatedSegment = await patchSegment(segment, endpoint, { callsign: callsign || null })
   if (!updatedSegment)
     return false
-  if (role === 'caller') {
-    const searchColumn = manualOnly.value && !aiOnly.value
-      ? updatedSegment.manualCallsign
-      : aiOnly.value && !manualOnly.value
-        ? updatedSegment.callsign
-        : updatedSegment.effectiveCallsign
-    if ((callsignFilter.value && searchColumn !== callsignFilter.value)
-      || (manualOnly.value && updatedSegment.manualCallsign === null)
-      || (aiOnly.value && updatedSegment.callsign === null)) {
-      await loadSegments()
-      return true
-    }
-  }
   return true
 }
 
@@ -338,10 +340,10 @@ function formatTime(iso: string): string {
           {{ statusMessage }}
         </p>
         <form class="ml-auto flex min-w-0 items-center gap-2" role="search" @submit.prevent="searchCallsign">
-          <label class="flex shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap text-xs text-slate-300"><input v-model="manualOnly" type="checkbox" class="accent-cyan-500">仅人工</label>
-          <label class="flex shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap text-xs text-slate-300"><input v-model="aiOnly" type="checkbox" class="accent-cyan-500">AI识别</label>
+          <label class="flex shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap text-xs text-slate-300"><input v-model="editedOnly" type="checkbox" class="accent-cyan-500" aria-label="筛选已编辑" @change="applyFilters">已编辑</label>
+          <label class="flex shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap text-xs text-slate-300"><input v-model="reviewedOnly" type="checkbox" class="accent-cyan-500" aria-label="筛选已标注" @change="applyFilters">已标注</label>
           <input v-model="searchInput" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="w-24 shrink-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 font-mono text-sm uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 sm:w-36 sm:px-3" inputmode="text" :pattern="CALLSIGN_PATTERN.source" placeholder="呼号搜索" aria-label="呼号搜索" spellcheck="false" @input="normalizeSearchInput">
-          <button v-if="searchInput || callsignFilter || manualOnly || aiOnly" type="button" class="shrink-0 rounded-lg border border-slate-700 px-2 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 sm:px-3" @click="clearCallsignSearch">
+          <button v-if="searchInput || callsignFilter || editedOnly || reviewedOnly" type="button" class="shrink-0 rounded-lg border border-slate-700 px-2 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 sm:px-3" @click="clearCallsignSearch">
             清除
           </button>
           <button type="submit" class="shrink-0 rounded-lg border border-slate-700 px-2 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 sm:px-4">

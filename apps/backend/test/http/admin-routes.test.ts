@@ -80,28 +80,22 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   })
   assert.equal(exactSearch.statusCode, 200)
   assert.equal(exactSearch.json().total, 1)
-  const manualOnlySearch = await app.inject({
+  const editedOnlySearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?callsign=bg5aaa&manualOnly=true',
+    url: '/api/admin/segments?callsign=bg5aaa&editedOnly=true',
   })
-  assert.equal(manualOnlySearch.statusCode, 200)
-  assert.equal(manualOnlySearch.json().total, 0)
-  const aiOnlySearch = await app.inject({
+  assert.equal(editedOnlySearch.statusCode, 200)
+  assert.equal(editedOnlySearch.json().total, 0)
+  const reviewedOnlySearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?aiOnly=true',
+    url: '/api/admin/segments?reviewedOnly=true',
   })
-  assert.equal(aiOnlySearch.statusCode, 200)
-  assert.equal(aiOnlySearch.json().total, 1)
-  const anyCallsignSearch = await app.inject({
-    headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?manualOnly=true&aiOnly=true',
-  })
-  assert.equal(anyCallsignSearch.statusCode, 200)
-  assert.equal(anyCallsignSearch.json().total, 1)
+  assert.equal(reviewedOnlySearch.statusCode, 200)
+  assert.equal(reviewedOnlySearch.json().total, 0)
   repository.updateManualReview(segment.id, { callsign: 'BG5AAA' })
   const reviewedSearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
-    url: '/api/admin/segments?callsign=bg5aaa&manualOnly=true',
+    url: '/api/admin/segments?callsign=bg5aaa&editedOnly=true',
   })
   assert.equal(reviewedSearch.json().total, 1)
   const calleeUpdate = await app.inject({
@@ -123,6 +117,9 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
     assert.equal(review.statusCode, 200)
     assert.equal(review.json().reviewed, reviewed)
     assert.equal(review.json().manualRecognition, '人工确认文本')
+    const filtered = await app.inject({ headers, url: '/api/admin/segments?editedOnly=true&reviewedOnly=true' })
+    assert.equal(filtered.statusCode, 200)
+    assert.equal(filtered.json().total, reviewed ? 1 : 0)
   }
   for (const payload of [{}, { reviewed: 'false' }, { reviewed: null }, { reviewed: 1 }]) {
     const invalid = await app.inject({ headers, method: 'PATCH', payload, url: '/api/admin/segments/matching-segment/manual-review' })

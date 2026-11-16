@@ -195,21 +195,17 @@ export class SegmentRepository {
     return row ? mapRow(row) : undefined
   }
 
-  list(page: number, pageSize: number, callsign?: string, manualOnly: boolean = false, aiOnly: boolean = false): SegmentPage {
+  list(page: number, pageSize: number, callsign?: string, editedOnly: boolean = false, reviewedOnly: boolean = false): SegmentPage {
     if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
       throw new Error('Invalid segment page')
     const conditions: string[] = []
     const parameters: string[] = []
-    const callsignConditions: string[] = []
-    if (manualOnly)
-      callsignConditions.push('manual_callsign IS NOT NULL')
-    if (aiOnly)
-      callsignConditions.push('callsign IS NOT NULL')
-    if (callsignConditions.length > 0)
-      conditions.push(`(${callsignConditions.join(' OR ')})`)
+    if (editedOnly)
+      conditions.push('(manual_recognition IS NOT NULL OR manual_callsign IS NOT NULL OR callee_callsign IS NOT NULL)')
+    if (reviewedOnly)
+      conditions.push('reviewed = 1')
     if (callsign !== undefined) {
-      const searchColumn = manualOnly && !aiOnly ? 'manual_callsign' : aiOnly && !manualOnly ? 'callsign' : 'effective_callsign'
-      conditions.push(`${searchColumn} = ? COLLATE NOCASE`)
+      conditions.push('effective_callsign = ? COLLATE NOCASE')
       parameters.push(callsign)
     }
     const whereClause = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`
