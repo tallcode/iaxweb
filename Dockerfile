@@ -39,13 +39,17 @@ RUN apt-get update \
   && chown node:node /app/config /app/data
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json tsconfig.json ./
-COPY apps/backend/package.json apps/backend/package.json
+COPY --from=deps /app/apps ./apps
+COPY --from=deps /app/packages ./packages
+COPY package.json tsconfig.json LICENSE ./
 COPY packages/contracts packages/contracts
 COPY apps/backend/src apps/backend/src
 COPY apps/backend/scripts apps/backend/scripts
 COPY --from=build /app/apps/admin/dist apps/admin/dist
 COPY --from=build /app/apps/public/dist apps/public/dist
+
+# Check imports from the final production dependency layout before publishing.
+RUN node --import tsx -e "import('./apps/backend/src/ai/schema-validator.ts')"
 
 USER node
 EXPOSE 3000
