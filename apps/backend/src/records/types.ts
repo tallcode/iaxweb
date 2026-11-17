@@ -1,0 +1,12 @@
+// Persistence accepts recognition data without depending on audio buffers or AI runtime state.
+export interface RecognitionRecord {
+  id: string
+  timestamp: string
+  durationMs: number
+  voicedMs: number
+  recognition?: string | undefined
+  corrected?: string | undefined
+  revise?: string | undefined
+  callsign?: string | undefined
+  risk?: { level: number, reason: string } | undefined
+}

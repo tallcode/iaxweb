@@ -1,6 +1,7 @@
+import type { AudioState } from '@iaxweb/contracts'
 import type { WebSocket } from 'ws'
-import type { SpotEvent } from './ai/spot-store.js'
 import type { StatusSnapshot } from './allmon3/index.js'
+import type { SpotEvent } from './spots/spot-store.js'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import process from 'node:process'
@@ -13,9 +14,7 @@ import { config as loadEnv } from 'dotenv'
 import Fastify from 'fastify'
 import { AdminAuth } from './admin/auth.js'
 import { LoginRateLimiter } from './admin/login-rate-limiter.js'
-import { RecordRepository } from './ai/record-repository.js'
 import { AiService } from './ai/service.js'
-import { SpotStore } from './ai/spot-store.js'
 import { Allmon3StatusService, parseNodeDefinitions, publicStatusSnapshot } from './allmon3/index.js'
 import { loadAiConfig, loadConfig } from './config.js'
 import { createConnectionOptions, NatsAudioService } from './gateway/nats-audio.js'
@@ -23,6 +22,8 @@ import { startWebSocketHeartbeat } from './gateway/websocket-heartbeat.js'
 import { registerAdminRoutes } from './http/admin-routes.js'
 import { registerStaticRoutes } from './http/static-routes.js'
 import { registerWebSocketRoutes } from './http/websocket-routes.js'
+import { RecordRepository } from './records/record-repository.js'
+import { SpotStore } from './spots/spot-store.js'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 loadEnv({ path: resolve(repositoryRoot, '.env'), quiet: true })
@@ -195,7 +196,7 @@ function updateAudioListenerCount(nodeId: string): void {
   natsAudio.get(nodeId)?.setListenerCount(count + (aiService?.hasNode(nodeId) ? 1 : 0))
 }
 
-function publishAudioState(nodeId: string, state: { listeners?: number }): void {
+function publishAudioState(nodeId: string, state: AudioState): void {
   broadcastAudio(nodeId, JSON.stringify(state), false)
 
   const listeners = state.listeners ?? 0
@@ -222,16 +223,19 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true
   app.log.info({ signal }, 'Shutting down')
 
-  allmon3.stop()
-  aiService?.stop()
-  stopWebSocketHeartbeat?.()
-  for (const client of app.websocketServer.clients)
-    client.close(1001, 'Server shutting down')
-  await app.close()
-  await Promise.all([...natsAudio.values()].map(service => service.stop()))
-  await spotStore.close()
-  if (!aiService)
+  try {
+    allmon3.stop()
+    aiService?.stop()
+    stopWebSocketHeartbeat?.()
+    for (const client of app.websocketServer.clients)
+      client.close(1001, 'Server shutting down')
+    await app.close()
+    await Promise.all([...natsAudio.values()].map(service => service.stop()))
+    await spotStore.close()
+  }
+  finally {
     recordRepository?.close()
+  }
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

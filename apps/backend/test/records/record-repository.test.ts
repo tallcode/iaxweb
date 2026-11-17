@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
-import { RecordRepository } from '../../src/ai/record-repository.js'
+import { RecordRepository } from '../../src/records/record-repository.js'
 
 function record(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
   return {

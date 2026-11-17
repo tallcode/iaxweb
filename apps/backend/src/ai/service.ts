@@ -1,17 +1,17 @@
 import type { AiConfig } from '../config.js'
 import type { AudioStateEvent } from '../gateway/nats-audio.js'
+import type { RecognitionRepository } from '../records/ports.js'
+import type { SpotEvent } from '../spots/spot-store.js'
 import type { SegmentRecord } from './segment-store.js'
 import type { ClosedSegment, DiscardReason } from './segmenter.js'
-import type { SpotEvent } from './spot-store.js'
 import { randomUUID } from 'node:crypto'
+import { RecordingStore } from '../records/recording-store.js'
 import { AsrClient } from './asr-client.js'
 import { AsrContextFiles, logTimestamp } from './asr-context-files.js'
 import { correctExplanationText } from './corrected-transcript.js'
 import { LlmParser } from './llm-parser.js'
 import { decodeMuLaw } from './mulaw.js'
 import { SerialQueue } from './queue.js'
-import { RecordRepository } from './record-repository.js'
-import { RecordingStore } from './recording-store.js'
 import { SegmentStore } from './segment-store.js'
 import { NodeSegmenter } from './segmenter.js'
 import { encodeWav } from './wav.js'
@@ -28,7 +28,7 @@ export interface AiServiceOptions {
   config: AiConfig
   nodeIds: string[]
   onSpot?: (spot: SpotEvent) => void
-  repository?: RecordRepository
+  repository?: RecognitionRepository
 }
 
 // AI 值机员：监听节点音频，按发射分段送百炼识别，输出到控制台。
@@ -39,7 +39,7 @@ export class AiService {
   private readonly asr: AsrClient
   private readonly llm: LlmParser | undefined
   private readonly onSpot: ((spot: SpotEvent) => void) | undefined
-  private readonly repository: RecordRepository | undefined
+  private readonly repository: RecognitionRepository | undefined
   private readonly recordings: RecordingStore | undefined
   private readonly nodes = new Map<string, NodeAiRuntime>()
   private stopped = false
@@ -48,7 +48,9 @@ export class AiService {
     const { config, nodeIds } = options
     this.config = config
     this.asrContextFiles = new AsrContextFiles(config.hotwordsFile, config.backgroundFile)
-    this.repository = options.repository ?? (config.persistenceEnabled ? new RecordRepository(config.databaseFile) : undefined)
+    if (config.persistenceEnabled && !options.repository)
+      throw new Error('AI persistence requires an injected recognition repository')
+    this.repository = options.repository
     this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
     this.onSpot = options.onSpot
     this.asr = new AsrClient({
@@ -176,7 +178,6 @@ export class AiService {
     this.stopped = true
     for (const runtime of this.nodes.values())
       runtime.queue.clear()
-    this.repository?.close()
   }
 
   private enqueue(nodeId: string, segment: ClosedSegment): void {
@@ -273,7 +274,9 @@ export class AiService {
         }
       }
       console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.callsign ? ` 呼号=${parsed.callsign}` : ''} | ${parsed.message ?? text}`)
-      if (parsed.callsign && this.config.llm.publishSpot) {
+      const persisted = this.repository?.find(record.id)
+      const mayPublish = !this.repository || (persisted !== undefined && persisted.manualCallsign === null)
+      if (parsed.callsign && this.config.llm.publishSpot && mayPublish) {
         this.onSpot?.({
           at: record.timestamp,
           callsign: parsed.callsign,

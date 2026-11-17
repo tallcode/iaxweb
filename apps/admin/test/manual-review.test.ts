@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import type { PersistedRecord } from '@iaxweb/contracts'
+import type { AdminRecord, PersistedRecord } from '@iaxweb/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import { adminSession } from '../src/admin-session'
-import CallsignText from '../src/components/CallsignText.vue'
+import CallsignText from '../src/components/records/CallsignText.vue'
 import RecordsPage from '../src/pages/RecordsPage.vue'
 
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace: vi.fn() }), RouterLink: 'a' }))
@@ -13,8 +13,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function record(): PersistedRecord {
+function record(): AdminRecord {
   return {
+    hasAudio: false,
     id: 'review-row',
     nodeId: '1900',
     capturedAt: new Date().toISOString(),

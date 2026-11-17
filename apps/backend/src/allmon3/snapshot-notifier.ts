@@ -36,8 +36,14 @@ export class SnapshotNotifier {
       this.timer = undefined
       const pendingSnapshot = this.pendingSnapshot
       this.pendingSnapshot = undefined
-      if (pendingSnapshot)
-        this.notify(pendingSnapshot)
+      if (pendingSnapshot) {
+        try {
+          this.notify(pendingSnapshot)
+        }
+        catch (error) {
+          console.warn('Failed to broadcast Allmon3 status:', error)
+        }
+      }
     }, this.delayMs)
   }
 

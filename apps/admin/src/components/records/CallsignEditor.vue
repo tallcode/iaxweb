@@ -7,7 +7,7 @@ const props = defineProps<{
   pattern: RegExp
   hint: string
   disabled: boolean
-  save: (input: HTMLInputElement) => Promise<boolean>
+  save: (value: string | null) => Promise<boolean>
 }>()
 const emit = defineEmits<{ close: [] }>()
 const input = ref<HTMLInputElement>()
@@ -28,9 +28,13 @@ function cancel(): void {
 async function submit(): Promise<void> {
   if (saving.value || props.disabled || !input.value)
     return
+  const value = draft.value.trim().toUpperCase()
+  input.value.setCustomValidity(value.length === 0 || props.pattern.test(value) ? '' : props.hint)
+  if (!input.value.reportValidity())
+    return
   saving.value = true
   try {
-    if (await props.save(input.value))
+    if (await props.save(value || null))
       emit('close')
   }
   finally {

@@ -196,3 +196,5 @@ function transmitLabel(value: TransmitSource): string {
     </div>
   </article>
 </template>
+
+<style src="./NodeCard.css"></style>

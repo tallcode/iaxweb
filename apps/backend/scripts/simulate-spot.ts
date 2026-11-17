@@ -3,9 +3,9 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect } from '@nats-io/transport-node'
 import { config as loadEnv } from 'dotenv'
-import { SpotStore } from '../src/ai/spot-store.js'
 import { loadConfig } from '../src/config.js'
 import { createConnectionOptions } from '../src/gateway/nats-audio.js'
+import { SpotStore } from '../src/spots/spot-store.js'
 
 loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../..', '.env'), quiet: true })
 const config = loadConfig()

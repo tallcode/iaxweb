@@ -9,7 +9,7 @@ const emit = defineEmits<{ logout: [] }>()
 </script>
 
 <template>
-  <header class="fixed inset-x-0 top-0 z-30 h-16 min-w-[380px] whitespace-nowrap border-b border-slate-800 bg-slate-950">
+  <header class="fixed inset-x-0 top-0 z-30 h-16 whitespace-nowrap border-b border-slate-800 bg-slate-950">
     <div class="mx-auto flex h-full max-w-screen-2xl items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 lg:px-8">
       <h1 class="shrink-0 text-lg font-semibold tracking-tight">
         {{ title }}

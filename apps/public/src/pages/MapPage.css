@@ -1,0 +1,135 @@
+.map-view {
+  grid-area: topology;
+  position: relative;
+  display: grid;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 45%, rgb(50 103 109 / 20%), transparent 45%);
+  place-items: center;
+}
+
+.zhejiang-map {
+  --maidenhead-grid-color: rgb(93 164 165 / 34%);
+
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.zhejiang-map.is-zoomed {
+  cursor: grab;
+}
+
+.zhejiang-map.is-dragging {
+  cursor: grabbing;
+}
+
+.map-center-debug {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  pointer-events: none;
+}
+
+.map-center-debug-point {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  background: #ff3030;
+  box-shadow: 0 0 5px rgb(255 48 48 / 90%);
+  transform: translate(-50%, -50%);
+}
+
+.maidenhead-grid {
+  stroke: var(--maidenhead-grid-color);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.maidenhead-grid-six {
+  stroke: rgb(93 164 165 / 6%);
+  stroke-width: 0.45;
+}
+
+.maidenhead-grid-labels {
+  fill: var(--maidenhead-grid-color);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  text-anchor: middle;
+}
+
+.maidenhead-grid-labels-six {
+  font-size: 1.4px;
+}
+
+.county-shape {
+  fill: #35404d;
+  fill-opacity: 0.86;
+  stroke: #687789;
+  stroke-width: 1.35;
+  vector-effect: non-scaling-stroke;
+  transition:
+    fill 160ms ease,
+    stroke 160ms ease;
+}
+
+.county-shape.online {
+  fill: #215442;
+  stroke: #4bc88b;
+}
+
+.county-shape.tx-local {
+  fill: #614316;
+  stroke: #ffb44a;
+}
+
+.county-shape.tx-remote {
+  fill: #163c64;
+  stroke: #62a8ff;
+}
+
+.county-shape.tx-system {
+  fill: #44285f;
+  stroke: #ad78df;
+}
+
+.county-outline {
+  fill: none;
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.county-outline.online {
+  stroke: #4bc88b;
+}
+
+.county-outline.tx-local {
+  stroke: #ffb44a;
+}
+
+.county-outline.tx-remote {
+  stroke: #62a8ff;
+}
+
+.county-outline.tx-system {
+  stroke: #ad78df;
+}
+
+.county-shape:hover {
+  filter: brightness(1.2);
+}
+
+.map-state {
+  margin: 0;
+  color: #96a4b7;
+  fill: #96a4b7;
+  font-size: 0.82rem;
+}

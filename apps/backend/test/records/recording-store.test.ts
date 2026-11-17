@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { RecordingStore } from '../../src/ai/recording-store.js'
+import { RecordingStore } from '../../src/records/recording-store.js'
 
 test('writes each recording beneath its UTC date directory', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'iaxweb-rec-'))

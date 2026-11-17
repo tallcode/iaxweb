@@ -1,82 +1,48 @@
-export type TransmitSource = 'local' | 'remote' | 'system' | null
-export type NodeType = 'HUB' | 'REPEATER'
+import type { z } from 'zod'
+import type {
+  adminRecordPageSchema,
+  adminRecordSchema,
+  adminRoleSchema,
+  adminSessionSchema,
+  adminUsersPageSchema,
+  audioStateSchema,
+  createUserSchema,
+  loginSchema,
+  manualCallsignSchema,
+  manualRecognitionSchema,
+  nodeTypeSchema,
+  persistedRecordSchema,
+  publicConnectionStatusSchema,
+  publicNodeStatusSchema,
+  publicStatusSnapshotSchema,
+  recordPageSchema,
+  reviewSchema,
+  spotEventSchema,
+  transmitSourceSchema,
+  updateUserSchema,
+} from './schemas.js'
 
-export type AdminRole = 'admin' | 'editor' | 'viewer'
+export type TransmitSource = z.output<typeof transmitSourceSchema>
+export type NodeType = z.output<typeof nodeTypeSchema>
+export type AdminRole = z.output<typeof adminRoleSchema>
+export type AdminSession = z.output<typeof adminSessionSchema>
+export type AdminUsersPage = z.output<typeof adminUsersPageSchema>
+export type PublicConnectionStatus = z.output<typeof publicConnectionStatusSchema>
+export type PublicNodeStatus = z.output<typeof publicNodeStatusSchema>
+export type PublicStatusSnapshot = z.output<typeof publicStatusSnapshotSchema>
+export type SpotEvent = z.output<typeof spotEventSchema>
+export type AudioState = z.output<typeof audioStateSchema>
+export type PersistedRecord = z.output<typeof persistedRecordSchema>
+export type RecordPage = z.output<typeof recordPageSchema>
+export type AdminRecord = z.output<typeof adminRecordSchema>
+export type AdminRecordPage = z.output<typeof adminRecordPageSchema>
+export type LoginInput = z.input<typeof loginSchema>
+export type CreateUserInput = z.input<typeof createUserSchema>
+export type UpdateUserInput = z.input<typeof updateUserSchema>
+export type ManualCallsignInput = z.input<typeof manualCallsignSchema>
+export type ManualRecognitionInput = z.input<typeof manualRecognitionSchema>
+export type ManualRecognition = z.output<typeof manualRecognitionSchema>
+export type ReviewInput = z.input<typeof reviewSchema>
 
-export interface AdminSession {
-  role: AdminRole
-  username: string
-  system?: boolean
-}
-
-export interface AdminUsersPage {
-  items: AdminSession[]
-}
-
-export interface PublicConnectionStatus {
-  CSTATE: 'ESTABLISHED'
-}
-
-export interface PublicNodeStatus {
-  AI?: boolean
-  AUDIO?: boolean
-  CONNS?: Record<string, PublicConnectionStatus>
-  DESC?: string
-  FREQ?: string
-  GB?: string
-  LAST_TX_AT?: string | null
-  LINK?: string[]
-  LISTENERS?: number
-  NAME?: string
-  ONLINE?: boolean
-  TX_SOURCE?: TransmitSource
-  TYPE?: NodeType
-}
-
-export type PublicStatusSnapshot = Record<string, PublicNodeStatus>
-
-export interface SpotEvent {
-  at: string
-  callsign: string
-  id: string
-  node: string
-  type?: 'spot'
-}
-
-export interface PersistedRecord {
-  calleeCallsign: string | null
-  callsign: string | null
-  capturedAt: string
-  corrected: string | null
-  createdAt: string
-  durationMs: number
-  effectiveCallsign: string | null
-  effectiveRiskLevel: number | null
-  id: string
-  manualCallsign: string | null
-  manualRecognition: string | null
-  manualNote: string | null
-  manualRiskLevel: number | null
-  nodeId: string
-  recognition: string
-  reviewed: boolean
-  revise: string | null
-  riskLevel: number | null
-  riskReason: string | null
-  voicedMs: number
-}
-
-export interface RecordPage {
-  items: PersistedRecord[]
-  page: number
-  pageSize: number
-  total: number
-}
-
-export interface AdminRecord extends PersistedRecord {
-  hasAudio: boolean
-}
-
-export interface AdminRecordPage extends RecordPage {
-  items: AdminRecord[]
-}
+export * from './callsign.js'
+export * from './schemas.js'

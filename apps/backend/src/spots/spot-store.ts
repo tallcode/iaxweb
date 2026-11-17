@@ -1,5 +1,8 @@
 import type { SpotEvent } from '@iaxweb/contracts'
 import type { NatsConnection, Subscription } from '@nats-io/transport-node'
+import { isDisplayableCallsign, NO_CALLSIGN, spotEventSchema } from '@iaxweb/contracts'
+
+export { isDisplayableCallsign, isValidCallsign, NO_CALLSIGN } from '@iaxweb/contracts'
 
 export type { SpotEvent } from '@iaxweb/contracts'
 
@@ -10,9 +13,6 @@ export interface SpotStoreOptions {
   setTimer?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>
   subjectPrefix?: string
 }
-
-const CALLSIGN_PATTERN = /^B[ADGHIY]\d[A-Z]{2,3}$/
-export const NO_CALLSIGN = 'N0CALL'
 
 // Core-NATS-only live Spot relay. Historical spots are read from SQLite by
 // RecordRepository, so NATS never acts as a second persistent data store.
@@ -140,27 +140,10 @@ export class SpotStore {
   }
 }
 
-export function isDisplayableCallsign(value: string): boolean {
-  return value !== NO_CALLSIGN && CALLSIGN_PATTERN.test(value)
-}
-
-// Used by callsign hints to validate ordinary amateur-radio callsigns. N0CALL
-// is a manual-review sentinel and intentionally does not pass this check.
-export const isValidCallsign = isDisplayableCallsign
-
 function parseSpot(data: Uint8Array): SpotEvent | undefined {
   try {
-    const parsed = JSON.parse(new TextDecoder().decode(data)) as Record<string, unknown>
-    if (typeof parsed.callsign !== 'string' || (!isDisplayableCallsign(parsed.callsign) && parsed.callsign !== NO_CALLSIGN)
-      || typeof parsed.node !== 'string' || typeof parsed.id !== 'string' || typeof parsed.at !== 'string') {
-      return undefined
-    }
-    return {
-      at: parsed.at,
-      callsign: parsed.callsign,
-      id: parsed.id,
-      node: parsed.node,
-    }
+    const parsed = spotEventSchema.safeParse(JSON.parse(new TextDecoder().decode(data)))
+    return parsed.success ? parsed.data : undefined
   }
   catch {
     return undefined

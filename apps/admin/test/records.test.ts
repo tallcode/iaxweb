@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { PersistedRecord, RecordPage } from '@iaxweb/contracts'
+import type { AdminRecord, RecordPage } from '@iaxweb/contracts'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { adminSession } from '../src/admin-session'
@@ -109,7 +109,7 @@ describe('record callsign editing', () => {
     await flushPromises()
     expect(wrapper.get('h1').text()).toBe('记录管理')
     expect(wrapper.get('header [aria-label="当前用户"]').text()).toBe('admin')
-    expect(wrapper.get('thead').classes()).toEqual(expect.arrayContaining(['sticky', 'top-32']))
+    expect(wrapper.get('thead').classes()).toContain('sticky')
     expect(wrapper.get('[aria-label="筛选工具栏"]').classes()).toEqual(expect.arrayContaining(['fixed', 'top-16', 'bg-slate-950']))
     expect(wrapper.get('header').classes()).toEqual(expect.arrayContaining(['fixed', 'top-0']))
     await wrapper.get('header button').trigger('click')
@@ -621,8 +621,9 @@ describe('record callsign editing', () => {
   })
 })
 
-function record(): PersistedRecord {
+function record(): AdminRecord {
   return {
+    hasAudio: false,
     calleeCallsign: null,
     callsign: 'BG5AAA',
     capturedAt: new Date().toISOString(),

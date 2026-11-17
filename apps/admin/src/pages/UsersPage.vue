@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import type { AdminRole, AdminSession, AdminUsersPage } from '@iaxweb/contracts'
+import type { AdminRole, AdminSession } from '@iaxweb/contracts'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { adminSession as currentUser } from '../admin-session'
+import { ApiError, apiErrorMessage } from '../api/client'
+import { sessionApi } from '../api/session'
+import { usersApi } from '../api/users'
 import AdminPageHeader from '../components/AdminPageHeader.vue'
 
 const router = useRouter()
@@ -33,26 +36,18 @@ const filteredUsers = computed(() => {
 onMounted(() => void loadUsers())
 onBeforeUnmount(() => request?.abort())
 
-async function checkAccess(response: Response): Promise<boolean> {
-  if (response.status === 401) {
+async function handleAccessError(error: unknown): Promise<boolean> {
+  if (!(error instanceof ApiError))
+    return false
+  if (error.status === 401) {
     await router.replace('/')
-    return false
+    return true
   }
-  if (response.status === 403) {
+  if (error.status === 403) {
     await router.replace('/records')
-    return false
+    return true
   }
-  return true
-}
-
-async function responseError(response: Response, fallback: string): Promise<string> {
-  try {
-    const body = await response.json() as { message?: unknown }
-    return typeof body.message === 'string' ? body.message : fallback
-  }
-  catch {
-    return fallback
-  }
+  return false
 }
 
 async function loadUsers(): Promise<void> {
@@ -62,21 +57,14 @@ async function loadUsers(): Promise<void> {
   loading.value = true
   status.value = ''
   try {
-    const response = await fetch('/api/admin/users', { signal: activeRequest.signal })
-    if (activeRequest.signal.aborted || !await checkAccess(response))
-      return
-    if (!response.ok) {
-      status.value = await responseError(response, '加载用户失败，请重试')
-      return
-    }
-    const page = await response.json() as AdminUsersPage
+    const page = await usersApi.list(activeRequest.signal)
     if (activeRequest.signal.aborted)
       return
     users.value = page.items
   }
-  catch {
-    if (!activeRequest.signal.aborted)
-      status.value = '加载用户失败：无法连接服务器'
+  catch (error) {
+    if (!activeRequest.signal.aborted && !await handleAccessError(error))
+      status.value = apiErrorMessage(error, '加载用户失败，请重试')
   }
   finally {
     if (request === activeRequest) {
@@ -92,17 +80,13 @@ async function logout(): Promise<void> {
   loggingOut.value = true
   request?.abort()
   try {
-    const response = await fetch('/api/admin/logout', { method: 'POST' })
-    if (!response.ok && response.status !== 401) {
-      status.value = '注销失败，请重试'
-      return
-    }
+    await sessionApi.logout()
     users.value = []
     currentUser.value = null
     await router.replace('/')
   }
-  catch {
-    status.value = '注销失败：无法连接服务器'
+  catch (error) {
+    status.value = apiErrorMessage(error, '注销失败，请重试')
   }
   finally {
     loggingOut.value = false
@@ -151,17 +135,10 @@ async function saveUser(): Promise<void> {
   const isCurrentUser = originalName !== null && originalName === currentUser.value?.username
   const body = { username: draft.username.trim(), role: draft.role, ...(draft.password ? { password: draft.password } : {}) }
   try {
-    const response = await fetch(originalName === null ? '/api/admin/users' : `/api/admin/users/${encodeURIComponent(originalName)}`, {
-      method: originalName === null ? 'POST' : 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!await checkAccess(response))
-      return
-    if (!response.ok) {
-      editorError.value = await responseError(response, '保存用户失败，请重试')
-      return
-    }
+    if (originalName === null)
+      await usersApi.create({ ...body, password: draft.password })
+    else
+      await usersApi.update(originalName, body)
     if (isCurrentUser && (body.username !== originalName || body.password)) {
       editorDialog.value?.close()
       await router.replace('/')
@@ -175,8 +152,9 @@ async function saveUser(): Promise<void> {
     await loadUsers()
     editorDialog.value?.close()
   }
-  catch {
-    editorError.value = '保存用户失败：无法连接服务器'
+  catch (error) {
+    if (!await handleAccessError(error))
+      editorError.value = apiErrorMessage(error, '保存用户失败，请重试')
   }
   finally {
     saving.value = false
@@ -205,13 +183,7 @@ async function deleteUser(): Promise<void> {
   saving.value = true
   deleteError.value = ''
   try {
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(user.username)}`, { method: 'DELETE' })
-    if (!await checkAccess(response))
-      return
-    if (!response.ok && response.status !== 404) {
-      deleteError.value = await responseError(response, '删除用户失败，请重试')
-      return
-    }
+    await usersApi.delete(user.username)
     if (user.username === currentUser.value?.username) {
       deleteDialog.value?.close()
       await router.replace('/')
@@ -220,8 +192,9 @@ async function deleteUser(): Promise<void> {
     await loadUsers()
     deleteDialog.value?.close()
   }
-  catch {
-    deleteError.value = '删除用户失败：无法连接服务器'
+  catch (error) {
+    if (!await handleAccessError(error))
+      deleteError.value = apiErrorMessage(error, '删除用户失败，请重试')
   }
   finally {
     saving.value = false
@@ -230,14 +203,14 @@ async function deleteUser(): Promise<void> {
 </script>
 
 <template>
-  <div class="min-h-dvh min-w-[380px] bg-slate-950 text-slate-100">
+  <div class="min-h-dvh bg-slate-950 text-slate-100">
     <AdminPageHeader title="用户管理" :username="currentUser?.username ?? ''" :logging-out="loggingOut" :disabled="saving" @logout="logout">
       <RouterLink to="/records" class="shrink-0 text-xs text-slate-400 transition hover:text-slate-100 sm:text-sm">
         记录管理
       </RouterLink>
     </AdminPageHeader>
     <main :inert="loggingOut" class="mx-auto w-full max-w-screen-2xl px-4 pt-32 pb-6 sm:px-6 lg:px-8">
-      <div class="fixed inset-x-0 top-16 z-20 h-16 min-w-[380px] bg-slate-950" aria-label="筛选工具栏">
+      <div class="fixed inset-x-0 top-16 z-20 h-16 bg-slate-950" aria-label="筛选工具栏">
         <div class="mx-auto flex h-full max-w-screen-2xl flex-nowrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <p class="shrink-0 whitespace-nowrap text-sm text-slate-400">
             <span class="sm:hidden">{{ filteredUsers.length }}人</span>

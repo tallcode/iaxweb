@@ -1,7 +1,7 @@
 import type { NatsConnection, Subscription } from '@nats-io/transport-node'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isDisplayableCallsign, NO_CALLSIGN, SpotStore } from '../../src/ai/spot-store.js'
+import { isDisplayableCallsign, NO_CALLSIGN, SpotStore } from '../../src/spots/spot-store.js'
 
 function spot(callsign: string) {
   return { at: '2026-08-12T12:00:00.000Z', callsign, id: 'abc123', node: '1900' }

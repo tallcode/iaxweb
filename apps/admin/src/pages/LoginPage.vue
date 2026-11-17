@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ApiError, apiErrorMessage } from '../api/client'
+import { sessionApi } from '../api/session'
 
 const router = useRouter()
 const username = ref('')
@@ -12,20 +14,16 @@ async function login(): Promise<void> {
   submitting.value = true
   loginError.value = ''
   try {
-    const response = await fetch('/api/admin/login', {
-      body: JSON.stringify({ password: password.value, username: username.value }),
-      headers: { 'content-type': 'application/json' },
-      method: 'POST',
-    })
-    if (!response.ok) {
-      loginError.value = response.status === 429 ? '登录尝试过多，请稍后再试' : '用户名或密码错误'
-      return
-    }
+    await sessionApi.login({ username: username.value, password: password.value })
     password.value = ''
     await router.replace('/records')
   }
-  catch {
-    loginError.value = '无法连接服务器，请检查网络后重试'
+  catch (error) {
+    loginError.value = error instanceof ApiError && error.status === 429
+      ? '登录尝试过多，请稍后再试'
+      : error instanceof ApiError && error.status === 401
+        ? '用户名或密码错误'
+        : apiErrorMessage(error, '登录失败')
   }
   finally {
     submitting.value = false

@@ -1,3 +1,4 @@
+import { CALLSIGN_PATTERN } from '@iaxweb/contracts'
 import { CHINESE_EXPLANATION_WORDS, correctExplanationWord, pinyinSyllables } from './phonetic-corrector.js'
 
 export interface TranscriptTurn {
@@ -60,7 +61,7 @@ const DIGITS: Record<string, string> = {
   八: '8',
   九: '9',
 }
-const CALLSIGN = /^B[ADGHIY]\d[A-Z]{2,3}$/
+const CALLSIGN = CALLSIGN_PATTERN
 const CHINESE_SPELLINGS = CHINESE_EXPLANATION_WORDS
   .map(word => pinyinSyllables(word.spoken))
   .sort((left, right) => right.length - left.length)

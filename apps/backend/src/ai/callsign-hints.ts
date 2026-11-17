@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
+import { isValidCallsign } from '@iaxweb/contracts'
 import { correctExplanationText, correctExplanationWord } from './phonetic-corrector.js'
-import { isValidCallsign } from './spot-store.js'
 
 export interface CallsignHintCandidate {
   callsign: string

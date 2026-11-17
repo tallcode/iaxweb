@@ -1,6 +1,7 @@
-import type { AdminRole, AdminUsersPage } from '@iaxweb/contracts'
+import type { AdminUsersPage } from '@iaxweb/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import type { AdminAuth, UserUpdate } from '../admin/auth.js'
+import type { AdminAuth } from '../admin/auth.js'
+import { createUserSchema, updateUserSchema } from '@iaxweb/contracts'
 import { UserManagementError } from '../admin/auth.js'
 
 interface UserBody {
@@ -29,9 +30,10 @@ export function registerUserRoutes(app: FastifyInstance, auth: AdminAuth, requir
   })
 
   app.post<{ Body: UserBody }>('/users', { preHandler: requireAdministrator }, async (request, reply) => {
-    const { username, password, role = 'viewer' } = request.body ?? {}
-    if (typeof username !== 'string' || typeof password !== 'string' || !isRole(role))
-      return reply.code(400).send({ message: '请填写用户名、密码并选择有效角色' })
+    const parsed = createUserSchema.safeParse(request.body)
+    if (!parsed.success)
+      return reply.code(400).send({ message: '请填写有效的用户名、密码并选择角色' })
+    const { username, password, role } = parsed.data
     try {
       const user = await auth.createUser(username, password, role)
       return reply.header('cache-control', 'no-store').code(201).send(user)
@@ -42,25 +44,10 @@ export function registerUserRoutes(app: FastifyInstance, auth: AdminAuth, requir
   })
 
   app.patch<{ Body: UserBody, Params: UserParams }>('/users/:username', { preHandler: requireAdministrator }, async (request, reply) => {
-    const body = request.body ?? {}
-    const patch: UserUpdate = {}
-    if (body.username !== undefined) {
-      if (typeof body.username !== 'string')
-        return reply.code(400).send({ message: '用户名格式无效' })
-      patch.username = body.username
-    }
-    if (body.password !== undefined) {
-      if (typeof body.password !== 'string')
-        return reply.code(400).send({ message: '密码格式无效' })
-      patch.password = body.password
-    }
-    if (body.role !== undefined) {
-      if (!isRole(body.role))
-        return reply.code(400).send({ message: '角色无效' })
-      patch.role = body.role
-    }
-    if (Object.keys(patch).length === 0)
-      return reply.code(400).send({ message: '请提供需要修改的用户信息' })
+    const parsed = updateUserSchema.safeParse(request.body)
+    if (!parsed.success)
+      return reply.code(400).send({ message: '请提供有效的用户修改信息' })
+    const patch = parsed.data
     try {
       const user = await auth.updateUser(request.params.username, patch)
       return reply.header('cache-control', 'no-store').send(user)
@@ -79,10 +66,6 @@ export function registerUserRoutes(app: FastifyInstance, auth: AdminAuth, requir
       return userError(error, request, reply)
     }
   })
-}
-
-function isRole(value: unknown): value is AdminRole {
-  return value === 'admin' || value === 'editor' || value === 'viewer'
 }
 
 function userError(error: unknown, request: FastifyRequest, reply: FastifyReply): FastifyReply {

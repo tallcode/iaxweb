@@ -15,3 +15,13 @@
 body {
   margin: 0;
 }
+
+.records-main {
+  padding-top: calc(4rem + var(--records-toolbar-height, 4rem));
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 2px;
+}

@@ -84,8 +84,8 @@ function publicNodeStatus(status: NodeStatus, listeners?: number): PublicNodeSta
 }
 
 function publicConnections(connections: NodeStatusFields['CONNS']): Record<string, PublicConnectionStatus> {
-  return Object.fromEntries(Object.entries(connections)
-    .filter(([, connection]) => connection.CSTATE === 'ESTABLISHED')
+  return Object.fromEntries(Object.entries(isRecord(connections) ? connections : {})
+    .filter(([, connection]) => isRecord(connection) && connection.CSTATE === 'ESTABLISHED')
     .map(([node]) => [node, { CSTATE: 'ESTABLISHED' }]))
 }
 

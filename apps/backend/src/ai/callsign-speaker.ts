@@ -1,4 +1,5 @@
 import type { CallsignContext, CallsignEvidence } from './callsign-evidence.js'
+import { isValidCallsign } from '@iaxweb/contracts'
 
 const OWN_PATTERN = /这里是?|我是|我的(?:电台)?呼号(?:是|为)?|\bthis\s+is\b|\bmy\s+call(?:sign)?(?:\s+is)?\b|\bcall\s*是/gi
 const OTHER_PATTERN = /(?:[你您他她]|对方).{0,8}呼号|我(?:抄收|拷贝|抄到)|请问.{0,12}(?:呼号|你是|您是)/
@@ -85,7 +86,7 @@ export function checkCallsignDecision(result: Record<string, unknown>, context: 
     return {}
   const callsign = typeof result.callsign === 'string' ? result.callsign.trim().toUpperCase() : ''
   const evidence = context.candidates.find(candidate => candidate.id === result.evidence && candidate.callsign === callsign)
-  if (!/^B[ADGHIY]\d[A-Z]{2,3}$/.test(callsign) || !Number.isInteger(result.evidence) || !evidence)
+  if (!isValidCallsign(callsign) || !Number.isInteger(result.evidence) || !evidence)
     return { error: 'invalid-candidate-reference' }
   const error = quoteError(result.quote, evidence, context)
   return error ? { error } : { callsign, evidence }

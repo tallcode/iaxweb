@@ -1,5 +1,5 @@
 import type { PersistedRecord, RecordPage } from '@iaxweb/contracts'
-import type { SegmentRecord } from './segment-store.js'
+import type { RecognitionRecord } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -135,7 +135,7 @@ export class RecordRepository {
     this.database.close()
   }
 
-  insert(nodeId: string, record: SegmentRecord): void {
+  insert(nodeId: string, record: RecognitionRecord): void {
     if (record.recognition === undefined)
       throw new Error('Cannot persist a segment without recognition text')
 
@@ -154,7 +154,7 @@ export class RecordRepository {
     )
   }
 
-  updateAnalysis(record: SegmentRecord): boolean {
+  updateAnalysis(record: RecognitionRecord): boolean {
     const result = this.database.prepare(`
       UPDATE ai_segments
       SET revise = ?, callsign = ?, risk_level = ?, risk_reason = ?

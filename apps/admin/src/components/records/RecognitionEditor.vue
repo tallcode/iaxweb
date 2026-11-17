@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { MAX_RECOGNITION_LENGTH } from '@iaxweb/contracts'
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import TextDiff from './TextDiff.vue'
 
@@ -80,7 +81,7 @@ onBeforeUnmount(() => {
 
 <template>
   <form v-if="editing" class="space-y-2" @submit.prevent="submit">
-    <textarea ref="textarea" v-model="draft" rows="4" maxlength="20000" aria-label="编辑识别文本" :disabled="saving" class="block w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-2.5 py-2 text-sm leading-6 text-slate-100 outline-none focus:border-cyan-500 disabled:opacity-50" @keydown="keydown" />
+    <textarea ref="textarea" v-model="draft" rows="4" :maxlength="MAX_RECOGNITION_LENGTH" aria-label="编辑识别文本" :disabled="saving" class="block w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-2.5 py-2 text-sm leading-6 text-slate-100 outline-none focus:border-cyan-500 disabled:opacity-50" @keydown="keydown" />
     <div class="flex flex-wrap items-center gap-2 text-xs">
       <button type="submit" :disabled="saving" class="rounded-md border border-emerald-700 px-2.5 py-1 text-emerald-300 disabled:opacity-50">
         {{ saving ? '保存中…' : '保存' }}

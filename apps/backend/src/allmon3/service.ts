@@ -6,6 +6,7 @@ import { isRecord } from './definitions.js'
 import { SnapshotNotifier } from './snapshot-notifier.js'
 import { buildSnapshot, statusFingerprint } from './snapshot.js'
 import { TransmissionTracker } from './transmission.js'
+import { parseNodeStatus } from './validation.js'
 
 export class Allmon3StatusService {
   private readonly refreshIntervalMs: number
@@ -188,8 +189,13 @@ export class Allmon3StatusService {
       for (const node of this.nodesForPort(port)) {
         const value = message[node]
         if (isRecord(value)) {
+          const status = parseNodeStatus(value)
+          if (!status) {
+            console.warn(`Ignoring invalid Allmon3 node ${node} status from port ${port}`)
+            continue
+          }
           this.details.set(node, {
-            ...(value as NodeStatus),
+            ...status,
             ERROR: null,
             ONLINE: true,
           })

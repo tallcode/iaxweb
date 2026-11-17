@@ -1,4 +1,5 @@
 import type { PublicStatusSnapshot, SpotEvent } from '@iaxweb/contracts'
+import { publicStatusSnapshotSchema, spotEventSchema } from '@iaxweb/contracts'
 import { ReconnectingWebSocket } from './reconnecting-websocket'
 
 interface StatusStreamOptions {
@@ -81,16 +82,9 @@ export function markSnapshotOffline(snapshot: PublicStatusSnapshot): PublicStatu
 }
 
 function isSnapshot(value: unknown): value is PublicStatusSnapshot {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  return publicStatusSnapshotSchema.safeParse(value).success
 }
 
 function isSpot(value: unknown): value is SpotEvent {
-  if (typeof value !== 'object' || value === null)
-    return false
-  const spot = value as Record<string, unknown>
-  return spot.type === 'spot'
-    && typeof spot.at === 'string'
-    && typeof spot.callsign === 'string'
-    && typeof spot.id === 'string'
-    && typeof spot.node === 'string'
+  return spotEventSchema.safeParse(value).success && (value as SpotEvent).type === 'spot'
 }

@@ -90,3 +90,5 @@ function relativeTime(iso: string): string {
     </p>
   </aside>
 </template>
+
+<style src="./SpotPanel.css"></style>

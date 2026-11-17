@@ -7,8 +7,8 @@ import fastifyCookie from '@fastify/cookie'
 import Fastify from 'fastify'
 import { AdminAuth, hashPassword } from '../../src/admin/auth.js'
 import { LoginRateLimiter } from '../../src/admin/login-rate-limiter.js'
-import { RecordRepository } from '../../src/ai/record-repository.js'
 import { registerAdminRoutes } from '../../src/http/admin-routes.js'
+import { RecordRepository } from '../../src/records/record-repository.js'
 
 test('all administrators can manage users without exposing or editing system accounts', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-user-routes-'))

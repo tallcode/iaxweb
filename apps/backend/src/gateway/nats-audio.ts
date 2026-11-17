@@ -1,6 +1,8 @@
+import type { AudioState } from '@iaxweb/contracts'
 import type { ConnectionOptions, NatsConnection } from '@nats-io/transport-node'
 import type { AppConfig } from '../config.js'
 import { randomUUID } from 'node:crypto'
+import { audioStateSchema } from '@iaxweb/contracts'
 import { connect, RequestError, TimeoutError } from '@nats-io/transport-node'
 
 export function createConnectionOptions(config: AppConfig['nats']): ConnectionOptions {
@@ -13,12 +15,7 @@ export function createConnectionOptions(config: AppConfig['nats']): ConnectionOp
   }
 }
 
-export interface AudioStateEvent {
-  type: 'state'
-  online: boolean
-  speaking: boolean
-  listeners?: number
-}
+export type AudioStateEvent = AudioState
 
 interface NatsAudioServiceOptions {
   config: AppConfig['nats']
@@ -263,13 +260,7 @@ export class NatsAudioService {
 }
 
 export function isAudioStateEvent(value: unknown): value is AudioStateEvent {
-  if (typeof value !== 'object' || value === null)
-    return false
-  const event = value as Record<string, unknown>
-  return event.type === 'state'
-    && typeof event.online === 'boolean'
-    && typeof event.speaking === 'boolean'
-    && (event.listeners === undefined || (Number.isInteger(event.listeners) && (event.listeners as number) >= 0))
+  return audioStateSchema.safeParse(value).success
 }
 
 function errorMessage(error: unknown): string {

@@ -1,5 +1,6 @@
 import type { NodeConfig } from './types.js'
 import { isRecord } from './definitions.js'
+import { nodeConfigSchema, nodeIdsSchema, overridesSchema } from './validation.js'
 
 interface SuccessResponse<T> {
   SUCCESS: T
@@ -17,15 +18,15 @@ export class Allmon3ApiClient {
   }
 
   nodeIds(): Promise<number[]> {
-    return this.fetchSuccess<number[]>('master/node/listall')
+    return this.fetchSuccess<unknown>('master/node/listall').then(value => nodeIdsSchema.parse(value))
   }
 
   overrides(): Promise<Record<string, string>> {
-    return this.fetchSuccess<Record<string, string>>('master/ui/custom/overrides')
+    return this.fetchSuccess<unknown>('master/ui/custom/overrides').then(value => overridesSchema.parse(value))
   }
 
   nodeConfig(node: string): Promise<NodeConfig> {
-    return this.fetchSuccess<NodeConfig>(`master/node/${node}/config`)
+    return this.fetchSuccess<unknown>(`master/node/${node}/config`).then(value => nodeConfigSchema.parse(value) as NodeConfig)
   }
 
   statusWebSocketUrl(port: number): string {

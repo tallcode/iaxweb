@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { textDiff } from '../utils/text-diff'
+import { textDiff } from '../../utils/text-diff'
 
 const props = defineProps<{ original: string, manual: string | null }>()
 const parts = computed(() => props.manual === null ? [{ text: props.original, changed: false }] : textDiff(props.original, props.manual))

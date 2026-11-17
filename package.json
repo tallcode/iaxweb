@@ -3,11 +3,15 @@
   "type": "module",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.19.0",
   "license": "MIT",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "build": "npm run build --workspace @iaxweb/public && npm run build --workspace @iaxweb/admin",
     "dev": "concurrently -n backend,public,admin -c cyan,magenta,yellow \"npm run dev:backend\" \"npm run dev:public\" \"npm run dev:admin\"",

@@ -133,3 +133,5 @@ function scheduleMobileRelayout(): void {
     </p>
   </main>
 </template>
+
+<style src="./TopologyPage.css"></style>

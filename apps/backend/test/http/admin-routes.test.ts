@@ -8,9 +8,9 @@ import fastifyCookie from '@fastify/cookie'
 import Fastify from 'fastify'
 import { AdminAuth, hashPassword } from '../../src/admin/auth.js'
 import { LoginRateLimiter } from '../../src/admin/login-rate-limiter.js'
-import { RecordRepository } from '../../src/ai/record-repository.js'
-import { RecordingStore } from '../../src/ai/recording-store.js'
 import { registerAdminRoutes } from '../../src/http/admin-routes.js'
+import { RecordRepository } from '../../src/records/record-repository.js'
+import { RecordingStore } from '../../src/records/recording-store.js'
 
 test('admin routes use hardened Fastify cookies and tolerate malformed cookies', async (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-fastify-admin-'))
@@ -36,6 +36,15 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
     sessionMaxAgeSeconds: AdminAuth.sessionMaxAgeSeconds,
     spotStore: { publishReview() {} },
   })
+
+  for (let attempt = 0; attempt < 11; attempt++) {
+    const response = await app.inject({ method: 'POST', url: '/api/admin/login', payload: { username: `missing-${attempt}`, password: 'bad' } })
+    assert.equal(response.statusCode, 401, 'different usernames must not share an IP limit')
+  }
+  for (let attempt = 0; attempt < 11; attempt++) {
+    const response = await app.inject({ method: 'POST', url: '/api/admin/login', payload: { username: 'same-account', password: 'bad' } })
+    assert.equal(response.statusCode, attempt < 10 ? 401 : 429)
+  }
 
   const login = await app.inject({
     headers: { 'x-forwarded-proto': 'https' },
