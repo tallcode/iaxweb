@@ -259,30 +259,3 @@ export function levenshteinDistance(left: string, right: string): number {
 
   return matrix[left.length]![right.length]!
 }
-
-export function formatCallsignHints(groups: CallsignHintGroup[]): string | undefined {
-  const candidatesByCallsign = new Map<string, { candidate: CallsignHintCandidate, source: string }>()
-  for (const group of groups) {
-    const minimumDistance = Math.min(...group.candidates.map(candidate => candidate.distance))
-    // Exact library matches add no evidence beyond the original ASR text;
-    // retain only one-character corrections for the LLM to assess.
-    if (minimumDistance !== 1)
-      continue
-    for (const candidate of group.candidates.filter(candidate => candidate.distance === minimumDistance)) {
-      const previous = candidatesByCallsign.get(candidate.callsign)
-      if (!previous || candidate.distance < previous.candidate.distance
-        || (candidate.distance === previous.candidate.distance && candidate.score > previous.candidate.score)) {
-        candidatesByCallsign.set(candidate.callsign, { candidate, source: group.source })
-      }
-    }
-  }
-
-  const merged = [...candidatesByCallsign.values()]
-  if (merged.length === 0)
-    return undefined
-
-  const lines = merged
-    .sort((left, right) => left.candidate.callsign.localeCompare(right.candidate.callsign))
-    .map(item => `- 原文片段“${item.source}”：${item.candidate.callsign}（距离 ${item.candidate.distance}）`)
-  return `常见呼号相似度候选：\n${lines.join('\n')}`
-}

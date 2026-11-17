@@ -1,6 +1,7 @@
 import type { AdminRecordPage } from '@iaxweb/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
+import type { SpeakerReferenceService } from '../ai/speaker-references.js'
 import type { RecordRepository } from '../records/record-repository.js'
 import type { SpotStore } from '../spots/spot-store.js'
 import { readFile } from 'node:fs/promises'
@@ -16,6 +17,7 @@ type Guard = (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyRe
 interface RecordRoutesOptions {
   adminAuth: AdminAuth
   recordRepository: RecordRepository
+  speakerReferences?: Pick<SpeakerReferenceService, 'recognizeRecord'>
   recordingsDirectory: string
   spotStore: Pick<SpotStore, 'publishReview'>
   requireAuthentication: Guard
@@ -84,6 +86,14 @@ export async function registerRecordRoutes(app: FastifyInstance, options: Record
     if (!parsed.success)
       return reply.code(400).send('Invalid review status')
     return reply.header('cache-control', 'no-store').send(reviews.update(request.params.id, parsed.data, options.adminAuth.getUser(request.cookies.admin_token)))
+  })
+
+  app.post<{ Params: RecordParams }>('/records/:id/speaker-recognition', { preHandler: requireAdministrator }, async (request, reply) => {
+    if (!options.speakerReferences)
+      return reply.code(503).send({ message: '声纹测试暂不可用' })
+    reviews.find(request.params.id)
+    const result = await options.speakerReferences.recognizeRecord(request.params.id)
+    return reply.header('cache-control', 'no-store').send(result)
   })
 
   app.delete<{ Params: RecordParams }>('/records/:id', { preHandler: requireAdministrator }, async (request, reply) => {

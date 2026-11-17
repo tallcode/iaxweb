@@ -1,5 +1,5 @@
-import type { AdminRecord, PersistedRecord } from '@iaxweb/contracts'
-import type { Ref } from 'vue'
+import type { AdminRecord, PersistedRecord, SpeakerRecognition } from '@iaxweb/contracts'
+import type { DeepReadonly, Ref } from 'vue'
 
 export type ReadonlyRef<T> = Readonly<Ref<T>>
 export type CallsignRole = 'callee' | 'caller'
@@ -91,6 +91,18 @@ export interface RecordDeletionController extends RecordDeletionContext {
   request: (record: PersistedRecord) => boolean
 }
 
+export interface SpeakerRecognitionContext {
+  state: {
+    record: ReadonlyRef<PersistedRecord | null>
+    loading: ReadonlyRef<boolean>
+    result: ReadonlyRef<DeepReadonly<SpeakerRecognition> | null>
+    error: ReadonlyRef<string>
+  }
+  request: (record: PersistedRecord) => void
+  retry: () => void
+  close: () => void
+}
+
 // Feature views can operate on records, but cannot access routing, pagination,
 // logout, raw HTTP requests, or writable state owned by another controller.
 export interface RecordInteractionsContext {
@@ -110,4 +122,5 @@ export interface RecordInteractionsContext {
   setReviewed: RecordEditingController['setReviewed']
   togglePlayback: RecordingPlayback['togglePlayback']
   requestDeletion: RecordDeletionController['request']
+  requestSpeakerRecognition: SpeakerRecognitionContext['request']
 }

@@ -26,8 +26,8 @@ test('loads AI defaults', () => {
   assert.equal(config.llm.timeoutMs, 30_000)
   assert.equal(config.llm.thinkingBudget, undefined)
   assert.equal(config.llm.publishSpot, true)
-  assert.equal(config.callsignHintsEnabled, false)
   assert.ok(config.callsignsFile.endsWith('config/callsigns.txt'))
+  assert.ok(config.speakerModelFile.endsWith('config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx'))
   assert.ok(config.llm.promptFile.endsWith('config/prompt.txt'))
   assert.ok(config.llm.schemaFile.endsWith('config/schema.json'))
   assert.ok(config.hotwordsFile.endsWith('config/hotwords.json'))
@@ -161,19 +161,6 @@ test('can disable SQLite and recording persistence', () => {
 test('can disable spot publishing', () => {
   const config = loadAiConfig({ AI_LLM_PUBLISH_SPOT: 'false' })
   assert.equal(config.llm.publishSpot, false)
-})
-
-test('can enable common callsign hints and override the list path', () => {
-  const config = loadAiConfig({
-    AI_CALLSIGN_HINTS_ENABLED: 'true',
-    AI_CALLSIGNS_FILE: '/custom/callsigns.txt',
-  })
-  assert.equal(config.callsignHintsEnabled, true)
-  assert.equal(config.callsignsFile, '/custom/callsigns.txt')
-})
-
-test('rejects an invalid AI_CALLSIGN_HINTS_ENABLED', () => {
-  assert.throws(() => loadAiConfig({ AI_CALLSIGN_HINTS_ENABLED: 'yes' }), /true.*false/)
 })
 
 test('rejects an invalid AI_LLM_PUBLISH_SPOT', () => {

@@ -1,3 +1,8 @@
+export type Voiceprint = { version: string, reason?: string | undefined } & (
+  | { status: 'ready', embedding: Float32Array }
+  | { status: 'pending' | 'unavailable' | 'failed' }
+)
+
 // Persistence accepts recognition data without depending on audio buffers or AI runtime state.
 export interface RecognitionRecord {
   id: string

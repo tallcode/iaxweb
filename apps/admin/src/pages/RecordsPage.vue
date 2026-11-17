@@ -7,6 +7,7 @@ import RecordCardList from '../components/records/RecordCardList.vue'
 import RecordFilters from '../components/records/RecordFilters.vue'
 import RecordPagination from '../components/records/RecordPagination.vue'
 import RecordTable from '../components/records/RecordTable.vue'
+import SpeakerRecognitionDialog from '../components/records/SpeakerRecognitionDialog.vue'
 import { provideRecords } from '../composables/records/use-records-context'
 import { useRecordsPage } from '../composables/records/use-records-page'
 
@@ -32,5 +33,6 @@ const filters = ref<InstanceType<typeof RecordFilters>>()
       <RecordPagination />
     </main>
     <DeleteRecordDialog @focus-search="filters?.focusSearch()" />
+    <SpeakerRecognitionDialog />
   </div>
 </template>

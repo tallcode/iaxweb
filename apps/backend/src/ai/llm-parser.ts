@@ -2,10 +2,10 @@ import type { CallsignContext, TranscriptTurn } from './callsign-evidence.js'
 import type { LlmClientOptions } from './llm-client.js'
 import { logTimestamp } from './asr-context-files.js'
 import { buildCallsignContext } from './callsign-evidence.js'
-import { CallsignHintMatcher, formatCallsignHints } from './callsign-hints.js'
 import { checkCallsignDecision, supportedSelfEvidence } from './callsign-speaker.js'
 import { LlmClient } from './llm-client.js'
 import { LlmConfigFiles } from './llm-config-files.js'
+import { callsignPayload } from './llm-payload.js'
 import { shouldIncludeCallsignCorrection } from './phonetic-corrector.js'
 import { validateAgainstSchema } from './schema-validator.js'
 
@@ -24,8 +24,6 @@ export interface ParsedTranscript {
 }
 
 export interface LlmParserOptions extends LlmClientOptions {
-  callsignHintsEnabled?: boolean
-  callsignsFile?: string
   model: string
   promptFile: string
   schemaFile: string
@@ -48,7 +46,6 @@ export class LlmParser {
   private readonly enableThinking: boolean | undefined
   private readonly thinkingBudget: number | undefined
   private readonly isDeepSeek: boolean
-  private readonly callsignHints: CallsignHintMatcher | undefined
   private readonly client: LlmClient
   private readonly files: LlmConfigFiles
 
@@ -61,9 +58,6 @@ export class LlmParser {
     this.enableThinking = options.enableThinking
     this.thinkingBudget = options.thinkingBudget
     this.isDeepSeek = /(?:^|\.)deepseek\.com$/i.test(new URL(options.baseUrl).hostname)
-    this.callsignHints = options.callsignHintsEnabled && options.callsignsFile
-      ? new CallsignHintMatcher(options.callsignsFile)
-      : undefined
   }
 
   async parse(
@@ -82,19 +76,15 @@ export class LlmParser {
     // continuation or history-supported self-introduction to be considered.
     if (context.candidates.length === 0 && !hasAnalysisFields(schema.object))
       return {}
-    const callsignHints = formatCallsignHints(this.callsignHints?.match(corrected) ?? [])
     const payload = {
-      history: context.history,
-      current: context.current,
-      candidates: context.candidates,
+      ...callsignPayload(context),
       ...(shouldIncludeCallsignCorrection(transcript, corrected) ? { corrected: { text: corrected, purpose: '音素纠错辅助文本，仅供判断，不是独立证据' } } : {}),
-      ...(callsignHints ? { similarityHints: callsignHints } : {}),
     }
     const body = (content: unknown, recheck = false) => ({
       ...(this.thinkingParams()),
       ...(this.thinkingBudget !== undefined && !this.isDeepSeek ? { thinking_budget: this.thinkingBudget } : {}),
       messages: [
-        { content: `${prompt}\n\n${CALLSIGN_OUTPUT_POLICY}${recheck ? '\n这是一次引用校验失败后的单次复核。只从独立核验过当前自报引用的候选中选择，suggestedQuote可直接核对；不确定仍然拒绝。' : ''}\n\n严格按以下 JSON Schema 输出：\n${schema.raw}`, role: 'system' },
+        { content: `${prompt}\n\n${CALLSIGN_OUTPUT_POLICY}${recheck ? '\n这是一次引用校验失败后的单次复核。只从独立核验过当前自报引用的候选中选择，suggestedQuote可直接核对；不确定仍然拒绝。' : ''}\n\n严格按以下 JSON Schema 输出：\n${JSON.stringify(schema.object)}`, role: 'system' },
         { content: JSON.stringify(content), role: 'user' },
       ],
       model: this.options.model,
@@ -129,7 +119,7 @@ export class LlmParser {
   ): Promise<ParsedTranscript> {
     let parsed: Record<string, unknown> | undefined
     try {
-      parsed = normalizeCallsign(parseJsonObject(await this.client.requestOnce(body({ history: context.history, current: context.current, candidates }, true))))
+      parsed = normalizeCallsign(parseJsonObject(await this.client.requestOnce(body(callsignPayload(context, candidates), true))))
     }
     catch (error) {
       console.warn(`${logTimestamp()} [AI]: 呼号单次复核失败: ${errorMessage(error)}`)

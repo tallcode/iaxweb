@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { CallsignHintMatcher, extractCallsignFragments, formatCallsignHints, levenshteinDistance } from '../../src/ai/callsign-hints.js'
+import { CallsignHintMatcher, extractCallsignFragments, levenshteinDistance } from '../../src/ai/callsign-hints.js'
 
 test('computes ordered Levenshtein distance without discounted transpositions', () => {
   assert.equal(levenshteinDistance('BG5ABT', 'BG5ABT'), 0)
@@ -119,11 +119,6 @@ test('keeps all nearby common callsigns per source fragment', (t) => {
     assert.equal(groups[0]?.candidates[0]?.score, 1)
     assert.ok(groups.some(group => group.candidates.length === 4))
     assert.ok(groups.flatMap(group => group.candidates).every(candidate => candidate.callsign !== 'INVALID'))
-
-    const formatted = formatCallsignHints(groups)
-    assert.ok(formatted?.includes('原文片段“BG5FVT”'))
-    assert.ok(formatted?.includes('BG5FBT（距离 1）'))
-    assert.ok(!formatted?.includes('BG5FBT（距离 0）'))
   }
   finally {
     rmSync(dir, { force: true, recursive: true })
@@ -173,64 +168,4 @@ test('returns no hints when the transcript has no nearby callsign fragment', () 
   finally {
     rmSync(dir, { force: true, recursive: true })
   }
-})
-
-test('formats each source fragment at its own minimum correction distance', () => {
-  const hints = formatCallsignHints([
-    {
-      candidates: [
-        { callsign: 'BG5AAA', distance: 2, score: 0.667 },
-        { callsign: 'BG5AAB', distance: 1, score: 0.833 },
-        { callsign: 'BG5AAC', distance: 1, score: 0.833 },
-      ],
-      source: 'BG5AAD',
-    },
-    {
-      candidates: [{ callsign: 'BG5AAB', distance: 1, score: 0.833 }],
-      source: '重复片段',
-    },
-  ])
-
-  assert.equal(hints, [
-    '常见呼号相似度候选：',
-    '- 原文片段“BG5AAD”：BG5AAB（距离 1）',
-    '- 原文片段“BG5AAD”：BG5AAC（距离 1）',
-  ].join('\n'))
-})
-
-test('does not give exact library matches to the LLM', () => {
-  const hints = formatCallsignHints([
-    {
-      candidates: [
-        { callsign: 'BG5AAA', distance: 0, score: 1 },
-        { callsign: 'BG5AAB', distance: 1, score: 0.833 },
-      ],
-      source: 'BG5AAA',
-    },
-    {
-      candidates: [{ callsign: 'BG5BBB', distance: 0, score: 1 }],
-      source: 'BG5BBB',
-    },
-  ])
-
-  assert.equal(hints, undefined)
-})
-
-test('does not let an exact callee hide a one-character caller correction', () => {
-  const hints = formatCallsignHints([
-    { candidates: [{ callsign: 'BG5ATV', distance: 0, score: 1 }], source: 'BG5ATV' },
-    { candidates: [{ callsign: 'BG5FBT', distance: 1, score: 0.833 }], source: 'BG5FVT' },
-  ])
-
-  assert.equal(hints, [
-    '常见呼号相似度候选：',
-    '- 原文片段“BG5FVT”：BG5FBT（距离 1）',
-  ].join('\n'))
-})
-
-test('does not give the LLM candidates when the minimum distance is greater than one', () => {
-  assert.equal(formatCallsignHints([{
-    candidates: [{ callsign: 'BG5AAA', distance: 2, score: 0.667 }],
-    source: 'BG35AAX',
-  }]), undefined)
 })

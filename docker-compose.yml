@@ -14,5 +14,6 @@ services:
       - path: .env
         required: false
     volumes:
+      # Includes config/models; weights are maintained on the host, not in the image.
       - ./config:/app/config:ro
       - ./data:/app/data

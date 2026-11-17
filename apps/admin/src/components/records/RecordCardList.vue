@@ -4,9 +4,10 @@ import { formatRecordTime as formatTime } from '../../utils/records-format'
 import RecognitionEditor from './RecognitionEditor.vue'
 import RecordCallsign from './RecordCallsign.vue'
 import ReviewStar from './ReviewStar.vue'
+import SpeakerRecognitionButton from './SpeakerRecognitionButton.vue'
 
-const { records } = useRecordsQueryContext().state
-const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecord, isSaving, togglePlayback, acquireEditor, finishEditing, isEditingCallsign, saveRecognition, saveCallsign, setReviewed, playingRecordId } = useRecordInteractions()
+const { records, isLoading } = useRecordsQueryContext().state
+const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecord, isSaving, togglePlayback, requestSpeakerRecognition, acquireEditor, finishEditing, isEditingCallsign, saveRecognition, saveCallsign, setReviewed, playingRecordId } = useRecordInteractions()
 </script>
 
 <template>
@@ -17,10 +18,11 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
           <p class="text-sm font-medium text-slate-200">
             {{ formatTime(record.capturedAt) }}<span class="ml-3 text-xs font-normal text-slate-500">{{ (record.durationMs / 1_000).toFixed(1) }}s</span>
           </p>
-        </div><div class="flex shrink-0 items-center gap-3">
+        </div><div class="flex shrink-0 items-center gap-1">
           <button v-if="record.hasAudio" class="shrink-0 rounded-md border border-slate-700 px-3 py-1.5 text-xs transition hover:bg-slate-700" @click="togglePlayback(record.id)">
             {{ playingRecordId === record.id ? '停止' : '播放' }}
           </button><span v-else class="shrink-0 text-xs text-slate-600">已过期</span>
+          <SpeakerRecognitionButton v-if="isAdministrator" :disabled="isLoading || isSaving(record.id) || isMutating || hasActiveEditor" @recognize="requestSpeakerRecognition(record)" />
           <ReviewStar v-if="isAdministrator" :reviewed="record.reviewed" :disabled="isSaving(record.id) || isMutating || hasActiveEditor" @toggle="setReviewed(record, !record.reviewed)" />
         </div>
       </div>

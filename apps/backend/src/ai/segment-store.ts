@@ -1,5 +1,4 @@
 import type { TranscriptTurn } from './callsign-evidence.js'
-import { shouldIncludeCallsignCorrection } from './phonetic-corrector.js'
 
 // Unified per-segment record accumulating every pipeline stage:
 // segmentation fills the audio fields, ASR fills recognition and corrected,
@@ -32,7 +31,7 @@ export const ASR_CONTEXT_BUDGET = 380
 export const LLM_HISTORY_BUDGET = 2_000
 
 // Rolling per-node window of segment records, and the single source for both
-// the ASR context (raw recognitions) and the LLM history (revised messages).
+// the ASR context and structured LLM history, both from raw recognitions.
 export class SegmentStore {
   private entries: Array<{ at: number, record: SegmentRecord }> = []
 
@@ -62,36 +61,18 @@ export class SegmentStore {
     return joinWithinBudget(texts, budget)
   }
 
-  // Revised messages (falling back to the raw recognition) for the LLM
-  // history block. Changed Bravo/Boston corrections preserve both ASR
-  // evidence and the auxiliary text, just as the current turn does. The
-  // segment being parsed is excluded so its text appears only as current.
-  llmHistory(budget: number = LLM_HISTORY_BUDGET, excludeId?: string): string | undefined {
-    const lines: string[] = []
-    for (const record of this.recent()) {
-      if (excludeId !== undefined && record.id === excludeId)
-        continue
-      const text = record.recognition !== undefined
-        && record.corrected !== undefined
-        && shouldIncludeCallsignCorrection(record.recognition, record.corrected)
-        ? `${record.recognition}\n音素纠错辅助文本（仅供判断）：\n${record.corrected}`
-        : record.revise ?? record.recognition
-      if (text === undefined)
-        continue
-      const risk = record.risk
-      // Do not feed model-generated callsign labels back as evidence. The raw
-      // or revised transcript may still contain genuine phonetic spelling.
-      lines.push(`${risk && risk.level > 1 ? `[风控${risk.level}] ` : ''}${text}`)
-    }
-    return joinWithinBudget(lines, budget)
-  }
-
   // Raw, independently identified turns are the only source of spelling
   // evidence. Drop whole oldest turns; never manufacture a truncated quote.
   llmTurns(budget: number = LLM_HISTORY_BUDGET, excludeId?: string): TranscriptTurn[] {
-    const turns = this.recent()
+    const recent = this.recent()
+    const turns = recent
       .filter(record => record.id !== excludeId && record.recognition !== undefined)
-      .map(record => ({ id: record.id, text: record.recognition!, transmissionId: record.transmissionId, partIndex: record.partIndex }))
+      .map(record => ({
+        id: record.id,
+        text: record.recognition!,
+        transmissionId: record.transmissionId,
+        partIndex: record.partIndex,
+      }))
     let size = turns.reduce((length, turn) => length + turn.text.length, 0) + Math.max(0, turns.length - 1)
     while (turns.length > 0 && size > budget) {
       const oldest = turns.shift()!

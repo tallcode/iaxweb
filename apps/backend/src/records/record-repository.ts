@@ -1,8 +1,13 @@
-import type { PersistedRecord, RecordPage } from '@iaxweb/contracts'
-import type { RecognitionRecord } from './types.js'
+import type { PersistedRecord, RecordPage, SpeakerMatch } from '@iaxweb/contracts'
+import type { RecognitionRecord, Voiceprint } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import * as sqliteVec from 'sqlite-vec'
+import { SPEAKER_VERSION } from '../ai/speaker-model.mjs'
+import { encodeVoiceprint } from './voiceprint.js'
+
+export const SPEAKER_REFERENCE_THRESHOLD = 0.80
 
 export interface StoredSpot {
   at: string
@@ -61,9 +66,27 @@ const SCHEMA = `
     COALESCE(manual_callsign, callsign) AS effective_callsign,
     COALESCE(manual_risk_level, risk_level) AS effective_risk_level
   FROM ai_segments;
+
+  CREATE TABLE IF NOT EXISTS ai_segment_embeddings (
+    record_id TEXT PRIMARY KEY REFERENCES ai_segments(id) ON DELETE CASCADE,
+    version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'unavailable', 'failed')),
+    embedding BLOB,
+    reason TEXT,
+    CHECK (
+      (status = 'ready' AND embedding IS NOT NULL AND length(embedding) = 1024)
+      OR (status != 'ready' AND embedding IS NULL)
+    )
+  );
 `
 
 const INDEXES = `
+  -- Versioned ready-vector filtering for full-history reference search.
+  -- Only the LLM context expires; persisted embeddings have no time window.
+  CREATE INDEX IF NOT EXISTS ai_segment_embeddings_ready_version
+    ON ai_segment_embeddings (version, record_id) WHERE status = 'ready';
+  CREATE INDEX IF NOT EXISTS ai_segment_embeddings_pending
+    ON ai_segment_embeddings (record_id) WHERE status = 'pending';
   CREATE INDEX IF NOT EXISTS ai_segments_capture_order
     ON ai_segments (captured_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS ai_segments_effective_callsign_order
@@ -105,12 +128,17 @@ const SELECT_EFFECTIVE = `
 // evidence; manual fields override them only through the effective view.
 export class RecordRepository {
   private readonly database: DatabaseSync
+  private vectorExtensionLoaded = false
 
   constructor(databaseFile: string) {
     if (databaseFile !== ':memory:')
       mkdirSync(dirname(databaseFile), { recursive: true })
-    this.database = new DatabaseSync(databaseFile, { timeout: 5_000 })
+    this.database = new DatabaseSync(databaseFile, { timeout: 5_000, allowExtension: true })
+    // Optional experiment: loading its native extension must not gate startup
+    // or the existing recognition flow. Enable it only for a manual search.
+    this.database.enableLoadExtension(false)
     this.database.exec('PRAGMA journal_mode = WAL')
+    this.database.exec('PRAGMA foreign_keys = ON')
     // Existing databases are upgraded in place; AI evidence is never rewritten.
     this.database.exec('BEGIN IMMEDIATE')
     try {
@@ -120,8 +148,13 @@ export class RecordRepository {
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN manual_recognition TEXT')
       if (!columns.has('reviewed'))
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0, 1))')
+      const embeddingColumns = new Set(this.database.prepare('PRAGMA table_info(ai_segment_embeddings)').all().map(row => row.name))
+      if (!embeddingColumns.has('reason'))
+        this.database.exec('ALTER TABLE ai_segment_embeddings ADD COLUMN reason TEXT')
       // Build after adding legacy columns used by the partial indexes.
       this.database.exec(INDEXES)
+      // Pending annotations are durable jobs and resume after restart. No new
+      // unreviewed recording writes an embedding row.
       this.database.exec('COMMIT')
     }
     catch (error) {
@@ -152,6 +185,86 @@ export class RecordRepository {
       record.recognition,
       record.corrected ?? null,
     )
+  }
+
+  updateVoiceprint(id: string, voiceprint: Voiceprint): boolean {
+    return Number(this.database.prepare(`
+      UPDATE ai_segment_embeddings SET status = ?, embedding = ?, reason = ?
+      WHERE record_id = ? AND version = ? AND status = 'pending'
+        AND EXISTS (SELECT 1 FROM ai_segments WHERE id = ? AND reviewed = 1)
+    `).run(voiceprint.status, encodeVoiceprint(voiceprint), voiceprint.reason ?? null, id, voiceprint.version, id).changes) === 1
+  }
+
+  pendingReviewedVoiceprints(limit: number = 10): Array<{ id: string, timestamp: string, voicedMs: number }> {
+    const rows = this.database.prepare(`
+      SELECT s.id, s.captured_at, s.voiced_ms FROM ai_segments s
+      LEFT JOIN ai_segment_embeddings e ON e.record_id = s.id
+      WHERE s.reviewed = 1 AND (e.record_id IS NULL OR e.version != ? OR e.status = 'pending')
+      ORDER BY s.captured_at, s.id LIMIT ?
+    `).all(SPEAKER_VERSION, limit)
+    return rows.map(row => ({ id: requiredString(row.id), timestamp: requiredString(row.captured_at), voicedMs: requiredNumber(row.voiced_ms) }))
+  }
+
+  prepareReviewedVoiceprint(id: string): boolean {
+    return Number(this.database.prepare(`
+      INSERT INTO ai_segment_embeddings (record_id, version, status, embedding)
+      SELECT id, ?, 'pending', NULL FROM ai_segments WHERE id = ? AND reviewed = 1
+      ON CONFLICT(record_id) DO UPDATE SET version = excluded.version, status = 'pending', embedding = NULL, reason = NULL
+      WHERE ai_segment_embeddings.version != excluded.version OR ai_segment_embeddings.status = 'pending'
+    `).run(SPEAKER_VERSION, id).changes) === 1
+  }
+
+  searchSpeakerMatches(voiceprint: Voiceprint, excludeId: string): { referenceCount: number, matches: SpeakerMatch[] } {
+    if (voiceprint.status !== 'ready' || voiceprint.version !== SPEAKER_VERSION)
+      return { referenceCount: 0, matches: [] }
+    this.loadVectorExtension()
+    // Exact radius search over the reviewed corpus, not a global top-K followed
+    // by filtering. Unreviewed neighbors cannot crowd out eligible references.
+    // Group only after scoring so multiple records for one call remain one hint.
+    const rows = this.database.prepare(`
+      WITH reviewed AS (
+        SELECT UPPER(COALESCE(s.manual_callsign, s.callsign)) AS callsign, e.embedding
+        FROM ai_segments s JOIN ai_segment_embeddings e ON e.record_id = s.id
+        WHERE s.reviewed = 1 AND e.status = 'ready' AND e.version = ? AND s.id != ?
+          AND COALESCE(s.manual_callsign, s.callsign) IS NOT NULL
+      ), eligible AS MATERIALIZED (
+        SELECT * FROM reviewed
+        WHERE callsign GLOB 'B[ADGHIY][0-9][A-Z][A-Z]' OR callsign GLOB 'B[ADGHIY][0-9][A-Z][A-Z][A-Z]'
+      ), scored AS MATERIALIZED (
+        SELECT callsign, MIN(1.0, MAX(-1.0, 1.0 - vec_distance_cosine(embedding, ?))) AS similarity
+        FROM eligible
+      ), matches AS (
+        SELECT callsign, COUNT(*) AS count, MIN(similarity) AS min_similarity,
+          MAX(similarity) AS max_similarity, AVG(similarity) AS average_similarity
+        FROM scored WHERE similarity > ? GROUP BY callsign
+      )
+      SELECT matches.*, (SELECT COUNT(*) FROM eligible) AS reference_count
+      FROM (SELECT 1) LEFT JOIN matches ON 1 = 1
+      ORDER BY count DESC, max_similarity DESC, average_similarity DESC, callsign
+    `).all(SPEAKER_VERSION, excludeId, encodeVoiceprint(voiceprint), SPEAKER_REFERENCE_THRESHOLD)
+    return {
+      referenceCount: requiredNumber(rows[0]!.reference_count),
+      matches: rows.flatMap(row => row.callsign === null
+        ? []
+        : [{
+            callsign: requiredString(row.callsign),
+            count: requiredNumber(row.count),
+            minSimilarity: requiredNumber(row.min_similarity),
+            maxSimilarity: requiredNumber(row.max_similarity),
+            averageSimilarity: requiredNumber(row.average_similarity),
+          }]),
+    }
+  }
+
+  private loadVectorExtension(): void {
+    if (this.vectorExtensionLoaded)
+      return
+    this.database.enableLoadExtension(true)
+    try {
+      sqliteVec.load(this.database)
+      this.vectorExtensionLoaded = true
+    }
+    finally { this.database.enableLoadExtension(false) }
   }
 
   updateAnalysis(record: RecognitionRecord): boolean {
@@ -199,10 +312,26 @@ export class RecordRepository {
     if (assignments.length === 0)
       throw new Error('Manual review patch must contain at least one field')
 
-    const result = this.database.prepare(`
-      UPDATE ai_segments SET ${assignments.join(', ')} WHERE id = ? ${allowReviewed ? '' : 'AND reviewed = 0'}
-    `).run(...values, id)
-    return Number(result.changes) === 1
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const result = this.database.prepare(`
+        UPDATE ai_segments SET ${assignments.join(', ')} WHERE id = ? ${allowReviewed ? '' : 'AND reviewed = 0'}
+      `).run(...values, id)
+      if (Number(result.changes) === 1 && patch.reviewed === true) {
+        this.database.prepare(`
+          INSERT INTO ai_segment_embeddings (record_id, version, status, embedding)
+          SELECT id, ?, 'pending', NULL FROM ai_segments WHERE id = ? AND reviewed = 1
+          ON CONFLICT(record_id) DO UPDATE SET version = excluded.version, status = 'pending', embedding = NULL, reason = NULL
+          WHERE ai_segment_embeddings.version != excluded.version OR ai_segment_embeddings.status != 'ready'
+        `).run(SPEAKER_VERSION, id)
+      }
+      this.database.exec('COMMIT')
+      return Number(result.changes) === 1
+    }
+    catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
   }
 
   find(id: string): PersistedRecord | undefined {

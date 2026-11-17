@@ -9,13 +9,11 @@ const fixtureDir = mkdtempSync(join(tmpdir(), 'iaxweb-llm-'))
 const fixturePrompt = join(fixtureDir, 'prompt.txt')
 const fixtureSchema = join(fixtureDir, 'schema.json')
 const fixtureSimpleSchema = join(fixtureDir, 'simple.json')
-const fixtureCallsigns = join(fixtureDir, 'callsigns.txt')
 const fullSchema = JSON.parse(readFileSync(new URL('../../../../examples/ai/full/schema.json', import.meta.url), 'utf8'))
 const simpleSchema = JSON.parse(readFileSync(new URL('../../../../examples/ai/simple/schema.json', import.meta.url), 'utf8'))
 writeFileSync(fixturePrompt, '测试提示词，输出JSON')
 writeFileSync(fixtureSchema, JSON.stringify(fullSchema))
 writeFileSync(fixtureSimpleSchema, JSON.stringify(simpleSchema))
-writeFileSync(fixtureCallsigns, 'BG5FBT\nBG5FAT\n')
 after(() => rmSync(fixtureDir, { force: true, recursive: true }))
 
 const TRANSCRIPT = '这里是 Bravo Delta Five X-ray X-ray X-ray'
@@ -32,7 +30,7 @@ interface CapturedCall {
 function makeParser(
   fetchImpl: typeof fetch,
   files: { promptFile?: string, schemaFile?: string } = {},
-  extra: { baseUrl?: string, callsignHintsEnabled?: boolean, callsignsFile?: string, enableThinking?: boolean, thinkingBudget?: number } = {},
+  extra: { baseUrl?: string, enableThinking?: boolean, thinkingBudget?: number } = {},
 ): { calls: CapturedCall[], parser: LlmParser } {
   const calls: CapturedCall[] = []
   const parser = new LlmParser({
@@ -61,6 +59,8 @@ test('accepts only a current speaker with matching explanation evidence', async 
   const payload = JSON.parse(calls[0]!.body.messages[1]!.content)
   assert.equal(payload.current.text, TRANSCRIPT)
   assert.equal(payload.candidates[0].callsign, 'BD5XXX')
+  assert.equal(payload.candidates[0].start, undefined)
+  assert.equal(payload.candidates[0].end, undefined)
 })
 
 test('normalizes callsign values without accepting the old Callsign key', async () => {
@@ -123,18 +123,23 @@ test('allows only adjacent chunks of the same transmission to complete spelling'
   // Use the full schema response for analysis, so configure full mode below.
   const full = makeParser(() => Promise.resolve(completion(response)))
   assert.equal((await full.parser.parse(current, history, current, { id: 'second', transmissionId: 'tx', partIndex: 1 }))?.callsign, 'BD5XXX')
+  const payload = JSON.parse(full.calls[0]!.body.messages[1]!.content)
+  assert.deepEqual(payload.current, { id: 'second', text: current })
+  assert.deepEqual(payload.history, [{ id: 'first', text: history[0]!.text }])
+  assert.equal(payload.candidates[0].kind, 'verified-continuation')
+  assert.deepEqual(payload.candidates[0].segmentIds, ['first', 'second'])
   assert.deepEqual(await yes.parser.parse(current, history, current, { id: 'second', transmissionId: 'different', partIndex: 1 }), {})
   assert.equal(yes.calls.length, 0)
 })
 
-test('similarity hints cannot override actual explanation evidence', async () => {
+test('does not send similarity hints or accept a callsign outside the evidence', async () => {
   const text = '这里是 Bravo Golf Five Foxtrot Victor Tango'
-  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ callsign: 'BG5FBT', quote: text }))), {}, { callsignHintsEnabled: true, callsignsFile: fixtureCallsigns })
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(okResult({ callsign: 'BG5FBT', quote: text }))))
   assert.equal((await parser.parse(text))?.callsign, undefined)
   const payload = JSON.parse(calls[0]!.body.messages[1]!.content)
   assert.equal(payload.candidates[0].callsign, 'BG5FVT')
-  assert.ok(payload.similarityHints.includes('BG5FBT'))
-  assert.ok(calls[0]!.body.messages[0]!.content.includes('数据库相似提示不能新增证据候选'))
+  assert.equal(payload.similarityHints, undefined)
+  assert.equal(payload.referenceCallsigns, undefined)
 })
 
 test('preserves raw current evidence beside an optional corrected transcript', async () => {

@@ -5,7 +5,116 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
+import { SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
 import { RecordRepository } from '../../src/records/record-repository.js'
+
+test('only reviewed records receive durable voiceprint jobs; cancellation keeps vectors', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-reviewed-embedding-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const filename = join(directory, 'ai.sqlite')
+  const embedding = new Float32Array(256)
+  embedding[0] = 1
+  const first = new RecordRepository(filename)
+  first.insert('1900', record())
+  const inspect = new DatabaseSync(filename)
+  assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM ai_segment_embeddings').get()?.n, 0)
+  assert.equal(first.updateVoiceprint('segment-1', { status: 'ready', version: SPEAKER_VERSION, embedding }), false)
+  first.updateManualReview('segment-1', { reviewed: true, callsign: 'BG5ABC' })
+  assert.equal(first.pendingReviewedVoiceprints().length, 1)
+  first.close()
+  const reopened = new RecordRepository(filename)
+  assert.equal(reopened.pendingReviewedVoiceprints().length, 1)
+  assert.equal(reopened.prepareReviewedVoiceprint('segment-1'), true)
+  assert.equal(reopened.updateVoiceprint('segment-1', { status: 'ready', version: SPEAKER_VERSION, embedding }), true)
+  assert.equal(reopened.searchSpeakerMatches({ status: 'ready', version: SPEAKER_VERSION, embedding }, 'query').matches[0]?.callsign, 'BG5ABC')
+  reopened.updateManualReview('segment-1', { reviewed: false })
+  assert.deepEqual(reopened.searchSpeakerMatches({ status: 'ready', version: SPEAKER_VERSION, embedding }, 'query'), { referenceCount: 0, matches: [] })
+  assert.equal(inspect.prepare('SELECT length(embedding) AS n FROM ai_segment_embeddings').get()?.n, 1024)
+  assert.equal(reopened.updateVoiceprint('segment-1', { status: 'failed', version: SPEAKER_VERSION }), false)
+  reopened.updateManualReview('segment-1', { reviewed: true })
+  assert.deepEqual(reopened.pendingReviewedVoiceprints(), [])
+  reopened.delete('segment-1', () => {})
+  assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM ai_segment_embeddings').get()?.n, 0)
+  inspect.close()
+  reopened.close()
+})
+
+test('quality reasons persist; cancelled or deleted jobs cannot save a vector', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-reviewed-quality-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const filename = join(directory, 'ai.sqlite')
+  const repository = new RecordRepository(filename)
+  repository.insert('1900', record())
+  repository.updateManualReview('segment-1', { reviewed: true })
+  repository.updateVoiceprint('segment-1', { status: 'unavailable', version: SPEAKER_VERSION, reason: 'interference_high_band' })
+  repository.close()
+  const reopened = new RecordRepository(filename)
+  const inspect = new DatabaseSync(filename)
+  const row = inspect.prepare('SELECT status, reason, embedding FROM ai_segment_embeddings').get()
+  assert.equal(row?.status, 'unavailable')
+  assert.equal(row?.reason, 'interference_high_band')
+  assert.equal(row?.embedding, null)
+  reopened.updateManualReview('segment-1', { reviewed: true })
+  reopened.updateManualReview('segment-1', { reviewed: false })
+  assert.equal(reopened.prepareReviewedVoiceprint('segment-1'), false)
+  assert.equal(reopened.updateVoiceprint('segment-1', { status: 'failed', version: SPEAKER_VERSION }), false)
+  reopened.delete('segment-1', () => {})
+  assert.equal(reopened.updateVoiceprint('segment-1', { status: 'failed', version: SPEAKER_VERSION }), false)
+  inspect.close()
+  reopened.close()
+})
+
+test('SQL voice search uses current reviewed main callsigns, groups duplicates, and ignores time windows', () => {
+  const repository = new RecordRepository(':memory:')
+  const embedding = (cosine: number) => {
+    const values = new Float32Array(256)
+    values[0] = cosine
+    values[1] = Math.sqrt(1 - cosine * cosine)
+    return values
+  }
+  for (const [id, callsign, similarity] of [['a', 'BG5ABC', 0.99], ['b', 'BG5ABC', 0.95], ['c', 'BG5XYZ', 0.86], ['d', 'BG5LOW', 0.7999], ['e', 'N0CALL', 0.99]] as const) {
+    repository.insert('1900', record({ id, timestamp: '2020-01-01T00:00:00Z' }))
+    repository.updateManualReview(id, { reviewed: true, callsign, calleeCallsign: 'BG5ZZZ' })
+    repository.updateVoiceprint(id, { status: 'ready', version: SPEAKER_VERSION, embedding: embedding(similarity) })
+  }
+  const query = { status: 'ready', version: SPEAKER_VERSION, embedding: embedding(1) } as const
+  assert.deepEqual(repository.searchSpeakerMatches(query, 'query').matches.map(row => row.callsign), ['BG5ABC', 'BG5XYZ'])
+  const stats = repository.searchSpeakerMatches(query, 'query')
+  assert.equal(stats.referenceCount, 4)
+  assert.equal(stats.matches[0]?.count, 2)
+  assert.ok(Math.abs(stats.matches[0]!.maxSimilarity - 0.99) < 1e-6)
+  assert.ok(Math.abs(stats.matches[0]!.minSimilarity - 0.95) < 1e-6)
+  assert.ok(Math.abs(stats.matches[0]!.averageSimilarity - 0.97) < 1e-6)
+  assert.equal(repository.searchSpeakerMatches(query, 'a').matches[0]?.count, 1)
+  repository.updateManualReview('a', { callsign: 'BG5NEW' })
+  assert.deepEqual(repository.searchSpeakerMatches(query, 'query').matches.map(row => row.callsign), ['BG5NEW', 'BG5ABC', 'BG5XYZ'])
+  repository.updateManualReview('c', { reviewed: false })
+  assert.deepEqual(repository.searchSpeakerMatches(query, 'query').matches.map(row => row.callsign), ['BG5NEW', 'BG5ABC'])
+  assert.deepEqual(repository.searchSpeakerMatches({ ...query, version: 'legacy' }, 'query'), { referenceCount: 0, matches: [] })
+  assert.deepEqual(repository.searchSpeakerMatches({ status: 'unavailable', version: SPEAKER_VERSION }, 'query'), { referenceCount: 0, matches: [] })
+  repository.close()
+})
+
+test('legacy embedding tables gain the reason column and keep unreviewed stored data', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-embedding-upgrade-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const filename = join(directory, 'ai.sqlite')
+  const first = new RecordRepository(filename)
+  first.insert('1900', record())
+  first.updateManualReview('segment-1', { reviewed: true })
+  first.updateVoiceprint('segment-1', { status: 'unavailable', version: SPEAKER_VERSION, reason: 'interference_tone' })
+  first.updateManualReview('segment-1', { reviewed: false })
+  first.close()
+  const legacy = new DatabaseSync(filename)
+  legacy.exec('ALTER TABLE ai_segment_embeddings DROP COLUMN reason')
+  legacy.close()
+  const upgraded = new RecordRepository(filename)
+  const inspect = new DatabaseSync(filename)
+  assert.equal(inspect.prepare('SELECT status FROM ai_segment_embeddings').get()?.status, 'unavailable')
+  assert.ok(inspect.prepare('PRAGMA table_info(ai_segment_embeddings)').all().some(row => row.name === 'reason'))
+  inspect.close()
+  upgraded.close()
+})
 
 function record(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
   return {

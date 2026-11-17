@@ -1,5 +1,5 @@
 import type { PersistedRecord } from '@iaxweb/contracts'
-import { adminRecordPageSchema, CALLSIGN_HINT, manualCallsignSchema, manualRecognitionSchema, persistedRecordSchema, reviewSchema } from '@iaxweb/contracts'
+import { adminRecordPageSchema, CALLSIGN_HINT, manualCallsignSchema, manualRecognitionSchema, persistedRecordSchema, reviewSchema, speakerRecognitionSchema } from '@iaxweb/contracts'
 import { parseInput, request, requestJson } from './client'
 
 export interface RecordsQuery {
@@ -40,6 +40,9 @@ export const recordsApi = {
   },
   setReviewed(id: string, reviewed: boolean) {
     return update(id, 'manual-review', parseInput(reviewSchema, { reviewed }, '标注状态无效'))
+  },
+  recognizeSpeaker(id: string, signal?: AbortSignal) {
+    return requestJson(`${recordUrl(id)}/speaker-recognition`, speakerRecognitionSchema, { method: 'POST', signal })
   },
   async delete(id: string): Promise<void> {
     await request(recordUrl(id), { method: 'DELETE', acceptedStatuses: [404] })

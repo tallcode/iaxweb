@@ -10,6 +10,7 @@ import { useRecordEditing } from './use-record-editing'
 import { useRecordingPlayback } from './use-recording-playback'
 import { useRecordsFeedback } from './use-records-feedback'
 import { useRecordsQuery } from './use-records-query'
+import { useSpeakerRecognition } from './use-speaker-recognition'
 
 export function useRecordsPage(options: { onNavigate: () => void }) {
   const router = useRouter()
@@ -50,6 +51,11 @@ export function useRecordsPage(options: { onNavigate: () => void }) {
     },
   })
   const isMutating = computed(() => editing.state.isSaving.value || deletion.state.deletingRecordId.value !== null)
+  const speakerRecognition = useSpeakerRecognition({
+    canBegin: () => isAdministrator.value && canChange() && !query.state.isLoading.value,
+    onBegin: query.abort,
+    onUnauthorized,
+  })
   const interactions: RecordInteractionsContext = {
     isAdministrator,
     activeEditor: editing.state.activeEditor,
@@ -67,13 +73,14 @@ export function useRecordsPage(options: { onNavigate: () => void }) {
     setReviewed: editing.setReviewed,
     togglePlayback: playback.togglePlayback,
     requestDeletion: deletion.request,
+    requestSpeakerRecognition: speakerRecognition.request,
   }
 
   function recordSummary(): string {
     return query.summary.value
   }
   function canBeginEditing(): boolean {
-    return !query.state.isLoading.value && !loggingOut.value && deletion.state.pendingDeletion.value === null
+    return !query.state.isLoading.value && !loggingOut.value && deletion.state.pendingDeletion.value === null && speakerRecognition.state.record.value === null
   }
   function canSave(): boolean {
     return !loggingOut.value && deletion.state.deletingRecordId.value === null
@@ -81,6 +88,7 @@ export function useRecordsPage(options: { onNavigate: () => void }) {
   function canChange(): boolean {
     return !loggingOut.value && !editing.state.hasActiveEditor.value && !editing.state.isSaving.value
       && deletion.state.deletingRecordId.value === null && deletion.state.pendingDeletion.value === null
+      && speakerRecognition.state.record.value === null
   }
   function canEditRecord(record: PersistedRecord): boolean {
     return isAdministrator.value || (adminSession.value?.role === 'editor' && !record.reviewed)
@@ -115,6 +123,7 @@ export function useRecordsPage(options: { onNavigate: () => void }) {
     interactions,
     deletion: { state: deletion.state, confirm: deletion.confirm, cancel: deletion.cancel },
     feedback: feedback.state,
+    speakerRecognition,
     username,
     isAdministrator,
     loggingOut: readonly(loggingOut),

@@ -19,6 +19,8 @@
     "dev:public": "npm run dev --workspace @iaxweb/public",
     "dev:admin": "npm run dev --workspace @iaxweb/admin",
     "start": "npm run start --workspace @iaxweb/backend",
+    "download:speaker-model": "node scripts/download-speaker-model.mjs",
+    "backfill:speaker": "npm run backfill:speaker --workspace @iaxweb/backend --",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "test": "npm run test --workspaces --if-present",

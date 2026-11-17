@@ -95,3 +95,20 @@ export const recordPageSchema = z.object({
 })
 export const adminRecordSchema = persistedRecordSchema.extend({ hasAudio: z.boolean() })
 export const adminRecordPageSchema = recordPageSchema.extend({ items: z.array(adminRecordSchema) })
+
+export const speakerMatchSchema = z.object({
+  callsign: z.string().regex(CALLSIGN_PATTERN),
+  count: z.number().int().positive(),
+  minSimilarity: z.number().min(-1).max(1),
+  maxSimilarity: z.number().min(-1).max(1),
+  averageSimilarity: z.number().min(-1).max(1),
+})
+export const speakerRecognitionSchema = z.object({
+  recordId: nonempty,
+  threshold: z.number().min(-1).max(1),
+  status: z.enum(['matched', 'no_match', 'unavailable']),
+  reasonCode: z.enum(['record_missing', 'recording_missing', 'recording_invalid', 'insufficient_audio', 'invalid_audio', 'interference_tone', 'interference_high_band', 'extraction_timeout', 'extraction_busy', 'extraction_failed', 'search_failed', 'empty_reference_library', 'below_threshold']).nullable(),
+  reason: z.string().nullable(),
+  referenceCount: z.number().int().nonnegative().nullable(),
+  matches: z.array(speakerMatchSchema),
+})

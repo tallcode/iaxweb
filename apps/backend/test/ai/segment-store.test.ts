@@ -19,7 +19,6 @@ test('recent is empty before any segment', () => {
   const store = new SegmentStore(300_000)
   assert.deepEqual(store.recent(), [])
   assert.equal(store.asrContext(), undefined)
-  assert.equal(store.llmHistory(), undefined)
 })
 
 test('accumulates stage fields on the same record', () => {
@@ -37,41 +36,9 @@ test('accumulates stage fields on the same record', () => {
   assert.deepEqual(store.recent(), [record])
   assert.equal(store.asrContext(), '原始文本')
   assert.equal(store.recent()[0]?.corrected, '纠错文本')
-  assert.equal(store.llmHistory(), '规范化文本')
 })
 
-test('llmHistory falls back to the raw recognition without a revise', () => {
-  const store = new SegmentStore(300_000)
-  store.add(makeRecord({ recognition: '只有识别' }))
-  assert.equal(store.llmHistory(), '只有识别')
-})
-
-test('llmHistory prefixes the risk level when set', () => {
-  const store = new SegmentStore(300_000)
-  const record = makeRecord({ recognition: '原始', callsign: 'BG5XXX' })
-  record.revise = '规范文本'
-  record.risk = { level: 4, reason: '涉政' }
-  store.add(record)
-  assert.equal(store.llmHistory(), '[风控4] 规范文本')
-})
-
-test('llmHistory keeps raw ASR plus changed Bravo or Boston corrections', () => {
-  const store = new SegmentStore(300_000)
-  const record = makeRecord({
-    recognition: '补拉窝 高尔夫 五',
-    corrected: 'Bravo Golf Five',
-    revise: '规范化文本',
-  })
-  store.add(record)
-
-  assert.equal(store.llmHistory(), [
-    '补拉窝 高尔夫 五',
-    '音素纠错辅助文本（仅供判断）：',
-    'Bravo Golf Five',
-  ].join('\n'))
-})
-
-test('asrContext uses raw recognitions and llmHistory revised messages', () => {
+test('ASR and structured LLM contexts use raw recognitions rather than model revisions', () => {
   const store = new SegmentStore(300_000)
   const first = makeRecord({ id: 'a', recognition: '第一条原始' })
   first.revise = '第一条规范'
@@ -83,7 +50,7 @@ test('asrContext uses raw recognitions and llmHistory revised messages', () => {
   store.add(third)
 
   assert.equal(store.asrContext(), '第一条原始\n第三条原始')
-  assert.equal(store.llmHistory(), '第一条规范\n第三条规范')
+  assert.deepEqual(store.llmTurns().map(turn => turn.text), ['第一条原始', '第三条原始'])
 })
 
 test('expires records older than the window', () => {

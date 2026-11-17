@@ -62,9 +62,6 @@ export class AiService {
       ? new LlmParser({
           apiKey: config.llm.apiKey ?? '',
           baseUrl: config.llm.baseUrl,
-          ...(config.callsignHintsEnabled
-            ? { callsignHintsEnabled: true, callsignsFile: config.callsignsFile }
-            : {}),
           ...(config.llm.enableThinking !== undefined ? { enableThinking: config.llm.enableThinking } : {}),
           model: config.llm.model,
           promptFile: config.llm.promptFile,

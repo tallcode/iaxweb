@@ -1,22 +1,25 @@
 import type { InjectionKey } from 'vue'
-import type { RecordDeletionContext, RecordInteractionsContext, RecordsFeedbackState, RecordsQueryContext } from './types'
+import type { RecordDeletionContext, RecordInteractionsContext, RecordsFeedbackState, RecordsQueryContext, SpeakerRecognitionContext } from './types'
 import { inject, provide } from 'vue'
 
 const queryKey: InjectionKey<RecordsQueryContext> = Symbol('records-query')
 const interactionsKey: InjectionKey<RecordInteractionsContext> = Symbol('record-interactions')
 const deletionKey: InjectionKey<RecordDeletionContext> = Symbol('record-deletion')
 const feedbackKey: InjectionKey<RecordsFeedbackState> = Symbol('records-feedback')
+const speakerRecognitionKey: InjectionKey<SpeakerRecognitionContext> = Symbol('speaker-recognition')
 
 export function provideRecords(context: {
   query: RecordsQueryContext
   interactions: RecordInteractionsContext
   deletion: RecordDeletionContext
   feedback: RecordsFeedbackState
+  speakerRecognition: SpeakerRecognitionContext
 }): void {
   provide(queryKey, context.query)
   provide(interactionsKey, context.interactions)
   provide(deletionKey, context.deletion)
   provide(feedbackKey, context.feedback)
+  provide(speakerRecognitionKey, context.speakerRecognition)
 }
 
 function required<T>(key: InjectionKey<T>): T {
@@ -29,3 +32,4 @@ export const useRecordsQueryContext = (): RecordsQueryContext => required(queryK
 export const useRecordInteractions = (): RecordInteractionsContext => required(interactionsKey)
 export const useRecordDeletionContext = (): RecordDeletionContext => required(deletionKey)
 export const useRecordsFeedbackContext = (): RecordsFeedbackState => required(feedbackKey)
+export const useSpeakerRecognitionContext = (): SpeakerRecognitionContext => required(speakerRecognitionKey)

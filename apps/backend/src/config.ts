@@ -46,8 +46,8 @@ export interface AiConfig {
   activityWindowMs: number
   asr: AiApiConfig
   backgroundFile: string
-  callsignHintsEnabled: boolean
   callsignsFile: string
+  speakerModelFile: string
   coldMinSegmentMs: number
   contextWindowMs: number
   databaseFile: string
@@ -187,10 +187,6 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   if (llmEnabledText !== 'true' && llmEnabledText !== 'false')
     throw new Error('AI_LLM_ENABLED must be "true" or "false"')
 
-  const callsignHintsEnabledText = optional(env, 'AI_CALLSIGN_HINTS_ENABLED') ?? 'false'
-  if (callsignHintsEnabledText !== 'true' && callsignHintsEnabledText !== 'false')
-    throw new Error('AI_CALLSIGN_HINTS_ENABLED must be "true" or "false"')
-
   const llmPublishSpotText = optional(env, 'AI_LLM_PUBLISH_SPOT') ?? 'true'
   if (llmPublishSpotText !== 'true' && llmPublishSpotText !== 'false')
     throw new Error('AI_LLM_PUBLISH_SPOT must be "true" or "false"')
@@ -228,8 +224,8 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
       model: asrModel,
     },
     backgroundFile: resolveProjectPath(optional(env, 'AI_BACKGROUND_FILE') ?? 'config/background.txt'),
-    callsignHintsEnabled: callsignHintsEnabledText === 'true',
     callsignsFile: resolveProjectPath(optional(env, 'AI_CALLSIGNS_FILE') ?? 'config/callsigns.txt'),
+    speakerModelFile: resolveProjectPath(optional(env, 'AI_SPEAKER_MODEL_FILE') ?? 'config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx'),
     coldMinSegmentMs,
     contextWindowMs,
     databaseFile,

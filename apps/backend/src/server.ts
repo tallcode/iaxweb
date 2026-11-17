@@ -15,6 +15,7 @@ import Fastify from 'fastify'
 import { AdminAuth } from './admin/auth.js'
 import { LoginRateLimiter } from './admin/login-rate-limiter.js'
 import { AiService } from './ai/service.js'
+import { SpeakerReferenceService } from './ai/speaker-references.js'
 import { Allmon3StatusService, parseNodeDefinitions, publicStatusSnapshot } from './allmon3/index.js'
 import { loadAiConfig, loadConfig } from './config.js'
 import { createConnectionOptions, NatsAudioService } from './gateway/nats-audio.js'
@@ -43,6 +44,9 @@ if (aiNodeIds.length > 0 && aiConfig.llm.enabled && !aiConfig.llm.apiKey)
   throw new Error(`AI_LLM_API_KEY is required when AI_LLM_ENABLED=true for nodes: ${aiNodeIds.join(', ')}`)
 
 const recordRepository = aiConfig.persistenceEnabled ? new RecordRepository(aiConfig.databaseFile) : undefined
+const speakerReferences = recordRepository
+  ? new SpeakerReferenceService({ repository: recordRepository, recordingsDirectory: aiConfig.recordingsDirectory, modelFile: aiConfig.speakerModelFile })
+  : undefined
 const adminAuth = recordRepository ? new AdminAuth(aiConfig.adminFile, aiConfig.sessionsFile) : undefined
 const audioClients = new Set<WebSocket>()
 const statusClients = new Set<WebSocket>()
@@ -127,6 +131,7 @@ app.register(registerAdminRoutes, {
   prefix: '/api/admin',
   recordingsDirectory: aiConfig.recordingsDirectory,
   recordRepository,
+  speakerReferences,
   sessionMaxAgeSeconds: AdminAuth.sessionMaxAgeSeconds,
   spotStore,
 })
@@ -151,6 +156,7 @@ let stopWebSocketHeartbeat: (() => void) | undefined
 
 async function main(): Promise<void> {
   await app.ready()
+  speakerReferences?.start()
   stopWebSocketHeartbeat = startWebSocketHeartbeat(app.websocketServer)
 
   void spotStore.start(broadcastSpot)
@@ -226,6 +232,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     allmon3.stop()
     aiService?.stop()
+    speakerReferences?.stop()
     stopWebSocketHeartbeat?.()
     for (const client of app.websocketServer.clients)
       client.close(1001, 'Server shutting down')

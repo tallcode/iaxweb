@@ -2,6 +2,7 @@ import type { AdminRole } from '@iaxweb/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
 import type { LoginRateLimiter } from '../admin/login-rate-limiter.js'
+import type { SpeakerReferenceService } from '../ai/speaker-references.js'
 import type { RecordRepository } from '../records/record-repository.js'
 import type { SpotStore } from '../spots/spot-store.js'
 import { loginSchema } from '@iaxweb/contracts'
@@ -15,6 +16,7 @@ interface AdminRoutesOptions {
   loginRateLimiter: LoginRateLimiter
   recordingsDirectory: string
   recordRepository: RecordRepository | undefined
+  speakerReferences?: Pick<SpeakerReferenceService, 'recognizeRecord'> | undefined
   sessionMaxAgeSeconds: number
   spotStore: Pick<SpotStore, 'publishReview'>
 }
@@ -84,6 +86,7 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
   app.register(registerRecordRoutes, {
     adminAuth,
     recordRepository,
+    ...(options.speakerReferences ? { speakerReferences: options.speakerReferences } : {}),
     recordingsDirectory: options.recordingsDirectory,
     spotStore: options.spotStore,
     requireAuthentication,

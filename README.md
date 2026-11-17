@@ -144,13 +144,29 @@ cp examples/ai/full/schema.json config/schema.json
 
 LLM 历史按节点保留原始转写、分段 ID 与发射分段关系，按 `AI_CONTEXT_WINDOW_MS` 过期，超预算时删除完整旧轮次。同一次长发射拆出的相邻片段可共同提供拼读证据；普通轮次间的半截拼读不能直接拼接。ASR 历史的使用方式保持原有行为。
 
+声纹使用 `sherpa-onnx-node@2.0.1` 与中文 `wespeaker_zh_cnceleb_resnet34_LM.onnx`，在独立 Worker 中常驻一个模型、CPU 2 线程，统一由原始 8 kHz PCM 走 sherpa 内部重采样。首次在宿主机准备 `config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx`，可以执行一次 `npm run download:speaker-model` 或拷贝已校验的同一文件；下载及加载均校验模型 SHA-256。Docker 不下载、不打包模型，直接通过现有 `./config:/app/config:ro` 挂载读取。镜像使用 Debian slim（原生库需要 glibc）。可通过 `AI_SPEAKER_MODEL_FILE` 指向相同模型的其他位置，容器中必须使用容器内可读路径。不混用之前实验的 SciPy 重采样声纹。
+
+只有管理员设为“已标注”的 record 才会从已保存的 WAV 计算并持久化声纹。标注操作与声纹 `pending` 任务在同一事务中保存；后台每 2 秒处理一批，启动时也会发现已有标注但缺失声纹的记录，重启后继续 `pending` 任务。SQLite 的 `ai_segment_embeddings` 表以 `record_id` 关联 `ai_segments.id`，保存 `version`、`status`、`embedding` 和可选的 `reason`（旧表自动添加）；向量为 256 维 little-endian Float32 BLOB，纯向量 1,024 字节。`status` 为 `pending`（等待/计算）、`ready`（成功）、`unavailable`（语音不足或质量不通过）、`failed`（异常或超时）。取消标注不删除已有声纹，但立即停止参与参考检索；任务提交前会再次检查标注状态，避免取消标注或删除记录后写回。重新标注会复用当前版本的 `ready` 声纹，其余终态可重新计算。删除 record 时级联删除声纹。
+
+声纹提取前先在同一 Worker 内进行 8 kHz 频谱质量检查，手动查询、标注计算和历史补算共用：窄带谱峰相对附近背景突出度 `>18 dB`，或 `3000–3900 Hz / 150–3900 Hz` 能量占比 `>1.4%` 时，不调用声纹模型生成向量。已标注记录记为 `unavailable`、`embedding=NULL`，`reason` 分别为 `interference_tone`、`interference_high_band`。无效采样或语音不足同样跳过。质量策略版本包含 `quality-v1` 后缀，旧版向量不参与新版检索；后台会重新检查仍已标注的旧版记录，未标注的旧数据保留。这组规则来自 2026-11-17 的两类干扰样本，能排除这次的四条干扰；它是频谱启发式规则，不能保证检出所有干扰，也可能受设备、信道和语音内容影响。
+
+声纹匹配目前仅用于管理员手动测试，不进入 ASR/LLM 主流程，也不自动处理新录音。管理页桌面操作栏和手机卡片提供 `fingerprint-pattern` 图标的“声纹识别”按钮，调用 `POST /api/admin/records/:id/speaker-recognition`；仅管理员有权限。点击后读取该条 WAV，先做质量检查，再临时计算查询向量。无论当前录音是否已标注，手动测试都不保存查询向量或声纹状态，不修改呼号，不调用 LLM。已标注录音的后台入库独立保留。
+
+`sqlite-vec@0.1.9` 对全量历史“当前仍已标注、同版本、ready、有效主叫”的声纹进行精确余弦搜索，阈值暂放宽为严格 `>0.80`，当前录音始终排除，避免自匹配。没有 5 分钟限制，也不先取全库 top-K 再过滤标注。主叫使用 `COALESCE(manual_callsign, callsign)`，不读取被叫呼号，排除 `N0CALL`；管理员改呼号后下次查询直接使用新值，无需重算声纹。使用普通 BLOB 表加 `vec_distance_cosine`，不额外复制向量到虚拟表。数据库连接加载扩展后关闭继续加载扩展的权限。
+
+弹窗按呼号显示 `count`（命中录音条数）、`maxSimilarity`、`minSimilarity`、`averageSimilarity`，手机端只显示呼号、数量和平均值，完整统计仍由接口返回并在桌面展示。统计仅包含相似度超过 0.80 的录音。按命中条数降序，再按最大值、平均值和呼号排序；数量不是身份概率，不将分数显示成置信概率。响应同时返回 `referenceCount`（排除自身后的合格参考录音数）、阈值和状态。无结果会区分参考库为空、未达阈值、干扰、语音不足、录音缺失/无效、模型异常、超时和检索失败。请求和弹窗结果不缓存，取消/删除标注后后续查询立即生效。
+
+声纹任务含排队最多等待 10 秒，不绕过质量检查。标注录音损坏、单条提取异常或超时记为 `failed`；模型、原生库暂不可用或队列繁忙时，后台保留 `pending` 稍后重试。手动测试异常仅返回原因，不向数据库写入查询声纹数据。Worker 超时或崩溃时清理等待任务并终止 Worker，退避 60 秒后重建。手动查询和标注任务共享一个常驻模型，标注任务逐条提取、每批最多 10 条；队列最多容纳 16 个任务，停止服务时清理等待任务，未完成的已标注 `pending` 由下次启动恢复。
+
+5 分钟文字上下文和原有呼号证据校验保留。发给模型的 JSON 保留完整字段名和原始 UUID：`history` 每条仅包含 `id`、`text`，`current` 包含 `id`、`text`；`candidates` 保留 `id`、`segmentId`、`callsign`、`kind`、`quote`，按需保留 `prefixQuote`、`segmentIds` 和复核建议引用。`transmissionId`、`partIndex`、`start`、`end` 仅在程序内部保留。声纹结果不注入 `referenceCallsigns` 或 `similarityHints`，原有 `0.70/0.80` 历史 `speaker` 标注已取消。输出 schema 在请求中去掉格式缩进，输出协议保持不变。
+
 呼号复核默认关闭，开关直接写在 `apps/backend/src/ai/llm-parser.ts` 的 `CALLSIGN_RECHECK_ENABLED` 常量里，不增加环境配置。以后启用时，也只对模型声称 `self`、候选或引用核验失败、且程序独立找到解释法与当前自报依据的情况最多复核一次。正常 `other` / `unknown`、没有证据的结果不复核；复核失败仍留空。网络请求的原有重试与这次语义复核分开处理。
 
 只有通过核验的呼号才保存和发布到 AI Spot；已有 `AI_LLM_PUBLISH_SPOT=false` 可以关闭发布。
 
 `recognition` 保留原始 ASR，`corrected` 保留现有音素纠错辅助文本。本次仅修复完整解释词 `X Ray` 被拆开后误改为 `Echo Ray`；其他音素词表、距离阈值和混淆规则保持原有行为。辅助文本不会取代原始拼读证据。
 
-可选的 `AI_CALLSIGN_HINTS_ENABLED=true` 会从 `config/callsigns.txt` 检索相似呼号，规则和热更新方式保持不变。相似度提示只供参考，不能扩充解释法证据候选，不能覆盖原文拼读，也不能证明当前说话人身份。仅凭库中的相似呼号不会输出呼号。
+LLM 请求不再发送 `similarityHints`，也不再读取 `AI_CALLSIGN_HINTS_ENABLED`。常见呼号表仅保留给离线 `callsign-match-test` 命令使用。
 
 不调用 LLM 即可手动检查片段提取和相似度候选：
 
@@ -179,6 +195,59 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 [260809 21:05:40] [1900]: 丢弃段 1.2s（热启动，时长不足 2s）
 ```
 
+### 已标注历史录音的声纹补算
+
+`npm run backfill:speaker` 在独立进程中读取服务器已有 WAV，只为当前已标注的历史 records 写入 `ai_segment_embeddings`。它只计算声纹，不调用 ASR/LLM，不修改转写、呼号、人工标注或录音。默认使用 `.env` 中的 `AI_DATABASE_FILE`、`AI_RECORDINGS_DIR`、`AI_SPEAKER_MODEL_FILE`；显式路径参数建议使用绝对路径。
+
+先部署新版数据库结构并准备模型，再盘点和预跑：
+
+```bash
+# 首次在宿主机准备模型；已存在且 SHA-256 正确时只校验，不重复下载
+npm run download:speaker-model
+
+# 只盘点并保存候选清单，不写入数据库
+npm run backfill:speaker -- --dry-run
+
+# 先计算 500 个候选；自动使用盘点生成的清单
+npm run backfill:speaker -- --limit 500
+
+# 继续剩余记录；无需记住或指定任务目录
+npm run backfill:speaker
+
+# 单独重试当前版本的失败记录，或重新检查 unavailable（如录音已恢复）
+npm run backfill:speaker -- --retry-failed --delay-ms 100
+npm run backfill:speaker -- --retry-unavailable --delay-ms 100
+```
+
+直接执行 `npm run backfill:speaker` 即可。程序按数据库、模型版本、录音路径和重试类型自动寻找未完成任务并续跑；没有未完成任务时才生成新清单，默认跳过已有声纹。`--dry-run` 会重新盘点并更新当前任务清单。`--limit` 限制本次处理的候选数量，盘点仍覆盖任务开始前的全部已标注历史。录音路径按原始 `captured_at` 的 UTC 日期定位，实际检查文件，不依赖管理页按日期目录缓存的 `hasAudio`。盘点检查路径、文件是否存在及是否为普通文件；WAV 内容损坏在读取阶段识别。
+
+默认单 Worker、模型 CPU 2 线程，每条间隔 100 ms，每 50 条提交一次短事务，每 100 条打印吞吐和预计剩余时间。模型计算及文件读取期间不持有数据库写事务；SQLite 临时锁冲突会退避重试。读取音频有大小、格式和时长限制，始终使用同一套 PCM16 单声道 8 kHz 解码与正式声纹提取流程。
+
+任务目录默认位于数据库旁的 `embedding-backfill/`，包含：
+
+- `manifest.json`：本次固定候选 ID、筛选方式、版本、路径和盘点统计。
+- `backup.sqlite`：首次写入前通过 Node SQLite backup API 创建并验证完整性的备份；同一任务续跑沿用该备份。
+- `progress.json`：已提交位置、任务状态和结果计数。
+- `results.jsonl`：逐条处理结果和具体失败原因，不保存音频或重复的声纹向量；中断边界附近可能出现重放日志。
+- `coverage.json`：候选 records 当前在数据库中的实际状态统计。它与进度计数独立核对，适用于写入完成但进度文件尚未落盘的中断情况。
+
+Ctrl+C 或 SIGTERM 会尽量提交已计算结果并保存暂停位置，以退出码 130 结束；随后再次执行相同命令即可自动续跑。进度文件只在数据库提交后推进，意外退出后会重新检查数据库，跳过已完成数据，重复计算未提交数据。已有 `ready`、实时 `pending` 和其他版本的数据都不会被默认补算覆盖；重试也只更新选择的终态和完全相同的版本。处理过程中已删除的 record 会跳过，不会重新创建。
+
+补算不使用应用启动时的 `pending` 恢复逻辑，也不向数据库写入自己的 `pending`；进行中的位置记在任务文件，只有最终结果才写数据库。补算清单只包含已标注记录，逐条处理和事务提交时再次检查标注状态，取消标注后跳过写入，已保存的声纹保留。新版清单格式为 2，不会恢复旧版未限制标注的清单。缺失文件、语音不足或质量检查不通过记为 `unavailable`，干扰原因同步保存在表的 `reason` 和任务的 `results.jsonl`，不存声纹向量；损坏 WAV 或单条提取错误记为 `failed`。权限、数据库持续写入异常、Worker 不可用或连续提取异常会停止任务，保留进度，不把剩余候选批量标成失败。
+
+同一数据库通过旁路锁文件限制为一个补算进程，实时服务仍可正常运行。同一主机异常退出留下的锁会在确认原 PID 不存在后回收；若强杀后换了主机或容器，命令会提示核实原任务已停止后清理锁文件。任务文件和当前任务索引均由程序自动管理，不需要指定目录。默认补算、失败重试和 unavailable 重查分别维护进度，互不混用；可在续跑时调整本次 `--limit` 和 `--delay-ms`。
+
+Docker 中可在现有服务容器运行同一命令，例如：
+
+```bash
+docker compose exec iaxweb npm run backfill:speaker -- --dry-run
+# 先预跑 500 条，再直接执行相同命令继续
+docker compose exec iaxweb npm run backfill:speaker -- --limit 500
+docker compose exec iaxweb npm run backfill:speaker
+```
+
+完整选项见 `npm run backfill:speaker -- --help`，支持 `--database`、`--recordings`、`--model` 覆盖配置；通常直接读取 `.env`，无需指定任何路径。盘点可以读取尚未创建声纹表的旧数据库；实际写入要求先部署新版结构和 WAL 模式。
+
 ### 接口配置
 
 语音识别与大语言模型完全独立：ASR 使用 DashScope 同步接口；LLM 使用 OpenAI 兼容接口，可指向任意供应商。旧的 `DASHSCOPE_API_KEY` / `DASHSCOPE_BASE_URL` 仅作为 ASR 的兼容别名，LLM 不会再读取它们。
@@ -198,8 +267,7 @@ npm run phonetic-corrector-test -- "Bravo Golf Five Foxtrot 补拉窝 Tango"
 | `AI_LLM_TIMEOUT_MS` | `30000` | 单次请求超时 |
 | `AI_LLM_PROMPT_FILE` | `config/prompt.txt` | LLM 提示词文件路径（示例见 `examples/ai/simple/prompt.txt`） |
 | `AI_LLM_SCHEMA_FILE` | `config/schema.json` | LLM 输出 JSON Schema 路径（示例见 `examples/ai/simple/schema.json`） |
-| `AI_CALLSIGN_HINTS_ENABLED` | `false` | 是否向 LLM 提供常见呼号相似度候选 |
-| `AI_CALLSIGNS_FILE` | `config/callsigns.txt` | 常见呼号表路径，每行一个呼号 |
+| `AI_CALLSIGNS_FILE` | `config/callsigns.txt` | 仅供离线呼号检索命令使用，每行一个呼号 |
 
 LLM 请求使用 `response_format: json_object`（DeepSeek JSON Output）。模型返回空内容、非 JSON 或不符合 schema 时会被静默忽略，只输出 ASR 原文，不会报错或中断识别。
 
@@ -211,7 +279,8 @@ LLM 请求使用 `response_format: json_object`（DeepSeek JSON Output）。模�
 | `AI_HOT_MIN_SEGMENT_MS` | `2000` | 热启动时长阈值，不足丢弃 |
 | `AI_ACTIVITY_WINDOW_MS` | `30000` | 冷/热启动判定的活动窗口 |
 | `AI_MAX_SEGMENT_MS` | `120000` | 超过该值的段切分，最大 290000 |
-| `AI_CONTEXT_WINDOW_MS` | `300000` | 识别结果上下文窗口 |
+| `AI_CONTEXT_WINDOW_MS` | `300000` | 识别结果及声纹历史上下文窗口 |
+| `AI_SPEAKER_MODEL_FILE` | `config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx` | 固定 WeSpeaker 模型文件；宿主机准备一次，Docker 通过 config 只读挂载使用 |
 | `AI_PERSISTENCE_ENABLED` | `false` | 是否持久化 SQLite 结果及 WAV 录音 |
 | `AI_DATABASE_FILE` | `data/ai.sqlite` | AI 识别与人工复核结果的 SQLite 文件路径 |
 | `AI_RECORDINGS_DIR` | 与数据库同级的 `rec` | 成功识别语音的 WAV 存储目录 |
@@ -296,12 +365,18 @@ npm run hash-admin-password -- '替换为强密码'
 
 ## Docker
 
-镜像基于 `node:24-alpine` 多阶段构建，只安装生产依赖，以非 root 用户 `node` 运行，内置 `/healthz` 健康检查，并通过 `tini` 保证 `SIGTERM` 能触发优雅关闭。
+镜像基于 `node:24-bookworm-slim` 多阶段构建，运行阶段只安装生产依赖，默认以非 root 用户 `node` 运行，内置 `/healthz` 健康检查，并通过 `tini` 保证 `SIGTERM` 能触发优雅关闭。使用 Debian/glibc 是为了支持 sherpa-onnx 的原生库，不使用 Alpine/musl。
+
+模型由宿主机独立维护，不进入 Docker 构建上下文、不随镜像打包，构建和启动均不下载模型。首次部署只需在 `config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx` 放置约 26.5 MB 的固定模型；可在本机执行一次 `npm run download:speaker-model`，再把文件随 `config` 同步到服务器，无需为此给服务器安装 Node.js。已有正确模型时下载命令只校验，不联网下载。后续拉取、构建或重建镜像都复用该文件。
+
+Compose 已将 `./config` 只读挂载到 `/app/config`，因此容器默认读取 `/app/config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx`，不需要新增挂载或设置 `AI_SPEAKER_MODEL_FILE`。如果 `.env` 曾显式设置旧的 `models/...` 路径，需改为 `config/models/...` 或删除该覆盖值。运行时仍验证固定 SHA-256，路径调整不改变声纹版本，也不要求重算现有向量。
 
 ```bash
 docker build -t iaxweb .
 
 docker run --rm -p 3000:3000 \
+  -v "$PWD/config:/app/config:ro" \
+  -v "$PWD/data:/app/data" \
   -e NATS_SERVERS=nats://nats.example:4222 \
   -e NATS_SUBJECT_ROOT=iaxmon.nodes \
   iaxweb
