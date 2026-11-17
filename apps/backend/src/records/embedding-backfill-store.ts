@@ -2,7 +2,7 @@ import type { StatementSync } from 'node:sqlite'
 import type { Voiceprint } from './types.js'
 import { DatabaseSync } from 'node:sqlite'
 import { SPEAKER_DIMENSIONS } from '../ai/speaker-model.mjs'
-import { backupLegacyEmbeddings, migrateEmbeddingSchema } from './embedding-schema.js'
+import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { encodeVoiceprint } from './voiceprint.js'
 
 export type BackfillMode = 'missing' | 'failed' | 'unavailable'
@@ -45,9 +45,6 @@ export class EmbeddingBackfillStore {
           throw new Error('Deploy the embedding schema before backfilling; dry-run is available on legacy databases')
         this.database.exec('PRAGMA journal_mode = WAL')
         this.database.exec('PRAGMA foreign_keys = ON')
-        const backup = backupLegacyEmbeddings(this.database, filename)
-        if (backup)
-          console.log(`声纹数据库升级备份：${backup}`)
         this.database.exec('BEGIN IMMEDIATE')
         try {
           migrateEmbeddingSchema(this.database)

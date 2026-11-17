@@ -1,6 +1,6 @@
 import type { SegmentRecord } from '../../src/ai/segment-store.js'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -116,7 +116,7 @@ test('legacy embedding tables gain the reason column and keep unreviewed stored 
   upgraded.close()
 })
 
-test('legacy vectors are backed up and cleared once; only reviewed rows are rebuilt as 768-byte vectors', (t) => {
+test('legacy vectors are cleared once without an automatic backup; only reviewed rows are rebuilt as 768-byte vectors', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-model-upgrade-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const filename = join(directory, 'ai.sqlite')
@@ -155,15 +155,11 @@ test('legacy vectors are backed up and cleared once; only reviewed rows are rebu
   assert.throws(() => database.prepare('UPDATE ai_segment_embeddings SET dimensions = 256 WHERE record_id = ?').run('reviewed'))
   assert.equal(upgraded.searchSpeakerMatches({ status: 'ready', version: SPEAKER_VERSION, embedding }, 'query').referenceCount, 1)
   assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), [])
-  const backups = readdirSync(join(directory, 'backups'))
-  assert.equal(backups.length, 1)
-  const backup = new DatabaseSync(join(directory, 'backups', backups[0]!), { readOnly: true })
-  assert.equal(backup.prepare('SELECT length(embedding) AS n FROM ai_segment_embeddings LIMIT 1').get()?.n, 1024)
-  backup.close()
+  assert.equal(existsSync(join(directory, 'backups')), false)
   upgraded.close()
   const reopened = new RecordRepository(filename)
   assert.deepEqual(reopened.pendingReviewedVoiceprints(), [])
-  assert.equal(readdirSync(join(directory, 'backups')).length, 1)
+  assert.equal(existsSync(join(directory, 'backups')), false)
   reopened.delete('cancelled', () => {})
   assert.equal(database.prepare('SELECT COUNT(*) AS n FROM ai_segment_embeddings WHERE record_id = ?').get('cancelled')?.n, 0)
   reopened.close()

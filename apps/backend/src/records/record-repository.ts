@@ -5,7 +5,7 @@ import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import * as sqliteVec from 'sqlite-vec'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../ai/speaker-model.mjs'
-import { backupLegacyEmbeddings, migrateEmbeddingSchema } from './embedding-schema.js'
+import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { encodeVoiceprint } from './voiceprint.js'
 
 export const SPEAKER_REFERENCE_THRESHOLD = 0.80
@@ -126,9 +126,6 @@ export class RecordRepository {
     // Existing databases are upgraded in place; AI evidence is never rewritten.
     let began = false
     try {
-      const backup = backupLegacyEmbeddings(this.database, databaseFile)
-      if (backup)
-        console.log(`声纹数据库升级备份：${backup}`)
       this.database.exec('BEGIN IMMEDIATE')
       began = true
       this.database.exec(SCHEMA)
