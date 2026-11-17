@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
+import { SPEAKER_DIMENSIONS } from '../../src/ai/speaker-model.mjs'
 import { eligibleForBackfill, EmbeddingBackfillStore } from '../../src/records/embedding-backfill-store.js'
 import { RecordRepository } from '../../src/records/record-repository.js'
 import { encodeVoiceprint } from '../../src/records/voiceprint.js'
@@ -26,7 +27,7 @@ function setup(t: { after: (callback: () => void) => void }) {
     database.prepare('INSERT INTO ai_segment_embeddings(record_id, version, status, embedding) VALUES (?, ?, ?, ?)').run(id, voiceprint.version, voiceprint.status, encodeVoiceprint(voiceprint))
     database.close()
   }
-  const embedding = new Float32Array(256)
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
   embedding[0] = 1
   return { filename, repository, insert, embedding, put }
 }
@@ -103,6 +104,32 @@ test('backfill persists interference rejection reason without a vector', (t) => 
   assert.equal(result[0]?.outcome, 'unavailable')
   assert.equal(store.database.prepare('SELECT reason FROM ai_segment_embeddings').get()?.reason, voiceprint.reason)
   assert.equal(store.database.prepare('SELECT embedding FROM ai_segment_embeddings').get()?.embedding, null)
+  store.close()
+  repository.close()
+})
+
+test('default backfill replaces only the selected old version and preserves concurrent completion', (t) => {
+  const { filename, repository, insert, embedding, put } = setup(t)
+  for (const id of ['legacy', 'concurrent', 'cancelled']) {
+    insert(id)
+    put(id, { status: 'ready', version: 'old-model', embedding })
+  }
+  const store = new EmbeddingBackfillStore(filename, false)
+  assert.equal(eligibleForBackfill(store.current('legacy')!, 'missing', 'new-model'), true)
+  store.database.prepare('UPDATE ai_segment_embeddings SET version = ? WHERE record_id = ?').run('new-model', 'concurrent')
+  repository.updateManualReview('cancelled', { reviewed: false })
+  const results: BackfillResult[] = ['legacy', 'concurrent', 'cancelled'].map((id, index) => ({
+    id,
+    index,
+    outcome: 'ready',
+    reason: 'upgraded',
+    previousVersion: 'old-model',
+    voiceprint: { status: 'ready', version: 'new-model', embedding },
+  }))
+  assert.deepEqual(store.commit(results, 'missing').map(row => row.outcome), ['ready', 'skipped', 'skipped'])
+  assert.equal(store.current('legacy')?.version, 'new-model')
+  assert.equal(store.current('cancelled')?.version, 'old-model')
+  assert.equal(eligibleForBackfill(store.current('concurrent')!, 'missing', 'new-model'), false)
   store.close()
   repository.close()
 })

@@ -1,7 +1,10 @@
 // Radio quality gate v1, calibrated on the 2026-11-17 interference examples.
 // This is a conservative spectral heuristic, not a general interference model.
-// Keep preprocessing identical to experiments/interference-20261117/evaluate-gate.py.
+// Spectral thresholds match the original experiment; long recordings now skip
+// radio key-up/key-down transients at both edges before measuring interference.
 const SAMPLE_RATE = 8000
+const MIN_SAMPLES = SAMPLE_RATE
+const EDGE_SAMPLES = SAMPLE_RATE / 2
 const TONE_LIMIT_DB = 18
 const HIGH_BAND_LIMIT = 0.014
 
@@ -57,13 +60,20 @@ const longSpectrum = spectrumPlan(2048, 2048)
 
 // Synchronous, bounded workspace; called serially inside the speaker Worker.
 export function checkSpeakerQuality(samples) {
-  let energy = 0
   for (const value of samples) {
     if (!Number.isFinite(value) || Math.abs(value) > 1)
       return { accepted: false, reason: 'invalid_audio' }
-    energy += value * value
   }
-  if (samples.length < SAMPLE_RATE || energy === 0)
+  if (samples.length < MIN_SAMPLES)
+    return { accepted: false, reason: 'insufficient_audio' }
+
+  // Trim 500 ms per edge only when at least one second remains. This view is
+  // used only for the quality gate; the Worker still embeds the full recording.
+  if (samples.length >= MIN_SAMPLES + 2 * EDGE_SAMPLES)
+    samples = samples.subarray(EDGE_SAMPLES, samples.length - EDGE_SAMPLES)
+  let energy = 0
+  for (const value of samples) energy += value * value
+  if (energy === 0)
     return { accepted: false, reason: 'insufficient_audio' }
 
   let total = 0

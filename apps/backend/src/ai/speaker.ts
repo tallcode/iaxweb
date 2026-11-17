@@ -1,8 +1,8 @@
 import type { Voiceprint } from '../records/types.js'
 import { Worker } from 'node:worker_threads'
-import { SPEAKER_VERSION } from './speaker-model.mjs'
+import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from './speaker-model.mjs'
 
-export const SPEAKER_DIMENSIONS = 256
+export { SPEAKER_DIMENSIONS } from './speaker-model.mjs'
 const MIN_VOICED_MS = 1_000
 const EXTRACTION_TIMEOUT_MS = 10_000
 const RETRY_DELAY_MS = 60_000

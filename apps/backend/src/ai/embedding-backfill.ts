@@ -404,6 +404,8 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
           result = { index, id: record.id, outcome: missing ? 'unavailable' : 'failed', reason, voiceprint: { status: missing ? 'unavailable' : 'failed', version: SPEAKER_VERSION, reason } }
         }
       }
+      if (result.voiceprint)
+        result.previousVersion = current?.version ?? null
       batch.push(result)
       if (batch.length >= 50 || fatal || index + 1 === last)
         await checkpoint()

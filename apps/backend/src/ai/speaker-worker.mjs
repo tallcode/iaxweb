@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { parentPort, workerData } from 'node:worker_threads'
 import sherpa from 'sherpa-onnx-node'
-import { SPEAKER_MODEL_SHA256, SPEAKER_VERSION } from './speaker-model.mjs'
+import { SPEAKER_DIMENSIONS, SPEAKER_MODEL_SHA256, SPEAKER_VERSION } from './speaker-model.mjs'
 import { checkSpeakerQuality } from './speaker-quality.mjs'
 
 const hash = createHash('sha256').update(readFileSync(workerData.modelFile)).digest('hex')
@@ -16,7 +16,7 @@ const extractor = new sherpa.SpeakerEmbeddingExtractor({
   provider: 'cpu',
   debug: false,
 })
-if (extractor.dim !== 256)
+if (extractor.dim !== SPEAKER_DIMENSIONS)
   throw new Error(`Unexpected speaker embedding dimension: ${extractor.dim}`)
 
 parentPort.on('message', ({ id, samples }) => {
@@ -36,7 +36,7 @@ parentPort.on('message', ({ id, samples }) => {
     for (const value of embedding)
       squared += value * value
     const norm = Math.sqrt(squared)
-    if (!Number.isFinite(norm) || norm <= 0 || embedding.length !== 256)
+    if (!Number.isFinite(norm) || norm <= 0 || embedding.length !== SPEAKER_DIMENSIONS)
       throw new Error('Invalid speaker embedding')
     const normalized = Float32Array.from(embedding, value => value / norm)
     parentPort.postMessage({ id, embedding: normalized, version: SPEAKER_VERSION }, [normalized.buffer])

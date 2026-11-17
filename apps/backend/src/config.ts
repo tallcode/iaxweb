@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { SPEAKER_MODEL_NAME } from './ai/speaker-model.mjs'
 
 export interface AppConfig {
   allmon3: {
@@ -225,7 +226,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     },
     backgroundFile: resolveProjectPath(optional(env, 'AI_BACKGROUND_FILE') ?? 'config/background.txt'),
     callsignsFile: resolveProjectPath(optional(env, 'AI_CALLSIGNS_FILE') ?? 'config/callsigns.txt'),
-    speakerModelFile: resolveProjectPath(optional(env, 'AI_SPEAKER_MODEL_FILE') ?? 'config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx'),
+    speakerModelFile: resolveProjectPath(optional(env, 'AI_SPEAKER_MODEL_FILE') ?? `config/models/${SPEAKER_MODEL_NAME}`),
     coldMinSegmentMs,
     contextWindowMs,
     databaseFile,

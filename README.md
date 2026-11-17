@@ -147,11 +147,13 @@ npm run hash-admin-password -- 'replace-with-your-password'
 npm run download:speaker-model
 ```
 
-模型保存在 `config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx`，约 26.5 MB；已有正确文件时跳过下载。也可以将同一模型文件从开发机复制到服务器。自定义路径使用 `AI_SPEAKER_MODEL_FILE`。
+模型为 ERes2NetV2，保存在 `config/models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx`，约 71.4 MB；已有正确文件时跳过下载。也可以将同一模型文件从开发机复制到服务器。自定义路径使用 `AI_SPEAKER_MODEL_FILE`，升级时需同步更新旧路径覆盖。
 
 Docker 不下载、不打包模型，通过 `config/` 的只读挂载使用该文件。模型随配置独立保存，更新应用镜像无需重新下载。
 
 管理后台的声纹匹配目前是管理员手动测试功能；已标注录音会自动计算并保存声纹，测试查询不入库。
+
+旧数据库首次启动时自动备份到 `data/backups/speaker-upgrade-*.sqlite`，清空旧声纹并升级为固定 192 维、768 字节的声纹表。后台分批重算已标注录音，期间只检索已完成的新声纹；录音、识别结果及人工标注保留。后续重启不会重复清空，无需手动删除数据。
 
 ## 检查与构建
 
@@ -228,7 +230,7 @@ npm run backfill:speaker
 npm run backfill:speaker -- --help
 ```
 
-只处理已标注录音，自动备份并保存进度；中断后再次执行相同命令即可续跑，无需指定任务目录。可用 `--limit`、`--delay-ms` 控制处理数量和间隔。
+只处理已标注录音缺失或旧版本的声纹，自动备份并保存进度；当前版本已有声纹及在线待处理任务不覆盖。中断后再次执行相同命令即可续跑，无需指定任务目录。可用 `--limit`、`--delay-ms` 控制处理数量和间隔。
 
 容器中使用：
 

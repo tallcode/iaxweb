@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { SPEAKER_MODEL_NAME } from '../../src/ai/speaker-model.mjs'
 import { loadAiConfig } from '../../src/config.js'
 
 test('loads AI defaults', () => {
@@ -27,7 +28,7 @@ test('loads AI defaults', () => {
   assert.equal(config.llm.thinkingBudget, undefined)
   assert.equal(config.llm.publishSpot, true)
   assert.ok(config.callsignsFile.endsWith('config/callsigns.txt'))
-  assert.ok(config.speakerModelFile.endsWith('config/models/wespeaker_zh_cnceleb_resnet34_LM.onnx'))
+  assert.ok(config.speakerModelFile.endsWith(`config/models/${SPEAKER_MODEL_NAME}`))
   assert.ok(config.llm.promptFile.endsWith('config/prompt.txt'))
   assert.ok(config.llm.schemaFile.endsWith('config/schema.json'))
   assert.ok(config.hotwordsFile.endsWith('config/hotwords.json'))

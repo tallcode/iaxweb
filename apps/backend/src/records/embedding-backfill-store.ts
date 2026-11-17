@@ -1,6 +1,8 @@
 import type { StatementSync } from 'node:sqlite'
 import type { Voiceprint } from './types.js'
 import { DatabaseSync } from 'node:sqlite'
+import { SPEAKER_DIMENSIONS } from '../ai/speaker-model.mjs'
+import { backupLegacyEmbeddings, migrateEmbeddingSchema } from './embedding-schema.js'
 import { encodeVoiceprint } from './voiceprint.js'
 
 export type BackfillMode = 'missing' | 'failed' | 'unavailable'
@@ -21,10 +23,11 @@ export interface BackfillResult {
   outcome: 'ready' | 'failed' | 'unavailable' | 'skipped'
   reason: string
   voiceprint?: Voiceprint | undefined
+  previousVersion?: string | null | undefined
 }
 
 // Dedicated connection: never run application startup recovery or reset pending
-// rows belonging to the online service. The schema must already be deployed.
+// rows belonging to the online service. Only legacy embedding DDL is upgraded.
 export class EmbeddingBackfillStore {
   readonly database: DatabaseSync
   readonly hasEmbeddings: boolean
@@ -40,11 +43,20 @@ export class EmbeddingBackfillStore {
       if (!readOnly) {
         if (!this.hasEmbeddings)
           throw new Error('Deploy the embedding schema before backfilling; dry-run is available on legacy databases')
-        if (!this.database.prepare('PRAGMA table_info(ai_segment_embeddings)').all().some(row => row.name === 'reason'))
-          throw new Error('Deploy the embedding quality schema before backfilling; dry-run is available on legacy databases')
-        if (this.database.prepare('PRAGMA journal_mode').get()?.journal_mode !== 'wal')
-          throw new Error('Backfill requires WAL mode; deploy the application schema first')
+        this.database.exec('PRAGMA journal_mode = WAL')
         this.database.exec('PRAGMA foreign_keys = ON')
+        const backup = backupLegacyEmbeddings(this.database, filename)
+        if (backup)
+          console.log(`声纹数据库升级备份：${backup}`)
+        this.database.exec('BEGIN IMMEDIATE')
+        try {
+          migrateEmbeddingSchema(this.database)
+          this.database.exec('COMMIT')
+        }
+        catch (error) {
+          this.database.exec('ROLLBACK')
+          throw error
+        }
       }
     }
     catch (error) {
@@ -125,13 +137,17 @@ export class EmbeddingBackfillStore {
     if (results.every(result => !result.voiceprint))
       return results
     const retryClause = mode === 'missing'
-      ? 'ON CONFLICT(record_id) DO NOTHING'
+      ? `ON CONFLICT(record_id) DO UPDATE SET
+          version = excluded.version, dimensions = excluded.dimensions,
+          status = excluded.status, embedding = excluded.embedding, reason = excluded.reason
+         WHERE ai_segment_embeddings.version = ? AND ai_segment_embeddings.version != excluded.version`
       : `ON CONFLICT(record_id) DO UPDATE SET
-          version = excluded.version, status = excluded.status, embedding = excluded.embedding, reason = excluded.reason
+          version = excluded.version, dimensions = excluded.dimensions,
+          status = excluded.status, embedding = excluded.embedding, reason = excluded.reason
          WHERE ai_segment_embeddings.status = ? AND ai_segment_embeddings.version = excluded.version`
     const statement = this.writeQueries.get(mode) ?? this.database.prepare(`
-      INSERT INTO ai_segment_embeddings (record_id, version, status, embedding, reason)
-      SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM ai_segments WHERE id = ? AND reviewed = 1)
+      INSERT INTO ai_segment_embeddings (record_id, version, dimensions, status, embedding, reason)
+      SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM ai_segments WHERE id = ? AND reviewed = 1)
       ${retryClause}
     `)
     this.writeQueries.set(mode, statement)
@@ -143,7 +159,7 @@ export class EmbeddingBackfillStore {
         if (!result.voiceprint)
           return result
         const voiceprint = result.voiceprint
-        const changes = statement.run(result.id, voiceprint.version, voiceprint.status, encodeVoiceprint(voiceprint), voiceprint.reason ?? null, result.id, ...(mode === 'missing' ? [] : [mode])).changes
+        const changes = statement.run(result.id, voiceprint.version, SPEAKER_DIMENSIONS, voiceprint.status, encodeVoiceprint(voiceprint), voiceprint.reason ?? null, result.id, mode === 'missing' ? result.previousVersion ?? null : mode).changes
         return Number(changes) === 1 ? result : { ...result, outcome: 'skipped' as const, reason: 'record_or_embedding_changed', voiceprint: undefined }
       })
       this.database.exec('COMMIT')
@@ -163,6 +179,6 @@ export class EmbeddingBackfillStore {
 
 export function eligibleForBackfill(record: { status: string | null, version: string | null, reviewed: boolean }, mode: BackfillMode, version: string): boolean {
   return record.reviewed && (mode === 'missing'
-    ? record.status === null
+    ? record.status === null || record.version !== version
     : record.status === mode && record.version === version)
 }

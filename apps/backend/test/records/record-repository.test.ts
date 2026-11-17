@@ -1,18 +1,18 @@
 import type { SegmentRecord } from '../../src/ai/segment-store.js'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
-import { SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
+import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
 import { RecordRepository } from '../../src/records/record-repository.js'
 
 test('only reviewed records receive durable voiceprint jobs; cancellation keeps vectors', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-reviewed-embedding-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const filename = join(directory, 'ai.sqlite')
-  const embedding = new Float32Array(256)
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
   embedding[0] = 1
   const first = new RecordRepository(filename)
   first.insert('1900', record())
@@ -29,7 +29,7 @@ test('only reviewed records receive durable voiceprint jobs; cancellation keeps 
   assert.equal(reopened.searchSpeakerMatches({ status: 'ready', version: SPEAKER_VERSION, embedding }, 'query').matches[0]?.callsign, 'BG5ABC')
   reopened.updateManualReview('segment-1', { reviewed: false })
   assert.deepEqual(reopened.searchSpeakerMatches({ status: 'ready', version: SPEAKER_VERSION, embedding }, 'query'), { referenceCount: 0, matches: [] })
-  assert.equal(inspect.prepare('SELECT length(embedding) AS n FROM ai_segment_embeddings').get()?.n, 1024)
+  assert.equal(inspect.prepare('SELECT length(embedding) AS n FROM ai_segment_embeddings').get()?.n, SPEAKER_DIMENSIONS * 4)
   assert.equal(reopened.updateVoiceprint('segment-1', { status: 'failed', version: SPEAKER_VERSION }), false)
   reopened.updateManualReview('segment-1', { reviewed: true })
   assert.deepEqual(reopened.pendingReviewedVoiceprints(), [])
@@ -67,7 +67,7 @@ test('quality reasons persist; cancelled or deleted jobs cannot save a vector', 
 test('SQL voice search uses current reviewed main callsigns, groups duplicates, and ignores time windows', () => {
   const repository = new RecordRepository(':memory:')
   const embedding = (cosine: number) => {
-    const values = new Float32Array(256)
+    const values = new Float32Array(SPEAKER_DIMENSIONS)
     values[0] = cosine
     values[1] = Math.sqrt(1 - cosine * cosine)
     return values
@@ -114,6 +114,60 @@ test('legacy embedding tables gain the reason column and keep unreviewed stored 
   assert.ok(inspect.prepare('PRAGMA table_info(ai_segment_embeddings)').all().some(row => row.name === 'reason'))
   inspect.close()
   upgraded.close()
+})
+
+test('legacy vectors are backed up and cleared once; only reviewed rows are rebuilt as 768-byte vectors', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-model-upgrade-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const filename = join(directory, 'ai.sqlite')
+  const initial = new RecordRepository(filename)
+  initial.insert('1900', record({ id: 'reviewed' }))
+  initial.insert('1900', record({ id: 'cancelled' }))
+  initial.close()
+  const database = new DatabaseSync(filename)
+  database.exec(`
+    DROP TABLE ai_segment_embeddings;
+    CREATE TABLE ai_segment_embeddings (
+      record_id TEXT PRIMARY KEY REFERENCES ai_segments(id) ON DELETE CASCADE,
+      version TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'unavailable', 'failed')),
+      embedding BLOB,
+      CHECK ((status = 'ready' AND embedding IS NOT NULL AND length(embedding) = 1024)
+        OR (status != 'ready' AND embedding IS NULL))
+    );
+    UPDATE ai_segments SET reviewed = 1 WHERE id = 'reviewed';
+  `)
+  const legacy = new Uint8Array(new Float32Array(256).fill(0.0625).buffer)
+  for (const id of ['reviewed', 'cancelled'])
+    database.prepare('INSERT INTO ai_segment_embeddings VALUES (?, ?, ?, ?)').run(id, 'wespeaker-legacy', 'ready', legacy)
+  const upgraded = new RecordRepository(filename)
+  assert.equal(database.prepare('SELECT COUNT(*) AS n FROM ai_segment_embeddings').get()?.n, 0)
+  assert.equal(upgraded.find('cancelled')?.reviewed, false)
+  assert.equal(upgraded.find('reviewed')?.reviewed, true)
+  assert.deepEqual(upgraded.pendingReviewedVoiceprints().map(row => row.id), ['reviewed'])
+  assert.equal(upgraded.prepareReviewedVoiceprint('reviewed'), true)
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
+  embedding[0] = 1
+  assert.equal(upgraded.updateVoiceprint('reviewed', { status: 'ready', version: SPEAKER_VERSION, embedding }), true)
+  assert.equal(database.prepare('SELECT length(embedding) AS n FROM ai_segment_embeddings WHERE record_id = ?').get('reviewed')?.n, SPEAKER_DIMENSIONS * 4)
+  assert.equal(database.prepare('SELECT embedding FROM ai_segment_embeddings WHERE record_id = ?').get('cancelled'), undefined)
+  assert.throws(() => database.prepare('UPDATE ai_segment_embeddings SET embedding = ? WHERE record_id = ?').run(legacy, 'reviewed'))
+  assert.throws(() => database.prepare('UPDATE ai_segment_embeddings SET dimensions = 256 WHERE record_id = ?').run('reviewed'))
+  assert.equal(upgraded.searchSpeakerMatches({ status: 'ready', version: SPEAKER_VERSION, embedding }, 'query').referenceCount, 1)
+  assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), [])
+  const backups = readdirSync(join(directory, 'backups'))
+  assert.equal(backups.length, 1)
+  const backup = new DatabaseSync(join(directory, 'backups', backups[0]!), { readOnly: true })
+  assert.equal(backup.prepare('SELECT length(embedding) AS n FROM ai_segment_embeddings LIMIT 1').get()?.n, 1024)
+  backup.close()
+  upgraded.close()
+  const reopened = new RecordRepository(filename)
+  assert.deepEqual(reopened.pendingReviewedVoiceprints(), [])
+  assert.equal(readdirSync(join(directory, 'backups')).length, 1)
+  reopened.delete('cancelled', () => {})
+  assert.equal(database.prepare('SELECT COUNT(*) AS n FROM ai_segment_embeddings WHERE record_id = ?').get('cancelled')?.n, 0)
+  reopened.close()
+  database.close()
 })
 
 function record(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
