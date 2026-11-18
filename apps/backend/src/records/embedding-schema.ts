@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { SPEAKER_DIMENSIONS } from '../ai/speaker-model.mjs'
+import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../ai/speaker-model.mjs'
+import { SPEAKER_MAX_AUDIO_MS } from '../ai/speaker-resources.js'
 
 const EMBEDDING_CONSTRAINT = `speaker_embedding_${SPEAKER_DIMENSIONS}_float32`
 
@@ -51,4 +52,12 @@ export function migrateEmbeddingSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS ai_segment_embeddings_pending
       ON ai_segment_embeddings (record_id) WHERE status = 'pending';
   `)
+  // Retry only the old 20s/640MiB policy rejections. New-policy reasons are
+  // distinct so restarts cannot repeatedly retry the same unavailable audio.
+  database.prepare(`
+    UPDATE ai_segment_embeddings SET status = 'pending', reason = NULL
+    WHERE version = ? AND status = 'unavailable'
+      AND reason IN ('audio_too_long', 'resource_limit')
+      AND record_id IN (SELECT id FROM ai_segments WHERE reviewed = 1 AND duration_ms <= ?)
+  `).run(SPEAKER_VERSION, SPEAKER_MAX_AUDIO_MS)
 }

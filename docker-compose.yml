@@ -7,11 +7,11 @@ services:
     # in .env when they differ from the usual 1000:1000 Linux account.
     user: '${PUID:-1000}:${PGID:-1000}'
     restart: unless-stopped
-    # Reserve host capacity on small servers; native inference must not consume
-    # both cores or push the entire host into memory reclaim / swapping.
+    # Full-record speaker extraction up to 60s requires a host with at least
+    # 4 GiB RAM. Reserve host capacity and prevent container swapping.
     cpus: '1.0'
-    mem_limit: 1g
-    memswap_limit: 1g
+    mem_limit: 2560m
+    memswap_limit: 2560m
     pids_limit: 128
     ports:
       # host 8059 -> container 3000

@@ -166,6 +166,36 @@ test('legacy vectors are cleared once without an automatic backup; only reviewed
   database.close()
 })
 
+test('resource policy upgrade retries only eligible legacy limit rejections once', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-resource-policy-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const filename = join(directory, 'ai.sqlite')
+  const first = new RecordRepository(filename)
+  for (const [id, reason] of [
+    ['legacy-time', 'audio_too_long'],
+    ['legacy-memory', 'resource_limit'],
+    ['quality', 'interference_high_band'],
+    ['new-limit', 'resource_limit_2g'],
+    ['cancelled', 'resource_limit'],
+    ['over-minute', 'audio_too_long'],
+  ] as const) {
+    first.insert('1900', record({ id, durationMs: id === 'over-minute' ? 61_000 : 30_000 }))
+    first.updateManualReview(id, { reviewed: true })
+    first.updateVoiceprint(id, { status: 'unavailable', version: SPEAKER_VERSION, reason })
+  }
+  first.updateManualReview('cancelled', { reviewed: false })
+  first.close()
+  const upgraded = new RecordRepository(filename)
+  assert.deepEqual(upgraded.pendingReviewedVoiceprints().map(row => row.id).sort(), ['legacy-memory', 'legacy-time'])
+  assert.equal(upgraded.prepareReviewedVoiceprint('legacy-memory'), true)
+  upgraded.updateVoiceprint('legacy-memory', { status: 'unavailable', version: SPEAKER_VERSION, reason: 'resource_limit_2g' })
+  upgraded.close()
+  const reopened = new RecordRepository(filename)
+  assert.deepEqual(reopened.pendingReviewedVoiceprints().map(row => row.id), ['legacy-time'])
+  assert.equal(reopened.find('cancelled')?.reviewed, false)
+  reopened.close()
+})
+
 function record(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
   return {
     corrected: 'Bravo Golf Five X-ray X-ray X-ray',

@@ -3,9 +3,18 @@ import { freemem } from 'node:os'
 import process from 'node:process'
 
 const MIB = 1024 * 1024
-export const SPEAKER_MAX_RSS = 640 * MIB
+export const SPEAKER_MAX_RSS = 2 * 1024 * MIB
 export const SPEAKER_MIN_BUDGET = 384 * MIB
-export const SPEAKER_MAX_SAMPLES = 20 * 8_000
+export const SPEAKER_MAX_AUDIO_MS = 60_000
+export const SPEAKER_MAX_SAMPLES = SPEAKER_MAX_AUDIO_MS * 8
+export const SPEAKER_TOO_LONG_REASON = 'audio_too_long_60s'
+export const SPEAKER_RESOURCE_LIMIT_REASON = 'resource_limit_2g'
+
+// Conservative admission estimate from full-record memory measurements. The
+// live RSS/cgroup checks still enforce the actual budget during inference.
+export function speakerRequiredMemory(samples: number): number {
+  return Math.max(SPEAKER_MIN_BUDGET, (256 + 26 * samples / 8_000) * MIB)
+}
 
 function readNumber(filename: string): number | undefined {
   try {

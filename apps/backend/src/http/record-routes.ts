@@ -92,8 +92,21 @@ export async function registerRecordRoutes(app: FastifyInstance, options: Record
     if (!options.speakerReferences)
       return reply.code(503).send({ message: '声纹测试暂不可用' })
     reviews.find(request.params.id)
-    const result = await options.speakerReferences.recognizeRecord(request.params.id)
-    return reply.header('cache-control', 'no-store').send(result)
+    const controller = new AbortController()
+    const onClose = () => {
+      if (!reply.raw.writableEnded)
+        controller.abort()
+    }
+    reply.raw.once('close', onClose)
+    try {
+      const result = await options.speakerReferences.recognizeRecord(request.params.id, controller.signal)
+      if (controller.signal.aborted) {
+        reply.hijack()
+        return
+      }
+      return reply.header('cache-control', 'no-store').send(result)
+    }
+    finally { reply.raw.removeListener('close', onClose) }
   })
 
   app.delete<{ Params: RecordParams }>('/records/:id', { preHandler: requireAdministrator }, async (request, reply) => {

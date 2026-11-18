@@ -11,6 +11,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
 import { eligibleForBackfill, EmbeddingBackfillStore } from '../records/embedding-backfill-store.js'
 import { SPEAKER_MODEL_SHA256, SPEAKER_VERSION } from './speaker-model.mjs'
+import { SPEAKER_RESOURCE_LIMIT_REASON } from './speaker-resources.js'
 import { readSpeakerWav, speakerWavFile } from './speaker-wav.js'
 import { SpeakerExtractor } from './speaker.js'
 
@@ -392,7 +393,7 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
                 break
               const reason = `extraction_error: ${error instanceof Error ? error.message : String(error)}`
               if (reason.includes('resource limit'))
-                result = { index, id: record.id, outcome: 'unavailable', reason: 'resource_limit', voiceprint: { status: 'unavailable', version: SPEAKER_VERSION, reason: 'resource_limit' } }
+                result = { index, id: record.id, outcome: 'unavailable', reason: SPEAKER_RESOURCE_LIMIT_REASON, voiceprint: { status: 'unavailable', version: SPEAKER_VERSION, reason: SPEAKER_RESOURCE_LIMIT_REASON } }
               else if (reason.includes('insufficient memory'))
                 result = { index, id: record.id, outcome: 'skipped', reason: 'insufficient_memory' }
               else
