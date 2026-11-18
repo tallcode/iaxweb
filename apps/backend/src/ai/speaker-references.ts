@@ -16,6 +16,31 @@ interface SpeakerReferenceOptions {
   modelFile: string
 }
 
+type ScoredSpeakerMatch = Omit<SpeakerMatch, 'confidence'>
+
+function matchConfidence(match: ScoredSpeakerMatch): SpeakerMatch['confidence'] {
+  const scores = [
+    { similarity: match.minSimilarity, recordCount: match.count },
+    { similarity: match.referenceSimilarity, recordCount: match.referenceRecordCount },
+    { similarity: match.trimmedReferenceSimilarity, recordCount: match.trimmedReferenceRecordCount },
+    ...match.referenceGroups,
+  ]
+  let confidence: SpeakerMatch['confidence'] = null
+  for (const { similarity, recordCount } of scores) {
+    if (similarity === null || recordCount < 2)
+      continue
+    if (recordCount >= 5 && similarity >= 0.90)
+      return 'high'
+    const mediumThreshold = recordCount >= 10 ? 0.80 : recordCount >= 5 ? 0.85 : 0.90
+    const lowThreshold = recordCount >= 5 ? 0.80 : 0.85
+    if (similarity >= mediumThreshold)
+      confidence = 'medium'
+    else if (confidence === null && similarity >= lowThreshold)
+      confidence = 'low'
+  }
+  return confidence
+}
+
 // One shared queue for manual queries and reviewed-reference jobs.
 // The DB's reviewed flag is checked again on every read and final write.
 export class SpeakerReferenceService {
@@ -122,7 +147,7 @@ export class SpeakerReferenceService {
       return unavailable('search_failed', '特征匹配失败，请稍后重试。')
     }
     finally { measurements.databaseSearchMs = performance.now() - searchStarted }
-    const matches: SpeakerMatch[] = search.matches.map(match => ({
+    const matches: ScoredSpeakerMatch[] = search.matches.map(match => ({
       ...match,
       referenceSimilarity: null,
       referenceRecordCount: 0,
@@ -169,7 +194,7 @@ export class SpeakerReferenceService {
           ? '参考库中暂无其他已标注、质量合格且有有效主叫呼号的同版本特征。'
           : `没有找到相似度大于 ${SPEAKER_REFERENCE_THRESHOLD.toFixed(2)} 的已标注录音。`,
       referenceCount: search.referenceCount,
-      matches,
+      matches: matches.map(match => ({ ...match, confidence: matchConfidence(match) })),
     }
   }
 

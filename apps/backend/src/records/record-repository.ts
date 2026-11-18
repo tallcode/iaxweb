@@ -11,7 +11,7 @@ import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { decodeVoiceprint, encodeVoiceprint } from './voiceprint.js'
 
 export const SPEAKER_REFERENCE_THRESHOLD = 0.80
-type SpeakerSearchMatch = Omit<SpeakerMatch, Exclude<keyof SpeakerReferenceScore, 'callsign'>>
+type SpeakerSearchMatch = Omit<SpeakerMatch, 'confidence' | Exclude<keyof SpeakerReferenceScore, 'callsign'>>
 
 export interface StoredSpot {
   at: string

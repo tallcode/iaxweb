@@ -98,6 +98,7 @@ export const adminRecordPageSchema = recordPageSchema.extend({ items: z.array(ad
 
 export const speakerMatchSchema = z.object({
   callsign: z.string().regex(CALLSIGN_PATTERN),
+  confidence: z.enum(['high', 'medium', 'low']).nullable(),
   count: z.number().int().positive(),
   minSimilarity: z.number().min(-1).max(1),
   maxSimilarity: z.number().min(-1).max(1),

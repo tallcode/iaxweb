@@ -55,27 +55,13 @@ function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>
 }
 
 function recognitionRow(match: DeepReadonly<SpeakerMatch>) {
-  const scores = [
-    { similarity: match.minSimilarity, recordCount: match.count },
-    { similarity: match.referenceSimilarity, recordCount: match.referenceRecordCount },
-    { similarity: match.trimmedReferenceSimilarity, recordCount: match.trimmedReferenceRecordCount },
-    ...match.referenceGroups,
-  ]
-  const highestScore = Math.max(...scores.map(score => score.similarity ?? -Infinity))
-  let status: 'passed' | 'uncertain' | null = null
-  for (const { similarity, recordCount } of scores) {
-    if (similarity === null || recordCount < 2)
-      continue
-    const passThreshold = recordCount >= 10 ? 0.80 : recordCount >= 5 ? 0.85 : 0.90
-    if (similarity >= passThreshold) {
-      status = 'passed'
-      break
-    }
-    const uncertainThreshold = recordCount >= 5 ? 0.80 : 0.85
-    if (similarity >= uncertainThreshold)
-      status = 'uncertain'
-  }
-  return { match, status, highestScore }
+  const highestScore = Math.max(
+    match.minSimilarity,
+    match.referenceSimilarity ?? -Infinity,
+    match.trimmedReferenceSimilarity ?? -Infinity,
+    ...match.referenceGroups.map(group => group.similarity),
+  )
+  return { match, highestScore }
 }
 </script>
 
@@ -97,7 +83,7 @@ function recognitionRow(match: DeepReadonly<SpeakerMatch>) {
             <table class="w-full whitespace-nowrap text-left text-xs tabular-nums sm:text-sm">
               <thead class="bg-slate-800/80 text-xs text-slate-400">
                 <tr>
-                  <th class="w-6" aria-label="通过状态" /><th class="px-1.5 py-2.5 sm:px-2.5">
+                  <th class="w-6" aria-label="置信度" /><th class="px-1.5 py-2.5 sm:px-2.5">
                     呼号
                   </th><th class="px-1.5 py-2.5 text-right sm:px-2.5">
                     独立
@@ -109,12 +95,16 @@ function recognitionRow(match: DeepReadonly<SpeakerMatch>) {
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800">
-                <tr v-for="{ match, status } in rankedMatches" :key="match.callsign">
+                <tr v-for="{ match } in rankedMatches" :key="match.callsign">
                   <td class="px-1 py-2.5">
-                    <svg v-if="status === 'passed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-emerald-400" role="img" aria-label="通过">
+                    <svg v-if="match.confidence === 'high'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-emerald-400" role="img" aria-label="高置信度">
+                      <path d="M3.85 8.62a4 4 0 0 1 4.78-4.78 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.76 4 4 0 0 1-4.78 4.78 4 4 0 0 1-6.74 0 4 4 0 0 1-4.78-4.78 4 4 0 0 1 0-6.76Z" />
+                      <path d="m9 12 2 2 4-4" />
+                    </svg>
+                    <svg v-else-if="match.confidence === 'medium'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-emerald-400" role="img" aria-label="中置信度">
                       <path d="m5 12 4 4L19 6" />
                     </svg>
-                    <svg v-else-if="status === 'uncertain'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-yellow-400" role="img" aria-label="不确定">
+                    <svg v-else-if="match.confidence === 'low'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-yellow-400" role="img" aria-label="低置信度">
                       <path d="M9 9a3 3 0 1 1 5 2.3c-1.2.9-2 1.3-2 2.7m0 4h.01" />
                     </svg>
                   </td><td class="px-1.5 py-2.5 font-mono font-medium text-cyan-300 sm:px-2.5">

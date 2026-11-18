@@ -5,8 +5,10 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { speakerRecognitionSchema } from '@iaxweb/contracts'
+import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
 import { SpeakerReferenceService } from '../../src/ai/speaker-references.js'
 import { speakerWavFile } from '../../src/ai/speaker-wav.js'
+import { SpeakerExtractor } from '../../src/ai/speaker.js'
 import { encodeWav } from '../../src/ai/wav.js'
 import { RecordRepository } from '../../src/records/record-repository.js'
 import { RecordingStore } from '../../src/records/recording-store.js'
@@ -92,4 +94,43 @@ test('manual recognition includes measurements on early recording failures witho
     assert.equal(inspect.prepare('SELECT COUNT(*) AS count FROM ai_segment_embeddings').get()?.count, 0)
   }
   finally { inspect.close() }
+})
+
+test('manual recognition returns the highest confidence across all scores with at least two references', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-speaker-confidence-'))
+  const repository = new RecordRepository(':memory:')
+  const service = new SpeakerReferenceService({ repository, recordingsDirectory: directory, modelFile: join(directory, 'missing.onnx') })
+  t.after(() => {
+    service.stop()
+    repository.close()
+    rmSync(directory, { recursive: true, force: true })
+  })
+  const record = { id: 'aabb', timestamp: '2026-11-17T09:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '测试录音' }
+  repository.insert('1900', record)
+  new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(speechLikeAudio()))
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
+  embedding[0] = 1
+  t.mock.method(SpeakerExtractor.prototype, 'extract', async () => ({ status: 'ready', version: SPEAKER_VERSION, embedding } as const))
+  t.mock.method(repository, 'searchSpeakerMatches', () => ({
+    referenceCount: 20,
+    matches: [
+      { callsign: 'BG5AAA', count: 5, similarity: 0.90 },
+      { callsign: 'BG5BBB', count: 4, similarity: 0.90 },
+      { callsign: 'BG5CCC', count: 5, similarity: 0.84 },
+      { callsign: 'BG5DDD', count: 5, similarity: 0.86 },
+      { callsign: 'BG5EEE', count: 1, similarity: 0.98 },
+    ].map(({ callsign, count, similarity }) => ({ callsign, count, minSimilarity: similarity, maxSimilarity: similarity, averageSimilarity: similarity })),
+  }))
+  t.mock.method(repository, 'recentSpeakerReferences', () => [{ callsign: 'BG5DDD', embeddings: Array.from<Float32Array>({ length: 8 }).fill(embedding) }])
+  t.mock.method(SpeakerExtractor.prototype, 'scoreReferences', async () => [{
+    callsign: 'BG5DDD',
+    referenceSimilarity: 0.77,
+    referenceRecordCount: 8,
+    trimmedReferenceSimilarity: 0.81,
+    trimmedReferenceRecordCount: 7,
+    referenceGroups: [{ similarity: 0.90, recordCount: 5 }],
+  }])
+
+  const result = speakerRecognitionSchema.parse(await service.recognizeRecord(record.id))
+  assert.deepEqual(result.matches.map(match => match.confidence), ['high', 'medium', 'low', 'high', null])
 })
