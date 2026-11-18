@@ -1,5 +1,5 @@
 import type { PersistedRecord, RecordPage, SpeakerMatch } from '@iaxweb/contracts'
-import type { RecognitionRecord, SpeakerReferenceGroup, Voiceprint } from './types.js'
+import type { RecognitionRecord, SpeakerReferenceGroup, SpeakerReferenceScore, Voiceprint } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -10,7 +10,7 @@ import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { decodeVoiceprint, encodeVoiceprint } from './voiceprint.js'
 
 export const SPEAKER_REFERENCE_THRESHOLD = 0.80
-type SpeakerSearchMatch = Omit<SpeakerMatch, 'referenceSimilarity' | 'referenceRecordCount'>
+type SpeakerSearchMatch = Omit<SpeakerMatch, Exclude<keyof SpeakerReferenceScore, 'callsign'>>
 
 export interface StoredSpot {
   at: string

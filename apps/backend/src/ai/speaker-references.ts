@@ -122,7 +122,13 @@ export class SpeakerReferenceService {
       return unavailable('search_failed', '特征匹配失败，请稍后重试。')
     }
     finally { measurements.databaseSearchMs = performance.now() - searchStarted }
-    const matches: SpeakerMatch[] = search.matches.map(match => ({ ...match, referenceSimilarity: null, referenceRecordCount: 0 }))
+    const matches: SpeakerMatch[] = search.matches.map(match => ({
+      ...match,
+      referenceSimilarity: null,
+      referenceRecordCount: 0,
+      trimmedReferenceSimilarity: null,
+      trimmedReferenceRecordCount: 0,
+    }))
     if (matches.length > 0) {
       let groups: SpeakerReferenceGroup[] = []
       const lookupStarted = performance.now()
@@ -141,6 +147,8 @@ export class SpeakerReferenceService {
             if (score) {
               match.referenceSimilarity = score.referenceSimilarity
               match.referenceRecordCount = score.referenceRecordCount
+              match.trimmedReferenceSimilarity = score.trimmedReferenceSimilarity
+              match.trimmedReferenceRecordCount = score.trimmedReferenceRecordCount
             }
           }
         }

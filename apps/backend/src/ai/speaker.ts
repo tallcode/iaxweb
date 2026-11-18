@@ -483,15 +483,19 @@ export class SpeakerExtractor {
 
 function validReferenceScores(scores: unknown, groups: SpeakerReferenceGroup[]): scores is SpeakerReferenceScore[] {
   return Array.isArray(scores) && scores.length === groups.length && scores.every((score, index) => {
-    if (!score || score.callsign !== groups[index]!.callsign || !Number.isInteger(score.referenceRecordCount)
-      || score.referenceRecordCount < 0 || score.referenceRecordCount > Math.min(10, groups[index]!.embeddings.length)) {
-      return false
-    }
-    return score.referenceSimilarity === null
-      ? score.referenceRecordCount === 0
-      : typeof score.referenceSimilarity === 'number' && Number.isFinite(score.referenceSimilarity)
-        && score.referenceSimilarity >= -1 && score.referenceSimilarity <= 1 && score.referenceRecordCount > 0
+    const group = groups[index]!
+    const count = group.embeddings.length
+    return score && score.callsign === group.callsign
+      && validReferenceScore(score.referenceSimilarity, score.referenceRecordCount, count)
+      && validReferenceScore(score.trimmedReferenceSimilarity, score.trimmedReferenceRecordCount, count - Math.floor(count / 5))
   })
+}
+
+function validReferenceScore(similarity: unknown, count: unknown, expectedCount: number): boolean {
+  return similarity === null
+    ? count === 0
+    : typeof similarity === 'number'
+      && similarity >= -1 && similarity <= 1 && count === expectedCount && expectedCount > 0
 }
 
 export function validEmbedding(embedding: Float32Array): boolean {

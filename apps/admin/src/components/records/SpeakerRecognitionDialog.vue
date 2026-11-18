@@ -27,6 +27,14 @@ function onClose(): void {
     previousFocus.focus()
   previousFocus = undefined
 }
+
+function formatSimilarity(value: number): string {
+  return (value * 100).toFixed(2)
+}
+
+function formatReferenceSimilarity(value: number | null, count: number): string {
+  return value === null ? '—' : `${formatSimilarity(value)}/${count}`
+}
 </script>
 
 <template>
@@ -47,7 +55,7 @@ function onClose(): void {
         </p>
         <template v-else-if="result">
           <p class="mb-3 text-sm text-slate-300">
-            相似度 &gt; {{ result.threshold.toFixed(2) }}<template v-if="result.referenceCount !== null">
+            相似度 &gt; {{ formatSimilarity(result.threshold) }}<template v-if="result.referenceCount !== null">
               · 参考录音 {{ result.referenceCount }} 条
             </template><template v-if="result.status === 'matched'">
               · 命中 {{ totalMatches }} 条 / {{ result.matches.length }} 个呼号
@@ -67,10 +75,10 @@ function onClose(): void {
                     <span class="sm:hidden">Min</span><span class="hidden sm:inline">最小值</span>
                   </th><th class="px-2 py-3 text-right sm:px-3" title="超过阈值的命中录音平均相似度">
                     <span class="sm:hidden">Avg</span><span class="hidden sm:inline">平均值</span>
-                  </th><th class="px-2 py-3 text-right sm:px-3" title="最近最多 10 条有效标注特征合成后的相似度">
-                    <span class="sm:hidden">Syn</span><span class="hidden sm:inline">合成相似度</span>
-                  </th><th class="hidden px-3 py-3 text-right sm:table-cell" title="参与合成的有效标注录音数量，最多 10 条（Ref）">
-                    参考数量
+                  </th><th class="px-2 py-3 text-right sm:px-3" title="合成相似度（百分制）/ 参考条数">
+                    Syn
+                  </th><th class="hidden px-3 py-3 text-right lg:table-cell" title="按参考录音之间的相似度筛选后，显示合成分数 / 剩余参考条数">
+                    Syn（筛选后）
                   </th>
                 </tr>
               </thead>
@@ -81,25 +89,25 @@ function onClose(): void {
                   </td><td class="px-2 py-3 text-right sm:px-3">
                     {{ match.count }}
                   </td><td class="hidden px-3 py-3 text-right sm:table-cell">
-                    {{ match.maxSimilarity.toFixed(4) }}
+                    {{ formatSimilarity(match.maxSimilarity) }}
                   </td><td class="hidden px-3 py-3 text-right sm:table-cell">
-                    {{ match.minSimilarity.toFixed(4) }}
+                    {{ formatSimilarity(match.minSimilarity) }}
                   </td><td class="px-2 py-3 text-right sm:px-3">
-                    {{ match.averageSimilarity.toFixed(4) }}
+                    {{ formatSimilarity(match.averageSimilarity) }}
                   </td><td class="px-2 py-3 text-right text-cyan-200 sm:px-3">
-                    {{ match.referenceSimilarity?.toFixed(4) ?? '—' }}
-                  </td><td class="hidden px-3 py-3 text-right sm:table-cell">
-                    {{ match.referenceRecordCount }}
+                    {{ formatReferenceSimilarity(match.referenceSimilarity, match.referenceRecordCount) }}
+                  </td><td class="hidden px-3 py-3 text-right text-cyan-200 lg:table-cell">
+                    {{ formatReferenceSimilarity(match.trimmedReferenceSimilarity, match.trimmedReferenceRecordCount) }}
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
           <p v-else class="rounded-lg border border-amber-900/70 bg-amber-950/20 px-4 py-4 text-sm leading-6 text-amber-200">
-            {{ result.reason }}
+            {{ result.reasonCode === 'below_threshold' ? '没有找到超过相似度阈值的已标注录音。' : result.reason }}
           </p>
           <p v-if="result.status === 'matched'" class="mt-3 text-xs leading-5 text-slate-400">
-            匹配统计仅含超过阈值的录音；合成值使用最近最多 10 条有效标注。按匹配数量排序。
+            匹配统计仅含超过阈值的录音，按匹配数量排序。Syn 显示合成分数 / 参考条数，取最近最多 10 条有效标注。
           </p>
         </template>
       </div>
