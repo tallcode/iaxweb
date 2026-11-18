@@ -103,9 +103,11 @@ export const speakerMatchSchema = z.object({
   maxSimilarity: z.number().min(-1).max(1),
   averageSimilarity: z.number().min(-1).max(1),
   referenceSimilarity: z.number().min(-1).max(1).nullable(),
-  referenceRecordCount: z.number().int().min(0).max(10),
-  trimmedReferenceSimilarity: z.number().min(-1).max(1).nullable(),
-  trimmedReferenceRecordCount: z.number().int().min(0).max(8),
+  referenceRecordCount: z.number().int().min(0).max(16),
+  referenceGroups: z.array(z.object({
+    similarity: z.number().min(-1).max(1),
+    recordCount: z.number().int().min(2).max(16),
+  })).max(4),
 })
 const measuredMilliseconds = z.number().nonnegative().nullable()
 export const speakerRecognitionMeasurementsSchema = z.object({

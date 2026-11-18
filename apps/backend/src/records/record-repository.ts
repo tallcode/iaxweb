@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { hasCallerCallsign } from '@iaxweb/contracts'
 import * as sqliteVec from 'sqlite-vec'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../ai/speaker-model.mjs'
+import { SPEAKER_REFERENCE_LIMIT } from '../ai/speaker-reference-score.mjs'
 import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { decodeVoiceprint, encodeVoiceprint } from './voiceprint.js'
 
@@ -252,11 +253,11 @@ export class RecordRepository {
       WHERE COALESCE(s.manual_callsign, s.callsign) COLLATE NOCASE = ?
         AND s.reviewed = 1 AND e.status = 'ready' AND e.version = ?
         AND e.dimensions = ? AND s.id != ?
-      ORDER BY s.captured_at DESC, s.id DESC LIMIT 10
+      ORDER BY s.captured_at DESC, s.id DESC LIMIT ?
     `)
     return callsigns.map(callsign => ({
       callsign,
-      embeddings: query.all(callsign, SPEAKER_VERSION, SPEAKER_DIMENSIONS, excludeId)
+      embeddings: query.all(callsign, SPEAKER_VERSION, SPEAKER_DIMENSIONS, excludeId, SPEAKER_REFERENCE_LIMIT)
         .map(row => decodeVoiceprint(row.embedding)),
     }))
   }

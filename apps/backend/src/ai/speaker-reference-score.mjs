@@ -1,5 +1,9 @@
 import { SPEAKER_DIMENSIONS } from './speaker-model.mjs'
 
+export const SPEAKER_REFERENCE_LIMIT = 16
+const GROUP_SIMILARITY_THRESHOLD = 0.72
+const MIN_REFERENCES_TO_GROUP = 5
+
 function vectorNorm(vector) {
   if (!(vector instanceof Float32Array) || vector.length !== SPEAKER_DIMENSIONS)
     return 0
@@ -12,29 +16,53 @@ function vectorNorm(vector) {
   return Math.sqrt(squared)
 }
 
-function median(values) {
-  values.sort((a, b) => a - b)
-  const midpoint = Math.floor(values.length / 2)
-  return values.length % 2 ? values[midpoint] : (values[midpoint - 1] + values[midpoint]) / 2
-}
-
-function trimReferences(embeddings, norms, removeCount) {
-  const similarities = embeddings.map(() => [])
+function clusterReferences(embeddings, norms) {
+  const similarities = embeddings.map(() => new Float64Array(embeddings.length))
   for (let i = 0; i < embeddings.length; i++) {
     for (let j = i + 1; j < embeddings.length; j++) {
       let dot = 0
       for (let k = 0; k < SPEAKER_DIMENSIONS; k++)
         dot += embeddings[i][k] * embeddings[j][k]
       const similarity = Math.max(-1, Math.min(1, dot / (norms[i] * norms[j])))
-      similarities[i].push(similarity)
-      similarities[j].push(similarity)
+      similarities[i][j] = similarity
+      similarities[j][i] = similarity
     }
   }
-  // The repository sends newest first, so drop older records first on ties.
-  const ranked = similarities.map((scores, index) => ({ index, score: median(scores) }))
-    .sort((a, b) => a.score - b.score || b.index - a.index)
-  const removed = new Set(ranked.slice(0, removeCount).map(item => item.index))
-  return embeddings.filter((_, index) => !removed.has(index))
+  const clusters = embeddings.map((_, index) => [index])
+  for (;;) {
+    let best = GROUP_SIMILARITY_THRESHOLD
+    let mergeLeft = -1
+    let mergeRight = -1
+    for (let i = 0; i < clusters.length; i++) {
+      if (clusters[i].length === 0)
+        continue
+      for (let j = i + 1; j < clusters.length; j++) {
+        if (clusters[j].length === 0)
+          continue
+        const similarity = similarities[i][j]
+        if (similarity > best || (similarity === best && mergeLeft === -1)) {
+          best = similarity
+          mergeLeft = i
+          mergeRight = j
+        }
+      }
+    }
+    if (mergeLeft === -1)
+      break
+
+    clusters[mergeLeft].push(...clusters[mergeRight])
+    clusters[mergeRight] = []
+    // Complete linkage uses the least similar pair across the merged groups.
+    for (let i = 0; i < clusters.length; i++) {
+      if (i === mergeLeft || clusters[i].length === 0)
+        continue
+      const similarity = Math.min(similarities[mergeLeft][i], similarities[mergeRight][i])
+      similarities[mergeLeft][i] = similarity
+      similarities[i][mergeLeft] = similarity
+    }
+  }
+
+  return clusters.filter(cluster => cluster.length * 5 > embeddings.length)
 }
 
 // sherpa-onnx-node 2.0.1 exposes addMulti/verify, but no numeric score or
@@ -76,25 +104,28 @@ export function scoreSpeakerReferences(sherpa, query, groups) {
       callsign,
       referenceSimilarity: null,
       referenceRecordCount: 0,
-      trimmedReferenceSimilarity: null,
-      trimmedReferenceRecordCount: 0,
+      referenceGroups: [],
     }
-    if (embeddings.length === 0 || embeddings.length > 10)
+    if (embeddings.length === 0 || embeddings.length > SPEAKER_REFERENCE_LIMIT)
       return unavailable
     const norms = embeddings.map(vectorNorm)
     if (norms.includes(0))
       return unavailable
 
     const referenceSimilarity = scoreTemplate(manager, callsign, query, embeddings)
-    const removeCount = Math.floor(embeddings.length / 5)
-    const retained = removeCount === 0 ? embeddings : trimReferences(embeddings, norms, removeCount)
-    const trimmedReferenceSimilarity = removeCount === 0 ? referenceSimilarity : scoreTemplate(manager, callsign, query, retained)
+    const referenceGroups = embeddings.length < MIN_REFERENCES_TO_GROUP
+      ? []
+      : clusterReferences(embeddings, norms).flatMap((cluster) => {
+          const similarity = cluster.length === embeddings.length
+            ? referenceSimilarity
+            : scoreTemplate(manager, callsign, query, cluster.map(index => embeddings[index]))
+          return similarity === null ? [] : [{ similarity, recordCount: cluster.length }]
+        }).sort((a, b) => b.recordCount - a.recordCount || b.similarity - a.similarity)
     return {
       callsign,
       referenceSimilarity,
       referenceRecordCount: referenceSimilarity === null ? 0 : embeddings.length,
-      trimmedReferenceSimilarity,
-      trimmedReferenceRecordCount: trimmedReferenceSimilarity === null ? 0 : retained.length,
+      referenceGroups,
     }
   })
 }

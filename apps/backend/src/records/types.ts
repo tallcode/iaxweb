@@ -5,7 +5,7 @@ export interface SpeakerReferenceGroup {
   embeddings: Float32Array[]
 }
 
-export type SpeakerReferenceScore = Pick<SpeakerMatch, 'callsign' | 'referenceSimilarity' | 'referenceRecordCount' | 'trimmedReferenceSimilarity' | 'trimmedReferenceRecordCount'>
+export type SpeakerReferenceScore = Pick<SpeakerMatch, 'callsign' | 'referenceSimilarity' | 'referenceRecordCount' | 'referenceGroups'>
 
 export type Voiceprint = { version: string, reason?: string | undefined } & (
   | { status: 'ready', embedding: Float32Array }

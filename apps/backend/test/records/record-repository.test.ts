@@ -98,29 +98,29 @@ test('quality reasons persist; cancelled or deleted jobs cannot save a vector', 
   reopened.close()
 })
 
-test('reference templates use the latest ten eligible records, including below-threshold and AI-only callers', () => {
+test('reference templates use the latest sixteen eligible records, including below-threshold and AI-only callers', () => {
   const repository = new RecordRepository(':memory:')
   try {
     const vectors: Float32Array[] = []
-    for (let index = 0; index < 12; index++) {
+    for (let index = 0; index < 18; index++) {
       const segment = record({ id: `ref-${index}`, timestamp: `2026-10-${String(index + 1).padStart(2, '0')}T00:00:00Z`, callsign: 'BG5ABC' })
       repository.insert('1900', segment)
       repository.updateAnalysis(segment)
       repository.updateManualReview(segment.id, { reviewed: true })
       const embedding = new Float32Array(SPEAKER_DIMENSIONS)
-      embedding[0] = index / 20
+      embedding[0] = index / 25
       embedding[1] = Math.sqrt(1 - embedding[0]! ** 2)
       vectors.push(embedding)
       repository.updateVoiceprint(segment.id, { status: 'ready', version: SPEAKER_VERSION, embedding })
     }
-    repository.updateManualReview('ref-11', { reviewed: false })
-    repository.updateManualReview('ref-10', { callsign: 'BG5XYZ' })
-    const references = repository.recentSpeakerReferences(['bg5abc', 'BG5XYZ', 'BG5NONE'], 'ref-9')
-    assert.deepEqual(references[0]?.embeddings, vectors.slice(0, 9).reverse())
-    assert.deepEqual(references[1]?.embeddings, [vectors[10]])
+    repository.updateManualReview('ref-17', { reviewed: false })
+    repository.updateManualReview('ref-16', { callsign: 'BG5XYZ' })
+    const references = repository.recentSpeakerReferences(['bg5abc', 'BG5XYZ', 'BG5NONE'], 'ref-15')
+    assert.deepEqual(references[0]?.embeddings, vectors.slice(0, 15).reverse())
+    assert.deepEqual(references[1]?.embeddings, [vectors[16]])
     assert.deepEqual(references[2]?.embeddings, [])
-    repository.updateManualReview('ref-11', { reviewed: true })
-    repository.updateManualReview('ref-10', { callsign: null })
+    repository.updateManualReview('ref-17', { reviewed: true })
+    repository.updateManualReview('ref-16', { callsign: null })
     assert.deepEqual(repository.recentSpeakerReferences(['BG5ABC'], 'query')[0]?.embeddings, vectors.slice(2).reverse())
   }
   finally { repository.close() }

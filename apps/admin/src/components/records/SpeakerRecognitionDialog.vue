@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import type { SpeakerMatch } from '@iaxweb/contracts'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useSpeakerRecognitionContext } from '../../composables/records/use-records-context'
-import { formatRecordTime } from '../../utils/records-format'
 
 const recognition = useSpeakerRecognitionContext()
 const { record, loading, result, error } = recognition.state
@@ -35,31 +35,28 @@ function formatSimilarity(value: number): string {
 function formatReferenceSimilarity(value: number | null, count: number): string {
   return value === null ? '—' : `${formatSimilarity(value)}/${count}`
 }
+
+function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>): string {
+  return groups.map(group => `${formatSimilarity(group.similarity)}(${group.recordCount})`).join('/') || '—'
+}
 </script>
 
 <template>
   <dialog ref="dialog" aria-labelledby="speaker-recognition-title" class="m-auto max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-3xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl backdrop:bg-slate-950/75 backdrop:backdrop-blur-sm sm:p-6" @cancel="recognition.close" @close="onClose">
     <div v-if="record">
       <h2 id="speaker-recognition-title" class="text-lg font-semibold">
-        特征识别
+        识别
       </h2>
-      <p class="mt-1 text-xs text-slate-400">
-        {{ formatRecordTime(record.capturedAt) }} · {{ (record.durationMs / 1000).toFixed(1) }} 秒
-      </p>
       <div class="mt-5" aria-live="polite" :aria-busy="loading">
         <p v-if="loading" role="status" class="rounded-lg border border-cyan-900 bg-cyan-950/30 px-4 py-5 text-sm text-cyan-200">
-          正在检查录音质量并进行特征匹配…
+          正在识别录音…
         </p>
         <p v-else-if="error" role="alert" class="rounded-lg border border-red-900 bg-red-950/30 px-4 py-4 text-sm text-red-300">
           {{ error }}
         </p>
         <template v-else-if="result">
-          <p class="mb-3 text-sm text-slate-300">
-            相似度 &gt; {{ formatSimilarity(result.threshold) }}<template v-if="result.referenceCount !== null">
-              · 参考录音 {{ result.referenceCount }} 条
-            </template><template v-if="result.status === 'matched'">
-              · 命中 {{ totalMatches }} 条 / {{ result.matches.length }} 个呼号
-            </template>
+          <p v-if="result.status === 'matched'" class="mb-3 text-sm text-slate-300">
+            识别到 {{ totalMatches }} 条记录/{{ result.matches.length }} 个呼号
           </p>
           <div v-if="result.status === 'matched'" class="overflow-x-auto rounded-lg border border-slate-700">
             <table class="w-full whitespace-nowrap text-left text-xs tabular-nums sm:text-sm">
@@ -77,8 +74,8 @@ function formatReferenceSimilarity(value: number | null, count: number): string 
                     <span class="sm:hidden">Avg</span><span class="hidden sm:inline">平均值</span>
                   </th><th class="px-2 py-3 text-right sm:px-3" title="合成相似度（百分制）/ 参考条数">
                     Syn
-                  </th><th class="hidden px-3 py-3 text-right lg:table-cell" title="按参考录音之间的相似度筛选后，显示合成分数 / 剩余参考条数">
-                    Syn（筛选后）
+                  </th><th class="hidden px-3 py-3 text-right lg:table-cell" title="每组显示合成分数（参考条数），至少 5 条有效参考才分组">
+                    合成组
                   </th>
                 </tr>
               </thead>
@@ -97,7 +94,7 @@ function formatReferenceSimilarity(value: number | null, count: number): string 
                   </td><td class="px-2 py-3 text-right text-cyan-200 sm:px-3">
                     {{ formatReferenceSimilarity(match.referenceSimilarity, match.referenceRecordCount) }}
                   </td><td class="hidden px-3 py-3 text-right text-cyan-200 lg:table-cell">
-                    {{ formatReferenceSimilarity(match.trimmedReferenceSimilarity, match.trimmedReferenceRecordCount) }}
+                    {{ formatReferenceGroups(match.referenceGroups) }}
                   </td>
                 </tr>
               </tbody>
@@ -105,9 +102,6 @@ function formatReferenceSimilarity(value: number | null, count: number): string 
           </div>
           <p v-else class="rounded-lg border border-amber-900/70 bg-amber-950/20 px-4 py-4 text-sm leading-6 text-amber-200">
             {{ result.reasonCode === 'below_threshold' ? '没有找到超过相似度阈值的已标注录音。' : result.reason }}
-          </p>
-          <p v-if="result.status === 'matched'" class="mt-3 text-xs leading-5 text-slate-400">
-            匹配统计仅含超过阈值的录音，按匹配数量排序。Syn 显示合成分数 / 参考条数，取最近最多 10 条有效标注。
           </p>
         </template>
       </div>

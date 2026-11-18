@@ -1,5 +1,7 @@
 import type { SpeakerReferenceGroup, SpeakerReferenceScore } from '../records/types.js'
 
+export const SPEAKER_REFERENCE_LIMIT: number
+
 interface SpeakerManager {
   addMulti: (entry: { name: string, v: Float32Array[] }) => boolean
   verify: (entry: { name: string, v: Float32Array, threshold: number }) => boolean

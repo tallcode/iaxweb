@@ -153,7 +153,7 @@ Docker 不下载、不打包模型，通过 `config/` 的只读挂载使用该�
 
 管理后台的声纹匹配目前是管理员手动测试功能；已标注录音会自动计算并保存声纹，测试查询不入库。
 
-匹配接口保留逐条命中的统计，并为每个候选呼号返回 `referenceSimilarity`（合成相似度）和 `referenceRecordCount`（参与合成数量）。参考来自该呼号最近最多 10 条已标注、当前模型版本的有效特征，排除查询录音自身；使用 `addMulti` 合成后比对，结果仅供观察，不改变阈值或排序。`measurements.referenceLookupMs` 记录参考查询耗时，`referenceMatchMs` 包含合成比对任务的排队与执行耗时。
+匹配接口保留逐条命中的统计，并为每个候选呼号返回 `referenceSimilarity`（合成相似度）和 `referenceRecordCount`（参与合成数量）。参考来自该呼号最近最多 16 条已标注、当前模型版本的有效特征，排除查询录音自身。达到 5 条参考时，`referenceGroups` 返回完全链接分组后的合成分数和条数，组内最低相似度为 0.72，保留条数严格大于参考总数 20% 的组。参考不足 5 条或无合格组时返回空数组。合成使用 `addMulti`，分数供手动对照。`measurements.referenceLookupMs` 记录参考查询耗时，`referenceMatchMs` 包含合成比对任务的排队与执行耗时。
 
 `speaker-recognition` 响应的 `measurements` 返回分阶段耗时，单位为毫秒。未执行或未取得计时的阶段为 `null`；复用模型时启动、校验和加载耗时为 `null`，进程未回收时退出耗时为 `null`。`processTotalMs` 是本条录音在计算子进程中的处理耗时（包含本次启动或回收），`totalMs` 还包含排队和数据库查询，两者与内部阶段存在包含关系，不应重复相加。测量数据不写入日志或数据库。
 

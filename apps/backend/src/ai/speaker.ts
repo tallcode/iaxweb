@@ -487,7 +487,7 @@ function validReferenceScores(scores: unknown, groups: SpeakerReferenceGroup[]):
     const count = group.embeddings.length
     return score && score.callsign === group.callsign
       && validReferenceScore(score.referenceSimilarity, score.referenceRecordCount, count)
-      && validReferenceScore(score.trimmedReferenceSimilarity, score.trimmedReferenceRecordCount, count - Math.floor(count / 5))
+      && validReferenceGroups(score.referenceGroups, count)
   })
 }
 
@@ -496,6 +496,22 @@ function validReferenceScore(similarity: unknown, count: unknown, expectedCount:
     ? count === 0
     : typeof similarity === 'number'
       && similarity >= -1 && similarity <= 1 && count === expectedCount && expectedCount > 0
+}
+
+function validReferenceGroups(groups: unknown, total: number): boolean {
+  if (!Array.isArray(groups) || groups.length > 4)
+    return false
+  if (total < 5)
+    return groups.length === 0
+  let count = 0
+  for (const group of groups) {
+    if (!group || typeof group.similarity !== 'number' || !(group.similarity >= -1 && group.similarity <= 1)
+      || !Number.isInteger(group.recordCount) || group.recordCount * 5 <= total || group.recordCount > total) {
+      return false
+    }
+    count += group.recordCount
+  }
+  return count <= total
 }
 
 export function validEmbedding(embedding: Float32Array): boolean {
