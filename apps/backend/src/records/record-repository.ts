@@ -1,5 +1,5 @@
 import type { PersistedRecord, RecordPage, SpeakerMatch } from '@iaxweb/contracts'
-import type { RecognitionRecord, Voiceprint } from './types.js'
+import type { RecognitionRecord, SpeakerReferenceGroup, Voiceprint } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -7,9 +7,10 @@ import { hasCallerCallsign } from '@iaxweb/contracts'
 import * as sqliteVec from 'sqlite-vec'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../ai/speaker-model.mjs'
 import { migrateEmbeddingSchema } from './embedding-schema.js'
-import { encodeVoiceprint } from './voiceprint.js'
+import { decodeVoiceprint, encodeVoiceprint } from './voiceprint.js'
 
 export const SPEAKER_REFERENCE_THRESHOLD = 0.80
+type SpeakerSearchMatch = Omit<SpeakerMatch, 'referenceSimilarity' | 'referenceRecordCount'>
 
 export interface StoredSpot {
   at: string
@@ -202,7 +203,7 @@ export class RecordRepository {
     `).run(SPEAKER_VERSION, SPEAKER_DIMENSIONS, id).changes) === 1
   }
 
-  searchSpeakerMatches(voiceprint: Voiceprint, excludeId: string): { referenceCount: number, matches: SpeakerMatch[] } {
+  searchSpeakerMatches(voiceprint: Voiceprint, excludeId: string): { referenceCount: number, matches: SpeakerSearchMatch[] } {
     if (voiceprint.status !== 'ready' || voiceprint.version !== SPEAKER_VERSION)
       return { referenceCount: 0, matches: [] }
     this.loadVectorExtension()
@@ -242,6 +243,22 @@ export class RecordRepository {
             averageSimilarity: requiredNumber(row.average_similarity),
           }]),
     }
+  }
+
+  recentSpeakerReferences(callsigns: string[], excludeId: string): SpeakerReferenceGroup[] {
+    const query = this.database.prepare(`
+      SELECT e.embedding FROM ai_segments s
+      JOIN ai_segment_embeddings e ON e.record_id = s.id
+      WHERE COALESCE(s.manual_callsign, s.callsign) COLLATE NOCASE = ?
+        AND s.reviewed = 1 AND e.status = 'ready' AND e.version = ?
+        AND e.dimensions = ? AND s.id != ?
+      ORDER BY s.captured_at DESC, s.id DESC LIMIT 10
+    `)
+    return callsigns.map(callsign => ({
+      callsign,
+      embeddings: query.all(callsign, SPEAKER_VERSION, SPEAKER_DIMENSIONS, excludeId)
+        .map(row => decodeVoiceprint(row.embedding)),
+    }))
   }
 
   private loadVectorExtension(): void {

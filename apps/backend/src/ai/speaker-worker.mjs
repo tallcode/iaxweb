@@ -5,10 +5,12 @@ import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { SPEAKER_DIMENSIONS, SPEAKER_MODEL_SHA256, SPEAKER_VERSION } from './speaker-model.mjs'
 import { checkSpeakerQuality } from './speaker-quality.mjs'
+import { scoreSpeakerReferences } from './speaker-reference-score.mjs'
 
 // Reuse the model, never the per-record stream. The parent supervises and
 // recycles it when idle or under memory pressure to release native arenas.
 let extractor
+let native
 let requestId
 let busy = false
 
@@ -62,6 +64,15 @@ function verifyModel(filename) {
     throw new Error('Speaker model SHA-256 mismatch; use npm run download:speaker-model')
 }
 
+async function loadNative() {
+  if (!native) {
+    native = (await measureAsync('nativeLibraryLoadMs', () => import('sherpa-onnx-node'))).default
+    if (native.version !== '2.0.1')
+      throw new Error(`Unsupported sherpa native version: ${native.version}`)
+  }
+  return native
+}
+
 process.on('disconnect', () => process.exit(0))
 
 process.on('message', async (message) => {
@@ -72,6 +83,12 @@ process.on('message', async (message) => {
   const samples = message.samples
   progress({ event: 'started' })
   try {
+    if (message.operation === 'references') {
+      const sherpa = await loadNative()
+      const scores = measure('referenceMatchMs', () => scoreSpeakerReferences(sherpa, message.embedding, message.groups))
+      send({ scores, version: SPEAKER_VERSION })
+      return
+    }
     const quality = measure('qualityCheckMs', () => checkSpeakerQuality(samples))
     if (!quality.accepted) {
       send({ status: 'unavailable', reason: quality.reason, version: SPEAKER_VERSION })
@@ -79,9 +96,7 @@ process.on('message', async (message) => {
     }
     if (!extractor) {
       measure('modelValidationMs', () => verifyModel(process.argv[2]))
-      const { default: sherpa } = await measureAsync('nativeLibraryLoadMs', () => import('sherpa-onnx-node'))
-      if (sherpa.version !== '2.0.1')
-        throw new Error(`Unsupported sherpa native version: ${sherpa.version}`)
+      const sherpa = await loadNative()
       extractor = measure('modelLoadMs', () => new sherpa.SpeakerEmbeddingExtractor({
         model: process.argv[2],
         numThreads: 2,

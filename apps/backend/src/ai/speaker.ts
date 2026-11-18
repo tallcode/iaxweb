@@ -1,7 +1,7 @@
 import type { SpeakerRecognitionMeasurements } from '@iaxweb/contracts'
 import type { Buffer } from 'node:buffer'
 import type { ChildProcess } from 'node:child_process'
-import type { Voiceprint } from '../records/types.js'
+import type { SpeakerReferenceGroup, SpeakerReferenceScore, Voiceprint } from '../records/types.js'
 import type { SpeakerWorkerMeasurementStage } from './speaker-measurements.js'
 import { fork } from 'node:child_process'
 import { setPriority } from 'node:os'
@@ -17,9 +17,13 @@ const EXTRACTION_TIMEOUT_MS = 60_000
 const RETRY_DELAY_MS = 60_000
 const MAX_QUEUED_EXTRACTIONS = 4
 
+type SpeakerRequest = { operation: 'extract', samples: Float32Array }
+  | { operation: 'references', embedding: Float32Array, groups: SpeakerReferenceGroup[] }
+type SpeakerResult = Voiceprint | SpeakerReferenceScore[]
+
 interface QueuedExtraction {
-  samples: Float32Array
-  resolve: (voiceprint: Voiceprint) => void
+  request: SpeakerRequest
+  resolve: (result: SpeakerResult) => void
   reject: (error: Error) => void
   signal: AbortSignal | undefined
   onAbort: () => void
@@ -35,6 +39,7 @@ interface ExtractionMessage {
   status?: string
   reason?: string
   embedding?: Float32Array
+  scores?: unknown
   version?: string
   error?: string
   rss?: number
@@ -42,6 +47,7 @@ interface ExtractionMessage {
 
 interface RunningExtraction {
   id: number
+  request: SpeakerRequest
   started: number
   cold: boolean
   budget: number
@@ -49,9 +55,9 @@ interface RunningExtraction {
   signal: AbortSignal | undefined
   onAbort: () => void
   timeout: ReturnType<typeof setTimeout>
-  resolve: (voiceprint: Voiceprint) => void
+  resolve: (result: SpeakerResult) => void
   reject: (error: Error) => void
-  result?: Voiceprint
+  result?: SpeakerResult
   failure?: Error
   terminationRequested?: number
   activeStage?: { stage: SpeakerWorkerMeasurementStage, started: number }
@@ -100,14 +106,45 @@ export class SpeakerExtractor {
       return Promise.resolve({ status: 'unavailable', version: SPEAKER_VERSION, reason: 'insufficient_audio' })
     if (samples.length > SPEAKER_MAX_SAMPLES)
       return Promise.resolve({ status: 'unavailable', version: SPEAKER_VERSION, reason: SPEAKER_TOO_LONG_REASON })
+    return this.enqueue({ operation: 'extract', samples }, signal, measurements).then((result) => {
+      if (Array.isArray(result))
+        throw new Error('Invalid speaker extraction response')
+      return result
+    })
+  }
+
+  scoreReferences(embedding: Float32Array, groups: SpeakerReferenceGroup[], signal?: AbortSignal): Promise<SpeakerReferenceScore[]> {
+    if (!validEmbedding(embedding))
+      return Promise.reject(new Error('Invalid reference query vector'))
+    if (groups.length === 0)
+      return Promise.resolve([])
+    const request: SpeakerRequest = {
+      operation: 'references',
+      embedding,
+      groups,
+    }
+    return this.enqueue(request, signal).then((result) => {
+      if (!Array.isArray(result))
+        throw new Error('Invalid speaker reference response')
+      return result
+    })
+  }
+
+  private enqueue(request: SpeakerRequest, signal?: AbortSignal, measurements?: SpeakerRecognitionMeasurements): Promise<SpeakerResult> {
+    if (this.stopped)
+      return Promise.reject(new Error('Speaker extractor stopped'))
+    if (signal?.aborted)
+      return Promise.reject(new Error('Speaker extraction cancelled'))
     if (this.queue.length >= MAX_QUEUED_EXTRACTIONS)
       return Promise.reject(new Error('Speaker extraction queue full'))
     if (this.backingOff)
       return Promise.reject(this.failure)
     return new Promise((resolve, reject) => {
       const job: QueuedExtraction = {
-        // Own the queued waveform; callers may reuse their audio buffer.
-        samples: Float32Array.from(samples),
+        // Requests own their buffers so callers can reuse the input arrays.
+        request: request.operation === 'extract'
+          ? { ...request, samples: Float32Array.from(request.samples) }
+          : { ...request, embedding: Float32Array.from(request.embedding), groups: request.groups.map(group => ({ callsign: group.callsign, embeddings: group.embeddings.map(vector => Float32Array.from(vector)) })) },
         resolve,
         reject,
         signal,
@@ -140,7 +177,7 @@ export class SpeakerExtractor {
         if (job.measurements)
           job.measurements.queueWaitMs = performance.now() - job.queuedAt
         try {
-          const result = await this.run(job.samples, job.signal, job.measurements)
+          const result = await this.run(job.request, job.signal, job.measurements)
           job.resolve(result)
         }
         catch (error) {
@@ -155,13 +192,14 @@ export class SpeakerExtractor {
     finally { this.draining = false }
   }
 
-  private async run(samples: Float32Array, signal: AbortSignal | undefined, measurements: SpeakerRecognitionMeasurements | undefined): Promise<Voiceprint> {
+  private async run(request: SpeakerRequest, signal: AbortSignal | undefined, measurements: SpeakerRecognitionMeasurements | undefined): Promise<SpeakerResult> {
+    const samples = request.operation === 'extract' ? request.samples.length : 0
     // An idle recycle or an earlier cancellation may still be closing.
     if (this.process?.retiring)
       await this.process.closed
     // A large dynamic-shape run can grow an already-warm arena past the hard
     // limit. Give long recordings a fresh process, still using the full audio.
-    if (this.process && speakerRequiredMemory(samples.length) >= SPEAKER_RECYCLE_RSS)
+    if (this.process && speakerRequiredMemory(samples) >= SPEAKER_RECYCLE_RSS)
       await this.retire(this.process)
     if (this.stopped)
       throw new Error('Speaker extractor stopped')
@@ -176,7 +214,7 @@ export class SpeakerExtractor {
       // Add back the existing worker's RSS: this is a total worker budget,
       // not an additional allocation on top of a second model.
       budget = speakerMemoryBudget(rss)
-      if (rss > budget || budget < speakerRequiredMemory(samples.length))
+      if (rss > budget || budget < speakerRequiredMemory(samples))
         throw new Error('Speaker extraction insufficient memory')
     }
     catch (error) {
@@ -195,6 +233,7 @@ export class SpeakerExtractor {
       const onAbort = () => this.fail(worker, new Error('Speaker extraction cancelled'), false)
       const task: RunningExtraction = {
         id: ++this.nextRequestId,
+        request,
         started,
         cold: !worker.started,
         budget,
@@ -208,7 +247,7 @@ export class SpeakerExtractor {
       worker.active = task
       signal?.addEventListener('abort', onAbort, { once: true })
       try {
-        worker.child.send({ samples, requestId: task.id }, error => error && this.fail(worker, error))
+        worker.child.send({ ...request, requestId: task.id }, error => error && this.fail(worker, error))
       }
       catch (error) { this.fail(worker, error instanceof Error ? error : new Error(String(error))) }
     })
@@ -322,10 +361,13 @@ export class SpeakerExtractor {
       this.fail(worker, new Error('Invalid speaker process version'))
       return
     }
-    if (message.status === 'unavailable' && !message.embedding && typeof message.reason === 'string' && message.reason.length > 0) {
+    if (task.request.operation === 'references' && validReferenceScores(message.scores, task.request.groups)) {
+      task.result = message.scores
+    }
+    else if (task.request.operation === 'extract' && message.status === 'unavailable' && !message.embedding && typeof message.reason === 'string' && message.reason.length > 0) {
       task.result = { status: 'unavailable', version: SPEAKER_VERSION, reason: message.reason }
     }
-    else if (message.embedding instanceof Float32Array && validEmbedding(message.embedding)) {
+    else if (task.request.operation === 'extract' && message.embedding instanceof Float32Array && validEmbedding(message.embedding)) {
       task.result = { status: 'ready', version: SPEAKER_VERSION, embedding: message.embedding }
     }
     else {
@@ -437,6 +479,19 @@ export class SpeakerExtractor {
     this.failure = error
     this.retryAt = Date.now() + RETRY_DELAY_MS
   }
+}
+
+function validReferenceScores(scores: unknown, groups: SpeakerReferenceGroup[]): scores is SpeakerReferenceScore[] {
+  return Array.isArray(scores) && scores.length === groups.length && scores.every((score, index) => {
+    if (!score || score.callsign !== groups[index]!.callsign || !Number.isInteger(score.referenceRecordCount)
+      || score.referenceRecordCount < 0 || score.referenceRecordCount > Math.min(10, groups[index]!.embeddings.length)) {
+      return false
+    }
+    return score.referenceSimilarity === null
+      ? score.referenceRecordCount === 0
+      : typeof score.referenceSimilarity === 'number' && Number.isFinite(score.referenceSimilarity)
+        && score.referenceSimilarity >= -1 && score.referenceSimilarity <= 1 && score.referenceRecordCount > 0
+  })
 }
 
 export function validEmbedding(embedding: Float32Array): boolean {

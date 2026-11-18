@@ -30,7 +30,7 @@ function onClose(): void {
 </script>
 
 <template>
-  <dialog ref="dialog" aria-labelledby="speaker-recognition-title" class="m-auto max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl backdrop:bg-slate-950/75 backdrop:backdrop-blur-sm sm:p-6" @cancel="recognition.close" @close="onClose">
+  <dialog ref="dialog" aria-labelledby="speaker-recognition-title" class="m-auto max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-3xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl backdrop:bg-slate-950/75 backdrop:backdrop-blur-sm sm:p-6" @cancel="recognition.close" @close="onClose">
     <div v-if="record">
       <h2 id="speaker-recognition-title" class="text-lg font-semibold">
         特征识别
@@ -54,34 +54,42 @@ function onClose(): void {
             </template>
           </p>
           <div v-if="result.status === 'matched'" class="overflow-x-auto rounded-lg border border-slate-700">
-            <table class="w-full whitespace-nowrap text-left text-sm tabular-nums">
+            <table class="w-full whitespace-nowrap text-left text-xs tabular-nums sm:text-sm">
               <thead class="bg-slate-800/80 text-xs text-slate-400">
                 <tr>
-                  <th class="px-3 py-3">
+                  <th class="px-2 py-3 sm:px-3">
                     呼号
-                  </th><th class="px-3 py-3 text-right">
-                    匹配数量
+                  </th><th class="px-2 py-3 text-right sm:px-3">
+                    <span class="sm:hidden">匹配数</span><span class="hidden sm:inline">匹配数量</span>
                   </th><th class="hidden px-3 py-3 text-right sm:table-cell">
-                    最大值
+                    <span class="sm:hidden">Max</span><span class="hidden sm:inline">最大值</span>
                   </th><th class="hidden px-3 py-3 text-right sm:table-cell">
-                    最小值
-                  </th><th class="px-3 py-3 text-right">
-                    平均值
+                    <span class="sm:hidden">Min</span><span class="hidden sm:inline">最小值</span>
+                  </th><th class="px-2 py-3 text-right sm:px-3" title="超过阈值的命中录音平均相似度">
+                    <span class="sm:hidden">Avg</span><span class="hidden sm:inline">平均值</span>
+                  </th><th class="px-2 py-3 text-right sm:px-3" title="最近最多 10 条有效标注特征合成后的相似度">
+                    <span class="sm:hidden">Syn</span><span class="hidden sm:inline">合成相似度</span>
+                  </th><th class="hidden px-3 py-3 text-right sm:table-cell" title="参与合成的有效标注录音数量，最多 10 条（Ref）">
+                    参考数量
                   </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800">
                 <tr v-for="match in result.matches" :key="match.callsign">
-                  <td class="px-3 py-3 font-mono font-medium text-cyan-300">
+                  <td class="px-2 py-3 font-mono font-medium text-cyan-300 sm:px-3">
                     {{ match.callsign }}
-                  </td><td class="px-3 py-3 text-right">
+                  </td><td class="px-2 py-3 text-right sm:px-3">
                     {{ match.count }}
                   </td><td class="hidden px-3 py-3 text-right sm:table-cell">
                     {{ match.maxSimilarity.toFixed(4) }}
                   </td><td class="hidden px-3 py-3 text-right sm:table-cell">
                     {{ match.minSimilarity.toFixed(4) }}
-                  </td><td class="px-3 py-3 text-right">
+                  </td><td class="px-2 py-3 text-right sm:px-3">
                     {{ match.averageSimilarity.toFixed(4) }}
+                  </td><td class="px-2 py-3 text-right text-cyan-200 sm:px-3">
+                    {{ match.referenceSimilarity?.toFixed(4) ?? '—' }}
+                  </td><td class="hidden px-3 py-3 text-right sm:table-cell">
+                    {{ match.referenceRecordCount }}
                   </td>
                 </tr>
               </tbody>
@@ -91,7 +99,7 @@ function onClose(): void {
             {{ result.reason }}
           </p>
           <p v-if="result.status === 'matched'" class="mt-3 text-xs leading-5 text-slate-400">
-            仅统计超过阈值的命中录音，按匹配数量排序。
+            匹配统计仅含超过阈值的录音；合成值使用最近最多 10 条有效标注。按匹配数量排序。
           </p>
         </template>
       </div>

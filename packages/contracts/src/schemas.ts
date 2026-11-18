@@ -102,6 +102,8 @@ export const speakerMatchSchema = z.object({
   minSimilarity: z.number().min(-1).max(1),
   maxSimilarity: z.number().min(-1).max(1),
   averageSimilarity: z.number().min(-1).max(1),
+  referenceSimilarity: z.number().min(-1).max(1).nullable(),
+  referenceRecordCount: z.number().int().min(0).max(10),
 })
 const measuredMilliseconds = z.number().nonnegative().nullable()
 export const speakerRecognitionMeasurementsSchema = z.object({
@@ -120,6 +122,8 @@ export const speakerRecognitionMeasurementsSchema = z.object({
   processExitMs: measuredMilliseconds,
   processTotalMs: measuredMilliseconds,
   databaseSearchMs: measuredMilliseconds,
+  referenceLookupMs: measuredMilliseconds,
+  referenceMatchMs: measuredMilliseconds,
 })
 export const speakerRecognitionSchema = z.object({
   recordId: nonempty,

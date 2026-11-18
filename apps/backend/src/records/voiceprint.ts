@@ -1,6 +1,22 @@
 import type { Voiceprint } from './types.js'
 import { SPEAKER_DIMENSIONS } from '../ai/speaker-model.mjs'
 
+export function decodeVoiceprint(bytes: unknown): Float32Array {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength !== SPEAKER_DIMENSIONS * 4)
+    throw new Error('Invalid stored voiceprint')
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const embedding = Float32Array.from({ length: SPEAKER_DIMENSIONS }, (_, i) => view.getFloat32(i * 4, true))
+  let norm = 0
+  for (const value of embedding) {
+    if (!Number.isFinite(value))
+      throw new Error('Non-finite stored voiceprint')
+    norm += value * value
+  }
+  if (!(norm > 0))
+    throw new Error('Empty stored voiceprint')
+  return embedding
+}
+
 // Explicit little-endian Float32, independent of the host architecture.
 export function encodeVoiceprint(voiceprint: Voiceprint): Uint8Array | null {
   if (voiceprint.status !== 'ready')

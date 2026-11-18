@@ -1,3 +1,12 @@
+import type { SpeakerMatch } from '@iaxweb/contracts'
+
+export interface SpeakerReferenceGroup {
+  callsign: string
+  embeddings: Float32Array[]
+}
+
+export type SpeakerReferenceScore = Pick<SpeakerMatch, 'callsign' | 'referenceSimilarity' | 'referenceRecordCount'>
+
 export type Voiceprint = { version: string, reason?: string | undefined } & (
   | { status: 'ready', embedding: Float32Array }
   | { status: 'pending' | 'unavailable' | 'failed' }

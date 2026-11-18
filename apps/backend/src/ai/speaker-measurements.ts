@@ -8,6 +8,7 @@ export const SPEAKER_WORKER_MEASUREMENT_STAGES = [
   'featureExtractionMs',
   'embeddingComputeMs',
   'embeddingNormalizeMs',
+  'referenceMatchMs',
 ] as const
 
 export type SpeakerWorkerMeasurementStage = typeof SPEAKER_WORKER_MEASUREMENT_STAGES[number]
@@ -29,5 +30,7 @@ export function createSpeakerMeasurements(): SpeakerRecognitionMeasurements {
     processExitMs: null,
     processTotalMs: null,
     databaseSearchMs: null,
+    referenceLookupMs: null,
+    referenceMatchMs: null,
   }
 }

@@ -1,6 +1,6 @@
-import type { SpeakerRecognition, SpeakerRecognitionMeasurements } from '@iaxweb/contracts'
+import type { SpeakerMatch, SpeakerRecognition, SpeakerRecognitionMeasurements } from '@iaxweb/contracts'
 import type { SpeakerReferenceRepository } from '../records/ports.js'
-import type { Voiceprint } from '../records/types.js'
+import type { SpeakerReferenceGroup, Voiceprint } from '../records/types.js'
 import { performance } from 'node:perf_hooks'
 import { SPEAKER_REFERENCE_THRESHOLD } from '../records/record-repository.js'
 import { logTimestamp } from './asr-context-files.js'
@@ -113,27 +113,54 @@ export class SpeakerReferenceService {
     // Read-only even for a reviewed source: never prepare/update its embedding.
     // The current recording is always excluded from its own reference results.
     const searchStarted = performance.now()
+    let search: ReturnType<SpeakerReferenceRepository['searchSpeakerMatches']>
     try {
-      const { referenceCount, matches } = this.options.repository.searchSpeakerMatches(voiceprint, recordId)
-      return {
-        recordId,
-        threshold: SPEAKER_REFERENCE_THRESHOLD,
-        status: matches.length > 0 ? 'matched' : 'no_match',
-        reasonCode: matches.length > 0 ? null : referenceCount === 0 ? 'empty_reference_library' : 'below_threshold',
-        reason: matches.length > 0
-          ? null
-          : referenceCount === 0
-            ? '参考库中暂无其他已标注、质量合格且有有效主叫呼号的同版本特征。'
-            : '没有找到相似度大于 0.80 的已标注录音。',
-        referenceCount,
-        matches,
-      }
+      search = this.options.repository.searchSpeakerMatches(voiceprint, recordId)
     }
     catch (error) {
       console.warn(`${logTimestamp()} [AI]: 手动声纹检索失败: ${String(error)}`)
       return unavailable('search_failed', '特征匹配失败，请稍后重试。')
     }
     finally { measurements.databaseSearchMs = performance.now() - searchStarted }
+    const matches: SpeakerMatch[] = search.matches.map(match => ({ ...match, referenceSimilarity: null, referenceRecordCount: 0 }))
+    if (matches.length > 0) {
+      let groups: SpeakerReferenceGroup[] = []
+      const lookupStarted = performance.now()
+      try {
+        groups = this.options.repository.recentSpeakerReferences(matches.map(match => match.callsign), recordId)
+      }
+      catch { /* Supplementary scores must not discard the original matches. */ }
+      finally { measurements.referenceLookupMs = performance.now() - lookupStarted }
+      if (groups.length > 0) {
+        const referenceStarted = performance.now()
+        try {
+          const scores = await this.extractor.scoreReferences(voiceprint.embedding, groups, abortSignal)
+          const byCallsign = new Map(scores.map(score => [score.callsign, score]))
+          for (const match of matches) {
+            const score = byCallsign.get(match.callsign)
+            if (score) {
+              match.referenceSimilarity = score.referenceSimilarity
+              match.referenceRecordCount = score.referenceRecordCount
+            }
+          }
+        }
+        catch { /* A failed/aborted reference job leaves its score unavailable. */ }
+        finally { measurements.referenceMatchMs = performance.now() - referenceStarted }
+      }
+    }
+    return {
+      recordId,
+      threshold: SPEAKER_REFERENCE_THRESHOLD,
+      status: matches.length > 0 ? 'matched' : 'no_match',
+      reasonCode: matches.length > 0 ? null : search.referenceCount === 0 ? 'empty_reference_library' : 'below_threshold',
+      reason: matches.length > 0
+        ? null
+        : search.referenceCount === 0
+          ? '参考库中暂无其他已标注、质量合格且有有效主叫呼号的同版本特征。'
+          : '没有找到相似度大于 0.80 的已标注录音。',
+      referenceCount: search.referenceCount,
+      matches,
+    }
   }
 
   // One job per tick leaves CPU and memory headroom for the radio gateway.
