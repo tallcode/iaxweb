@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createSpeakerMeasurements } from '../../src/ai/speaker-measurements.js'
+import { SPEAKER_IDLE_TIMEOUT_MS } from '../../src/ai/speaker-resources.js'
 import { SpeakerExtractor } from '../../src/ai/speaker.js'
 
 test('insufficient voiced audio does not start a native worker', async () => {
@@ -92,11 +93,63 @@ test('quality rejection measures the worker but leaves inference stages unexecut
     assert.equal(result.status, 'unavailable')
     assert.equal(typeof measurements.processStartupMs, 'number')
     assert.equal(typeof measurements.qualityCheckMs, 'number')
-    assert.equal(typeof measurements.processExitMs, 'number')
+    assert.equal(measurements.processExitMs, null)
     assert.equal(typeof measurements.processTotalMs, 'number')
     assert.equal(measurements.modelValidationMs, null)
     assert.equal(measurements.modelLoadMs, null)
     assert.equal(measurements.embeddingComputeMs, null)
+  }
+  finally { extractor.stop() }
+})
+
+test('idle resident workers are not busy and are reused without another startup', async () => {
+  const extractor = new SpeakerExtractor('/missing/model.onnx')
+  try {
+    const first = createSpeakerMeasurements()
+    await extractor.extract(new Float32Array(8000), 1000, undefined, first)
+    assert.equal(typeof first.processStartupMs, 'number')
+    assert.equal(extractor.busy, false)
+    const second = createSpeakerMeasurements()
+    await extractor.extract(new Float32Array(8000), 1000, undefined, second)
+    assert.equal(second.processStartupMs, null)
+    assert.equal(typeof second.qualityCheckMs, 'number')
+    assert.equal(second.processExitMs, null)
+  }
+  finally { extractor.stop() }
+})
+
+test('a resident worker keeps serving past twenty jobs without a count-based recycle', async () => {
+  const extractor = new SpeakerExtractor('/missing/model.onnx')
+  try {
+    for (let index = 0; index < 25; index++) {
+      const measurements = createSpeakerMeasurements()
+      await extractor.extract(new Float32Array(8000), 1000, undefined, measurements)
+      assert.equal(typeof measurements.qualityCheckMs, 'number')
+      if (index > 0)
+        assert.equal(measurements.processStartupMs, null)
+      assert.equal(measurements.processExitMs, null)
+    }
+    const next = createSpeakerMeasurements()
+    await extractor.extract(new Float32Array(8000), 1000, undefined, next)
+    assert.equal(next.processStartupMs, null)
+    assert.equal(extractor.backingOff, false)
+  }
+  finally { extractor.stop() }
+})
+
+test('idle recycling closes the old process before a new request starts', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const extractor = new SpeakerExtractor('/missing/model.onnx')
+  try {
+    await extractor.extract(new Float32Array(8000), 1000)
+    t.mock.timers.tick(120_000)
+    const stillWarm = createSpeakerMeasurements()
+    await extractor.extract(new Float32Array(8000), 1000, undefined, stillWarm)
+    assert.equal(stillWarm.processStartupMs, null)
+    t.mock.timers.tick(SPEAKER_IDLE_TIMEOUT_MS)
+    const measurements = createSpeakerMeasurements()
+    assert.equal((await extractor.extract(new Float32Array(8000), 1000, undefined, measurements)).status, 'unavailable')
+    assert.equal(typeof measurements.processStartupMs, 'number')
   }
   finally { extractor.stop() }
 })

@@ -4,6 +4,9 @@ import process from 'node:process'
 
 const MIB = 1024 * 1024
 export const SPEAKER_MAX_RSS = 2 * 1024 * MIB
+// Retire after a successful large job instead of retaining its arena forever.
+export const SPEAKER_RECYCLE_RSS = 1024 * MIB
+export const SPEAKER_IDLE_TIMEOUT_MS = 5 * 60_000
 export const SPEAKER_MIN_BUDGET = 384 * MIB
 export const SPEAKER_MAX_AUDIO_MS = 60_000
 export const SPEAKER_MAX_SAMPLES = SPEAKER_MAX_AUDIO_MS * 8

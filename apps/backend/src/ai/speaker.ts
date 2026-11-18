@@ -9,7 +9,7 @@ import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { SPEAKER_WORKER_MEASUREMENT_STAGES } from './speaker-measurements.js'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from './speaker-model.mjs'
-import { SPEAKER_MAX_SAMPLES, SPEAKER_TOO_LONG_REASON, speakerMemoryBudget, speakerProcessRss, speakerRequiredMemory } from './speaker-resources.js'
+import { SPEAKER_IDLE_TIMEOUT_MS, SPEAKER_MAX_SAMPLES, SPEAKER_RECYCLE_RSS, SPEAKER_TOO_LONG_REASON, speakerMemoryBudget, speakerProcessRss, speakerRequiredMemory } from './speaker-resources.js'
 
 export { SPEAKER_DIMENSIONS } from './speaker-model.mjs'
 const MIN_VOICED_MS = 1_000
@@ -28,6 +28,7 @@ interface QueuedExtraction {
 }
 
 interface ExtractionMessage {
+  requestId?: number
   event?: string
   stage?: string
   durationMs?: number
@@ -39,11 +40,41 @@ interface ExtractionMessage {
   rss?: number
 }
 
-// Single-flight, single-use native process. Never start another model until the
-// previous process has closed; Worker.terminate cannot preempt a native call.
+interface RunningExtraction {
+  id: number
+  started: number
+  cold: boolean
+  budget: number
+  measurements: SpeakerRecognitionMeasurements | undefined
+  signal: AbortSignal | undefined
+  onAbort: () => void
+  timeout: ReturnType<typeof setTimeout>
+  resolve: (voiceprint: Voiceprint) => void
+  reject: (error: Error) => void
+  result?: Voiceprint
+  failure?: Error
+  terminationRequested?: number
+  activeStage?: { stage: SpeakerWorkerMeasurementStage, started: number }
+}
+
+interface SpeakerProcess {
+  child: ChildProcess
+  closed: Promise<void>
+  started: boolean
+  rss: number
+  retiring: boolean
+  lastIdleCheck: number
+  stderr: string
+  monitor: ReturnType<typeof setInterval>
+  idleTimer?: ReturnType<typeof setTimeout>
+  active?: RunningExtraction
+}
+
+// Single-flight resident native process. Recycling always waits for close
+// before another model starts, including after timeout or cancellation.
 export class SpeakerExtractor {
-  private child: ChildProcess | undefined
-  private cancel: ((error: Error) => void) | undefined
+  private process: SpeakerProcess | undefined
+  private nextRequestId = 0
   private failure: Error | undefined
   private retryAt = 0
   private stopped = false
@@ -57,7 +88,7 @@ export class SpeakerExtractor {
   }
 
   get busy(): boolean {
-    return this.draining || this.child !== undefined || this.queue.length > 0
+    return this.draining || this.queue.length > 0
   }
 
   extract(samples: Float32Array, voicedMs: number, signal?: AbortSignal, measurements?: SpeakerRecognitionMeasurements): Promise<Voiceprint> {
@@ -124,163 +155,273 @@ export class SpeakerExtractor {
     finally { this.draining = false }
   }
 
-  private run(samples: Float32Array, signal: AbortSignal | undefined, measurements: SpeakerRecognitionMeasurements | undefined): Promise<Voiceprint> {
+  private async run(samples: Float32Array, signal: AbortSignal | undefined, measurements: SpeakerRecognitionMeasurements | undefined): Promise<Voiceprint> {
+    // An idle recycle or an earlier cancellation may still be closing.
+    if (this.process?.retiring)
+      await this.process.closed
+    // A large dynamic-shape run can grow an already-warm arena past the hard
+    // limit. Give long recordings a fresh process, still using the full audio.
+    if (this.process && speakerRequiredMemory(samples.length) >= SPEAKER_RECYCLE_RSS)
+      await this.retire(this.process)
+    if (this.stopped)
+      throw new Error('Speaker extractor stopped')
     if (signal?.aborted)
-      return Promise.reject(new Error('Speaker extraction cancelled'))
+      throw new Error('Speaker extraction cancelled')
+    if (this.failure && this.backingOff)
+      throw this.failure
     let budget: number
     try {
-      budget = speakerMemoryBudget()
+      const resident = this.process
+      const rss = resident ? this.readRss(resident) : 0
+      // Add back the existing worker's RSS: this is a total worker budget,
+      // not an additional allocation on top of a second model.
+      budget = speakerMemoryBudget(rss)
+      if (rss > budget || budget < speakerRequiredMemory(samples.length))
+        throw new Error('Speaker extraction insufficient memory')
     }
     catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error))
       this.backoff(failure)
-      return Promise.reject(failure)
-    }
-    if (budget < speakerRequiredMemory(samples.length)) {
-      const error = new Error('Speaker extraction insufficient memory')
-      this.backoff(error)
-      return Promise.reject(error)
+      if (this.process)
+        await this.retire(this.process)
+      throw failure
     }
     this.failure = undefined
+    const started = performance.now()
+    const worker = this.process ?? this.spawn()
+    clearTimeout(worker.idleTimer)
+    delete worker.idleTimer
     return new Promise((resolve, reject) => {
-      const processStarted = performance.now()
-      let resultReceived: number | undefined
-      let terminationRequested: number | undefined
-      let activeStage: { stage: SpeakerWorkerMeasurementStage, started: number } | undefined
-      let result: Voiceprint | undefined
-      let failure: Error | undefined
-      let stderr = ''
-      const child = fork(new URL('./speaker-worker.mjs', import.meta.url), [this.modelFile], {
-        execArgv: [],
-        serialization: 'advanced',
-        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-        env: { ...process.env, OMP_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1', MKL_NUM_THREADS: '1', MALLOC_ARENA_MAX: '2' },
-      })
-      this.child = child
-      child.once('spawn', () => {
-        try {
-          if (child.pid)
-            setPriority(child.pid, 10)
-        }
-        catch { /* Container CPU limits remain the hard boundary. */ }
-      })
-      const fail = (error: Error, backoff = true) => {
-        if (failure)
-          return
-        failure = error
-        if (backoff)
-          this.backoff(error)
-        if (child.pid)
-          terminationRequested = performance.now()
-        child.kill('SIGKILL')
+      const onAbort = () => this.fail(worker, new Error('Speaker extraction cancelled'), false)
+      const task: RunningExtraction = {
+        id: ++this.nextRequestId,
+        started,
+        cold: !worker.started,
+        budget,
+        measurements,
+        signal,
+        onAbort,
+        timeout: setTimeout(() => this.fail(worker, new Error('Speaker extraction timed out')), EXTRACTION_TIMEOUT_MS),
+        resolve,
+        reject,
       }
-      this.cancel = error => fail(error, false)
-      const onAbort = () => fail(new Error('Speaker extraction cancelled'), false)
+      worker.active = task
       signal?.addEventListener('abort', onAbort, { once: true })
-      const timeout = setTimeout(() => fail(new Error('Speaker extraction timed out')), EXTRACTION_TIMEOUT_MS)
-      const monitor = setInterval(() => {
-        if (!child.pid || failure || result)
-          return
-        try {
-          const rss = speakerProcessRss(child.pid)
-          if (rss !== undefined) {
-            const limit = Math.min(budget, speakerMemoryBudget(rss))
-            if (rss > limit)
-              fail(new Error(`Speaker extraction resource limit exceeded (RSS ${Math.ceil(rss / 1048576)} MiB, budget ${Math.floor(limit / 1048576)} MiB)`))
-          }
-        }
-        catch (error) { fail(error instanceof Error ? error : new Error(String(error))) }
-      }, 50)
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr = (stderr + data.toString()).slice(-2_000)
-      })
-      child.on('message', (message: ExtractionMessage) => {
-        if (failure || result)
-          return
-        if (message.event === 'started') {
-          if (measurements)
-            measurements.processStartupMs = performance.now() - processStarted
-          return
-        }
-        if (message.event === 'stageStarted' || message.event === 'stageCompleted') {
-          const stage = SPEAKER_WORKER_MEASUREMENT_STAGES.find(stage => stage === message.stage)
-          if (!stage) {
-            fail(new Error('Invalid speaker measurement stage'))
-            return
-          }
-          if (message.event === 'stageStarted') {
-            activeStage = { stage, started: performance.now() }
-          }
-          else {
-            if (typeof message.durationMs !== 'number' || !Number.isFinite(message.durationMs) || message.durationMs < 0) {
-              fail(new Error('Invalid speaker measurement duration'))
-              return
-            }
-            if (measurements)
-              measurements[stage] = message.durationMs
-            activeStage = undefined
-          }
-          return
-        }
-        resultReceived = performance.now()
-        if (message.rss !== undefined && message.rss > budget) {
-          fail(new Error('Speaker extraction resource limit exceeded'))
-          return
-        }
-        if (message.error) {
-          fail(new Error(message.error))
-        }
-        else if (message.version !== SPEAKER_VERSION) {
-          fail(new Error('Invalid speaker process version'))
-        }
-        else if (message.status === 'unavailable' && !message.embedding && typeof message.reason === 'string' && message.reason.length > 0) {
-          result = { status: 'unavailable', version: SPEAKER_VERSION, reason: message.reason }
-        }
-        else if (message.embedding instanceof Float32Array && validEmbedding(message.embedding)) {
-          result = { status: 'ready', version: SPEAKER_VERSION, embedding: message.embedding }
-        }
-        else { fail(new Error('Invalid speaker process result')) }
-      })
-      child.on('error', fail)
-      child.once('close', (code, exitSignal) => {
-        if (measurements) {
-          const closedAt = performance.now()
-          measurements.processTotalMs = closedAt - processStarted
-          const exitStarted = resultReceived ?? terminationRequested
-          if (exitStarted !== undefined)
-            measurements.processExitMs = closedAt - exitStarted
-          // A timeout or memory kill can interrupt a stage before the child
-          // reports completion. Preserve time spent in that stage as well.
-          if (activeStage)
-            measurements[activeStage.stage] = closedAt - activeStage.started
-        }
-        clearTimeout(timeout)
-        clearInterval(monitor)
-        signal?.removeEventListener('abort', onAbort)
-        if (this.child === child) {
-          this.child = undefined
-          this.cancel = undefined
-        }
-        if (!failure && (!result || code !== 0)) {
-          failure = new Error(`Speaker process exited (${exitSignal ?? code}): ${stderr}`)
-          this.backoff(failure)
-        }
-        if (failure)
-          reject(failure)
-        else
-          resolve(result!)
-      })
       try {
-        child.send({ samples }, error => error && fail(error))
+        worker.child.send({ samples, requestId: task.id }, error => error && this.fail(worker, error))
       }
-      catch (error) { fail(error instanceof Error ? error : new Error(String(error))) }
+      catch (error) { this.fail(worker, error instanceof Error ? error : new Error(String(error))) }
     })
+  }
+
+  private spawn(): SpeakerProcess {
+    const child = fork(new URL('./speaker-worker.mjs', import.meta.url), [this.modelFile], {
+      execArgv: [],
+      serialization: 'advanced',
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      // ORT's explicit numThreads controls inference. Keep nested math-library
+      // pools at one thread to avoid multiplying the inference thread count.
+      env: { ...process.env, OMP_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1', MKL_NUM_THREADS: '1', MALLOC_ARENA_MAX: '2' },
+    })
+    let closed!: () => void
+    const worker: SpeakerProcess = {
+      child,
+      closed: new Promise<void>((resolve) => { closed = resolve }),
+      started: false,
+      rss: 0,
+      retiring: false,
+      lastIdleCheck: 0,
+      stderr: '',
+      monitor: setInterval(() => this.checkMemory(worker), 50),
+    }
+    worker.monitor.unref()
+    this.process = worker
+    child.once('spawn', () => {
+      try {
+        if (child.pid)
+          setPriority(child.pid, 10)
+      }
+      catch { /* Container CPU limits remain the hard boundary. */ }
+    })
+    child.stderr?.on('data', (data: Buffer) => {
+      worker.stderr = (worker.stderr + data.toString()).slice(-2_000)
+    })
+    child.on('message', (message: ExtractionMessage) => this.receive(worker, message))
+    child.on('error', error => this.fail(worker, error))
+    child.once('close', (code, exitSignal) => {
+      clearInterval(worker.monitor)
+      clearTimeout(worker.idleTimer)
+      if (!worker.retiring) {
+        const error = new Error(`Speaker process exited (${exitSignal ?? code}): ${worker.stderr}`)
+        if (worker.active)
+          worker.active.failure = error
+        this.backoff(error)
+      }
+      if (this.process === worker)
+        this.process = undefined
+      closed()
+      this.finish(worker)
+    })
+    return worker
+  }
+
+  private receive(worker: SpeakerProcess, message: ExtractionMessage): void {
+    const task = worker.active
+    if (!task || worker.retiring)
+      return
+    if (message.requestId !== task.id) {
+      this.fail(worker, new Error('Invalid speaker process request'))
+      return
+    }
+    const measurements = task.measurements
+    if (message.event === 'started') {
+      if (measurements && task.cold)
+        measurements.processStartupMs = performance.now() - task.started
+      return
+    }
+    if (message.event === 'stageStarted' || message.event === 'stageCompleted') {
+      const stage = SPEAKER_WORKER_MEASUREMENT_STAGES.find(stage => stage === message.stage)
+      if (!stage) {
+        this.fail(worker, new Error('Invalid speaker measurement stage'))
+        return
+      }
+      if (message.event === 'stageStarted') {
+        task.activeStage = { stage, started: performance.now() }
+      }
+      else {
+        if (typeof message.durationMs !== 'number' || !Number.isFinite(message.durationMs) || message.durationMs < 0) {
+          this.fail(worker, new Error('Invalid speaker measurement duration'))
+          return
+        }
+        if (measurements)
+          measurements[stage] = message.durationMs
+        delete task.activeStage
+      }
+      return
+    }
+    if (typeof message.rss !== 'number' || !Number.isFinite(message.rss) || message.rss <= 0) {
+      this.fail(worker, new Error('Invalid speaker process memory usage'))
+      return
+    }
+    worker.rss = message.rss
+    try {
+      if (worker.rss > Math.min(task.budget, speakerMemoryBudget(worker.rss))) {
+        this.fail(worker, new Error('Speaker extraction resource limit exceeded'))
+        return
+      }
+    }
+    catch (error) {
+      this.fail(worker, error instanceof Error ? error : new Error(String(error)))
+      return
+    }
+    if (message.error) {
+      this.fail(worker, new Error(message.error))
+      return
+    }
+    if (message.version !== SPEAKER_VERSION) {
+      this.fail(worker, new Error('Invalid speaker process version'))
+      return
+    }
+    if (message.status === 'unavailable' && !message.embedding && typeof message.reason === 'string' && message.reason.length > 0) {
+      task.result = { status: 'unavailable', version: SPEAKER_VERSION, reason: message.reason }
+    }
+    else if (message.embedding instanceof Float32Array && validEmbedding(message.embedding)) {
+      task.result = { status: 'ready', version: SPEAKER_VERSION, embedding: message.embedding }
+    }
+    else {
+      this.fail(worker, new Error('Invalid speaker process result'))
+      return
+    }
+    worker.started = true
+    if (worker.rss >= Math.min(SPEAKER_RECYCLE_RSS, task.budget * 0.75)) {
+      task.terminationRequested = performance.now()
+      void this.retire(worker)
+      // Return a successful result only after reclaiming the old process.
+    }
+    else {
+      this.finish(worker)
+      worker.idleTimer = setTimeout(() => {
+        void this.retire(worker)
+      }, SPEAKER_IDLE_TIMEOUT_MS)
+      worker.idleTimer.unref()
+    }
+  }
+
+  private readRss(worker: SpeakerProcess): number {
+    if (worker.child.pid)
+      worker.rss = speakerProcessRss(worker.child.pid) ?? worker.rss
+    return worker.rss
+  }
+
+  private checkMemory(worker: SpeakerProcess): void {
+    if (worker.retiring)
+      return
+    // Idle workers need supervision too, but not 20 /proc reads per second.
+    if (!worker.active) {
+      if (Date.now() - worker.lastIdleCheck < 1000)
+        return
+      worker.lastIdleCheck = Date.now()
+    }
+    try {
+      const rss = this.readRss(worker)
+      const budget = Math.min(worker.active?.budget ?? Infinity, speakerMemoryBudget(rss))
+      if (rss > budget)
+        this.fail(worker, new Error(`Speaker extraction resource limit exceeded (RSS ${Math.ceil(rss / 1048576)} MiB, budget ${Math.floor(budget / 1048576)} MiB)`), Boolean(worker.active))
+    }
+    catch (error) { this.fail(worker, error instanceof Error ? error : new Error(String(error)), Boolean(worker.active)) }
+  }
+
+  private fail(worker: SpeakerProcess, error: Error, backoff = true): void {
+    if (worker.retiring)
+      return
+    if (worker.active) {
+      worker.active.failure = error
+      worker.active.terminationRequested = performance.now()
+    }
+    if (backoff)
+      this.backoff(error)
+    void this.retire(worker)
+  }
+
+  private retire(worker: SpeakerProcess): Promise<void> {
+    if (!worker.retiring) {
+      worker.retiring = true
+      clearTimeout(worker.idleTimer)
+      worker.child.kill('SIGKILL')
+    }
+    return worker.closed
+  }
+
+  private finish(worker: SpeakerProcess): void {
+    const task = worker.active
+    if (!task)
+      return
+    delete worker.active
+    clearTimeout(task.timeout)
+    task.signal?.removeEventListener('abort', task.onAbort)
+    if (task.measurements) {
+      const ended = performance.now()
+      task.measurements.processTotalMs = ended - task.started
+      if (task.terminationRequested !== undefined)
+        task.measurements.processExitMs = ended - task.terminationRequested
+      if (task.activeStage)
+        task.measurements[task.activeStage.stage] = (task.terminationRequested ?? ended) - task.activeStage.started
+    }
+    if (task.failure)
+      task.reject(task.failure)
+    else
+      task.resolve(task.result!)
   }
 
   stop(): void {
     this.stopped = true
     this.rejectQueued(new Error('Speaker extractor stopped'))
-    this.cancel?.(new Error('Speaker extractor stopped'))
+    if (this.process) {
+      if (this.process.active && !this.process.active.result)
+        this.fail(this.process, new Error('Speaker extractor stopped'), false)
+      else
+        void this.retire(this.process)
+    }
   }
 
   private rejectQueued(error: Error): void {

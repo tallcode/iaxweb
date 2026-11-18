@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     # Full-record speaker extraction up to 60s requires a host with at least
     # 4 GiB RAM. Reserve host capacity and prevent container swapping.
-    cpus: '1.0'
+    cpus: '1.5'
     mem_limit: 2560m
     memswap_limit: 2560m
     pids_limit: 128

@@ -6,33 +6,42 @@ import process from 'node:process'
 import { SPEAKER_DIMENSIONS, SPEAKER_MODEL_SHA256, SPEAKER_VERSION } from './speaker-model.mjs'
 import { checkSpeakerQuality } from './speaker-quality.mjs'
 
-// One job per process: native allocators and model arenas are released by the
-// OS on exit, including after a timeout or an out-of-memory kill.
+// Reuse the model, never the per-record stream. The parent supervises and
+// recycles it when idle or under memory pressure to release native arenas.
+let extractor
+let requestId
+let busy = false
+
+function progress(message) {
+  process.send?.({ ...message, requestId })
+}
+
 function measure(stage, operation) {
-  process.send?.({ event: 'stageStarted', stage })
+  progress({ event: 'stageStarted', stage })
   const started = performance.now()
   try {
     return operation()
   }
   finally {
-    process.send?.({ event: 'stageCompleted', stage, durationMs: performance.now() - started })
+    progress({ event: 'stageCompleted', stage, durationMs: performance.now() - started })
   }
 }
 
 async function measureAsync(stage, operation) {
-  process.send?.({ event: 'stageStarted', stage })
+  progress({ event: 'stageStarted', stage })
   const started = performance.now()
   try {
     return await operation()
   }
   finally {
-    process.send?.({ event: 'stageCompleted', stage, durationMs: performance.now() - started })
+    progress({ event: 'stageCompleted', stage, durationMs: performance.now() - started })
   }
 }
 
 function send(result) {
-  process.send?.({ ...result, rss: process.memoryUsage().rss }, (error) => {
-    process.exit(error ? 1 : 0)
+  process.send?.({ ...result, requestId, rss: process.memoryUsage().rss }, (error) => {
+    if (error)
+      process.exit(1)
   })
 }
 
@@ -53,26 +62,35 @@ function verifyModel(filename) {
     throw new Error('Speaker model SHA-256 mismatch; use npm run download:speaker-model')
 }
 
-process.once('message', async ({ samples }) => {
-  process.send?.({ event: 'started' })
+process.on('disconnect', () => process.exit(0))
+
+process.on('message', async (message) => {
+  if (busy)
+    process.exit(1)
+  busy = true
+  requestId = message.requestId
+  const samples = message.samples
+  progress({ event: 'started' })
   try {
     const quality = measure('qualityCheckMs', () => checkSpeakerQuality(samples))
     if (!quality.accepted) {
       send({ status: 'unavailable', reason: quality.reason, version: SPEAKER_VERSION })
       return
     }
-    measure('modelValidationMs', () => verifyModel(process.argv[2]))
-    const { default: sherpa } = await measureAsync('nativeLibraryLoadMs', () => import('sherpa-onnx-node'))
-    if (sherpa.version !== '2.0.1')
-      throw new Error(`Unsupported sherpa native version: ${sherpa.version}`)
-    const extractor = measure('modelLoadMs', () => new sherpa.SpeakerEmbeddingExtractor({
-      model: process.argv[2],
-      numThreads: 1,
-      provider: 'cpu',
-      debug: false,
-    }))
-    if (extractor.dim !== SPEAKER_DIMENSIONS)
-      throw new Error(`Unexpected speaker embedding dimension: ${extractor.dim}`)
+    if (!extractor) {
+      measure('modelValidationMs', () => verifyModel(process.argv[2]))
+      const { default: sherpa } = await measureAsync('nativeLibraryLoadMs', () => import('sherpa-onnx-node'))
+      if (sherpa.version !== '2.0.1')
+        throw new Error(`Unsupported sherpa native version: ${sherpa.version}`)
+      extractor = measure('modelLoadMs', () => new sherpa.SpeakerEmbeddingExtractor({
+        model: process.argv[2],
+        numThreads: 2,
+        provider: 'cpu',
+        debug: false,
+      }))
+      if (extractor.dim !== SPEAKER_DIMENSIONS)
+        throw new Error(`Unexpected speaker embedding dimension: ${extractor.dim}`)
+    }
     const stream = measure('featureExtractionMs', () => {
       const stream = extractor.createStream()
       stream.acceptWaveform({ samples, sampleRate: 8000 })
@@ -96,4 +114,5 @@ process.once('message', async ({ samples }) => {
   catch (error) {
     send({ error: error instanceof Error ? error.message : String(error) })
   }
+  finally { busy = false }
 })
