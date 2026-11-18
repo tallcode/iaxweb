@@ -4,7 +4,7 @@ const emit = defineEmits<{ recognize: [] }>()
 </script>
 
 <template>
-  <button type="button" aria-label="声纹识别" title="声纹识别（测试）" :disabled="disabled" class="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-cyan-400 transition hover:bg-cyan-500/10 hover:text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 disabled:cursor-not-allowed disabled:opacity-40" @click="emit('recognize')">
+  <button type="button" aria-label="特征识别" title="特征识别" :disabled="disabled" class="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-cyan-400 transition hover:bg-cyan-500/10 hover:text-cyan-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50 disabled:cursor-not-allowed disabled:opacity-40" @click="emit('recognize')">
     <!-- Lucide fingerprint-pattern (ISC): https://lucide.dev/icons/fingerprint-pattern -->
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4" aria-hidden="true">
       <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" />

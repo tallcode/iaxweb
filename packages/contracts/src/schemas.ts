@@ -103,6 +103,24 @@ export const speakerMatchSchema = z.object({
   maxSimilarity: z.number().min(-1).max(1),
   averageSimilarity: z.number().min(-1).max(1),
 })
+const measuredMilliseconds = z.number().nonnegative().nullable()
+export const speakerRecognitionMeasurementsSchema = z.object({
+  totalMs: z.number().nonnegative(),
+  recordLookupMs: measuredMilliseconds,
+  audioReadMs: measuredMilliseconds,
+  queueWaitMs: measuredMilliseconds,
+  processStartupMs: measuredMilliseconds,
+  qualityCheckMs: measuredMilliseconds,
+  modelValidationMs: measuredMilliseconds,
+  nativeLibraryLoadMs: measuredMilliseconds,
+  modelLoadMs: measuredMilliseconds,
+  featureExtractionMs: measuredMilliseconds,
+  embeddingComputeMs: measuredMilliseconds,
+  embeddingNormalizeMs: measuredMilliseconds,
+  processExitMs: measuredMilliseconds,
+  processTotalMs: measuredMilliseconds,
+  databaseSearchMs: measuredMilliseconds,
+})
 export const speakerRecognitionSchema = z.object({
   recordId: nonempty,
   threshold: z.number().min(-1).max(1),
@@ -111,4 +129,5 @@ export const speakerRecognitionSchema = z.object({
   reason: z.string().nullable(),
   referenceCount: z.number().int().nonnegative().nullable(),
   matches: z.array(speakerMatchSchema),
+  measurements: speakerRecognitionMeasurementsSchema,
 })

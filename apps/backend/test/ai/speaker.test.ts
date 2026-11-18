@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createSpeakerMeasurements } from '../../src/ai/speaker-measurements.js'
 import { SpeakerExtractor } from '../../src/ai/speaker.js'
 
 test('insufficient voiced audio does not start a native worker', async () => {
@@ -13,12 +14,19 @@ test('insufficient voiced audio does not start a native worker', async () => {
 test('timeout rejects the bounded queue, and no process retries during backoff', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const extractor = new SpeakerExtractor('/missing/model.onnx')
+  const measurements = createSpeakerMeasurements()
+  const queuedMeasurements = createSpeakerMeasurements()
   try {
-    const first = assert.rejects(extractor.extract(new Float32Array(8000), 1000), /timed out/)
-    const queued = Array.from({ length: 4 }, () => assert.rejects(extractor.extract(new Float32Array(8000), 1000), /timed out/))
+    const first = assert.rejects(extractor.extract(new Float32Array(8000), 1000, undefined, measurements), /timed out/)
+    const measuredQueued = assert.rejects(extractor.extract(new Float32Array(8000), 1000, undefined, queuedMeasurements), /timed out/)
+    const queued = Array.from({ length: 3 }, () => assert.rejects(extractor.extract(new Float32Array(8000), 1000), /timed out/))
     await assert.rejects(extractor.extract(new Float32Array(8000), 1000), /queue full/)
     t.mock.timers.tick(60_000)
-    await Promise.all([first, ...queued])
+    await Promise.all([first, measuredQueued, ...queued])
+    assert.equal(typeof measurements.processTotalMs, 'number')
+    assert.equal(typeof measurements.processExitMs, 'number')
+    assert.equal(typeof queuedMeasurements.queueWaitMs, 'number')
+    assert.equal(queuedMeasurements.processTotalMs, null)
     await assert.rejects(extractor.extract(new Float32Array(8000), 1000), /timed out/)
   }
   finally { extractor.stop() }
@@ -62,13 +70,33 @@ test('queue waiting time is excluded from each extraction timeout', async (t) =>
 test('cancelling a queued request releases its slot without cancelling the running task', async () => {
   const extractor = new SpeakerExtractor('/missing/model.onnx')
   const controller = new AbortController()
+  const measurements = createSpeakerMeasurements()
   try {
     const first = extractor.extract(new Float32Array(8000), 1000)
-    const cancelled = assert.rejects(extractor.extract(new Float32Array(8000), 1000, controller.signal), /cancelled/)
+    const cancelled = assert.rejects(extractor.extract(new Float32Array(8000), 1000, controller.signal, measurements), /cancelled/)
     controller.abort()
     await cancelled
+    assert.equal(typeof measurements.queueWaitMs, 'number')
+    assert.equal(measurements.processTotalMs, null)
     assert.equal((await first).status, 'unavailable')
     assert.equal(extractor.backingOff, false)
+  }
+  finally { extractor.stop() }
+})
+
+test('quality rejection measures the worker but leaves inference stages unexecuted', async () => {
+  const extractor = new SpeakerExtractor('/missing/model.onnx')
+  const measurements = createSpeakerMeasurements()
+  try {
+    const result = await extractor.extract(new Float32Array(8000), 1000, undefined, measurements)
+    assert.equal(result.status, 'unavailable')
+    assert.equal(typeof measurements.processStartupMs, 'number')
+    assert.equal(typeof measurements.qualityCheckMs, 'number')
+    assert.equal(typeof measurements.processExitMs, 'number')
+    assert.equal(typeof measurements.processTotalMs, 'number')
+    assert.equal(measurements.modelValidationMs, null)
+    assert.equal(measurements.modelLoadMs, null)
+    assert.equal(measurements.embeddingComputeMs, null)
   }
   finally { extractor.stop() }
 })

@@ -29,7 +29,7 @@ export function useSpeakerRecognition(options: { canBegin: () => boolean, onBegi
     catch (cause) {
       if (current !== sequence || (cause instanceof ApiError && cause.kind === 'aborted'))
         return
-      error.value = apiErrorMessage(cause, '声纹测试失败，请重试')
+      error.value = apiErrorMessage(cause, '特征识别失败，请重试')
       if (cause instanceof ApiError && cause.status === 401)
         await options.onUnauthorized()
     }

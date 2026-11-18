@@ -90,7 +90,7 @@ export async function registerRecordRoutes(app: FastifyInstance, options: Record
 
   app.post<{ Params: RecordParams }>('/records/:id/speaker-recognition', { preHandler: requireAdministrator }, async (request, reply) => {
     if (!options.speakerReferences)
-      return reply.code(503).send({ message: '声纹测试暂不可用' })
+      return reply.code(503).send({ message: '特征识别暂不可用' })
     reviews.find(request.params.id)
     const controller = new AbortController()
     const onClose = () => {

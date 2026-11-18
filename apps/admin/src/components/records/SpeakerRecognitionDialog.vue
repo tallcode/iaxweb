@@ -33,14 +33,14 @@ function onClose(): void {
   <dialog ref="dialog" aria-labelledby="speaker-recognition-title" class="m-auto max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl backdrop:bg-slate-950/75 backdrop:backdrop-blur-sm sm:p-6" @cancel="recognition.close" @close="onClose">
     <div v-if="record">
       <h2 id="speaker-recognition-title" class="text-lg font-semibold">
-        声纹识别 <span class="ml-2 rounded border border-cyan-800 bg-cyan-950/50 px-1.5 py-0.5 text-xs font-normal text-cyan-300">测试</span>
+        特征识别
       </h2>
       <p class="mt-1 text-xs text-slate-400">
         {{ formatRecordTime(record.capturedAt) }} · {{ (record.durationMs / 1000).toFixed(1) }} 秒
       </p>
       <div class="mt-5" aria-live="polite" :aria-busy="loading">
         <p v-if="loading" role="status" class="rounded-lg border border-cyan-900 bg-cyan-950/30 px-4 py-5 text-sm text-cyan-200">
-          正在检查录音质量并匹配声纹…
+          正在检查录音质量并进行特征匹配…
         </p>
         <p v-else-if="error" role="alert" class="rounded-lg border border-red-900 bg-red-950/30 px-4 py-4 text-sm text-red-300">
           {{ error }}

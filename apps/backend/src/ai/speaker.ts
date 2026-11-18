@@ -1,9 +1,13 @@
+import type { SpeakerRecognitionMeasurements } from '@iaxweb/contracts'
 import type { Buffer } from 'node:buffer'
 import type { ChildProcess } from 'node:child_process'
 import type { Voiceprint } from '../records/types.js'
+import type { SpeakerWorkerMeasurementStage } from './speaker-measurements.js'
 import { fork } from 'node:child_process'
 import { setPriority } from 'node:os'
+import { performance } from 'node:perf_hooks'
 import process from 'node:process'
+import { SPEAKER_WORKER_MEASUREMENT_STAGES } from './speaker-measurements.js'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from './speaker-model.mjs'
 import { SPEAKER_MAX_SAMPLES, SPEAKER_TOO_LONG_REASON, speakerMemoryBudget, speakerProcessRss, speakerRequiredMemory } from './speaker-resources.js'
 
@@ -19,9 +23,14 @@ interface QueuedExtraction {
   reject: (error: Error) => void
   signal: AbortSignal | undefined
   onAbort: () => void
+  queuedAt: number
+  measurements: SpeakerRecognitionMeasurements | undefined
 }
 
 interface ExtractionMessage {
+  event?: string
+  stage?: string
+  durationMs?: number
   status?: string
   reason?: string
   embedding?: Float32Array
@@ -51,7 +60,7 @@ export class SpeakerExtractor {
     return this.draining || this.child !== undefined || this.queue.length > 0
   }
 
-  extract(samples: Float32Array, voicedMs: number, signal?: AbortSignal): Promise<Voiceprint> {
+  extract(samples: Float32Array, voicedMs: number, signal?: AbortSignal, measurements?: SpeakerRecognitionMeasurements): Promise<Voiceprint> {
     if (this.stopped)
       return Promise.reject(new Error('Speaker extractor stopped'))
     if (signal?.aborted)
@@ -71,10 +80,14 @@ export class SpeakerExtractor {
         resolve,
         reject,
         signal,
+        queuedAt: performance.now(),
+        measurements,
         onAbort: () => {
           const index = this.queue.indexOf(job)
           if (index >= 0) {
             this.queue.splice(index, 1)
+            if (measurements)
+              measurements.queueWaitMs = performance.now() - job.queuedAt
             reject(new Error('Speaker extraction cancelled'))
           }
         },
@@ -93,8 +106,10 @@ export class SpeakerExtractor {
       while (this.queue.length > 0 && !this.stopped) {
         const job = this.queue.shift()!
         job.signal?.removeEventListener('abort', job.onAbort)
+        if (job.measurements)
+          job.measurements.queueWaitMs = performance.now() - job.queuedAt
         try {
-          const result = await this.run(job.samples, job.signal)
+          const result = await this.run(job.samples, job.signal, job.measurements)
           job.resolve(result)
         }
         catch (error) {
@@ -109,7 +124,7 @@ export class SpeakerExtractor {
     finally { this.draining = false }
   }
 
-  private run(samples: Float32Array, signal?: AbortSignal): Promise<Voiceprint> {
+  private run(samples: Float32Array, signal: AbortSignal | undefined, measurements: SpeakerRecognitionMeasurements | undefined): Promise<Voiceprint> {
     if (signal?.aborted)
       return Promise.reject(new Error('Speaker extraction cancelled'))
     let budget: number
@@ -128,6 +143,10 @@ export class SpeakerExtractor {
     }
     this.failure = undefined
     return new Promise((resolve, reject) => {
+      const processStarted = performance.now()
+      let resultReceived: number | undefined
+      let terminationRequested: number | undefined
+      let activeStage: { stage: SpeakerWorkerMeasurementStage, started: number } | undefined
       let result: Voiceprint | undefined
       let failure: Error | undefined
       let stderr = ''
@@ -151,6 +170,8 @@ export class SpeakerExtractor {
         failure = error
         if (backoff)
           this.backoff(error)
+        if (child.pid)
+          terminationRequested = performance.now()
         child.kill('SIGKILL')
       }
       this.cancel = error => fail(error, false)
@@ -176,6 +197,32 @@ export class SpeakerExtractor {
       child.on('message', (message: ExtractionMessage) => {
         if (failure || result)
           return
+        if (message.event === 'started') {
+          if (measurements)
+            measurements.processStartupMs = performance.now() - processStarted
+          return
+        }
+        if (message.event === 'stageStarted' || message.event === 'stageCompleted') {
+          const stage = SPEAKER_WORKER_MEASUREMENT_STAGES.find(stage => stage === message.stage)
+          if (!stage) {
+            fail(new Error('Invalid speaker measurement stage'))
+            return
+          }
+          if (message.event === 'stageStarted') {
+            activeStage = { stage, started: performance.now() }
+          }
+          else {
+            if (typeof message.durationMs !== 'number' || !Number.isFinite(message.durationMs) || message.durationMs < 0) {
+              fail(new Error('Invalid speaker measurement duration'))
+              return
+            }
+            if (measurements)
+              measurements[stage] = message.durationMs
+            activeStage = undefined
+          }
+          return
+        }
+        resultReceived = performance.now()
         if (message.rss !== undefined && message.rss > budget) {
           fail(new Error('Speaker extraction resource limit exceeded'))
           return
@@ -196,6 +243,17 @@ export class SpeakerExtractor {
       })
       child.on('error', fail)
       child.once('close', (code, exitSignal) => {
+        if (measurements) {
+          const closedAt = performance.now()
+          measurements.processTotalMs = closedAt - processStarted
+          const exitStarted = resultReceived ?? terminationRequested
+          if (exitStarted !== undefined)
+            measurements.processExitMs = closedAt - exitStarted
+          // A timeout or memory kill can interrupt a stage before the child
+          // reports completion. Preserve time spent in that stage as well.
+          if (activeStage)
+            measurements[activeStage.stage] = closedAt - activeStage.started
+        }
         clearTimeout(timeout)
         clearInterval(monitor)
         signal?.removeEventListener('abort', onAbort)
@@ -227,6 +285,8 @@ export class SpeakerExtractor {
 
   private rejectQueued(error: Error): void {
     for (const job of this.queue.splice(0)) {
+      if (job.measurements)
+        job.measurements.queueWaitMs = performance.now() - job.queuedAt
       job.signal?.removeEventListener('abort', job.onAbort)
       job.reject(error)
     }

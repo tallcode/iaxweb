@@ -1,8 +1,10 @@
-import type { SpeakerRecognition } from '@iaxweb/contracts'
+import type { SpeakerRecognition, SpeakerRecognitionMeasurements } from '@iaxweb/contracts'
 import type { SpeakerReferenceRepository } from '../records/ports.js'
 import type { Voiceprint } from '../records/types.js'
+import { performance } from 'node:perf_hooks'
 import { SPEAKER_REFERENCE_THRESHOLD } from '../records/record-repository.js'
 import { logTimestamp } from './asr-context-files.js'
+import { createSpeakerMeasurements } from './speaker-measurements.js'
 import { SPEAKER_VERSION } from './speaker-model.mjs'
 import { SPEAKER_RESOURCE_LIMIT_REASON, SPEAKER_TOO_LONG_REASON } from './speaker-resources.js'
 import { readSpeakerWav, speakerWavFile } from './speaker-wav.js'
@@ -41,8 +43,21 @@ export class SpeakerReferenceService {
   }
 
   async recognizeRecord(recordId: string, signal?: AbortSignal): Promise<SpeakerRecognition> {
+    const measurements = createSpeakerMeasurements()
+    const started = performance.now()
+    const result = await this.recognizeRecordOnce(recordId, signal, measurements)
+    measurements.totalMs = performance.now() - started
+    for (const stage of Object.keys(measurements) as Array<keyof SpeakerRecognitionMeasurements>) {
+      const value = measurements[stage]
+      if (value !== null)
+        measurements[stage] = Math.round(value * 100) / 100
+    }
+    return { ...result, measurements }
+  }
+
+  private async recognizeRecordOnce(recordId: string, signal: AbortSignal | undefined, measurements: SpeakerRecognitionMeasurements): Promise<Omit<SpeakerRecognition, 'measurements'>> {
     const abortSignal = signal ? AbortSignal.any([this.abort.signal, signal]) : this.abort.signal
-    const unavailable = (reasonCode: NonNullable<SpeakerRecognition['reasonCode']>, reason: string): SpeakerRecognition => ({
+    const unavailable = (reasonCode: NonNullable<SpeakerRecognition['reasonCode']>, reason: string): Omit<SpeakerRecognition, 'measurements'> => ({
       recordId,
       threshold: SPEAKER_REFERENCE_THRESHOLD,
       status: 'unavailable',
@@ -51,48 +66,53 @@ export class SpeakerReferenceService {
       referenceCount: null,
       matches: [],
     })
+    const lookupStarted = performance.now()
     const record = this.options.repository.find(recordId)
+    measurements.recordLookupMs = performance.now() - lookupStarted
     if (!record)
       return unavailable('record_missing', '记录已不存在，请刷新列表。')
     if (this.stopped)
-      return unavailable('extraction_failed', '声纹服务正在停止，请稍后重试。')
+      return unavailable('extraction_failed', '特征识别服务正在停止，请稍后重试。')
     let samples: Float32Array
+    const readStarted = performance.now()
     try {
       samples = await readSpeakerWav(speakerWavFile(this.options.recordingsDirectory, { id: record.id, timestamp: record.capturedAt }), abortSignal)
     }
     catch (error) {
       const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT'
       return missing
-        ? unavailable('recording_missing', '录音文件不存在或已过期，无法进行声纹识别。')
-        : unavailable('recording_invalid', '录音文件无法读取或格式无效，无法进行声纹识别。')
+        ? unavailable('recording_missing', '录音文件不存在或已过期，无法进行特征识别。')
+        : unavailable('recording_invalid', '录音文件无法读取或格式无效，无法进行特征识别。')
     }
+    finally { measurements.audioReadMs = performance.now() - readStarted }
     let voiceprint: Voiceprint
     try {
-      voiceprint = await this.extractor.extract(samples, record.voicedMs, abortSignal)
+      voiceprint = await this.extractor.extract(samples, record.voicedMs, abortSignal, measurements)
     }
     catch (error) {
       const detail = String(error)
       if (detail.includes('timed out'))
-        return unavailable('extraction_timeout', '声纹提取超时，请稍后重试。')
+        return unavailable('extraction_timeout', '特征提取超时，请稍后重试。')
       if (detail.includes('queue full'))
-        return unavailable('extraction_busy', '声纹任务较多，请稍后重试。')
+        return unavailable('extraction_busy', '特征识别任务较多，请稍后重试。')
       if (detail.includes('resource limit') || detail.includes('insufficient memory'))
-        return unavailable('resource_limit', '服务器可用内存不足或声纹提取达到内存上限，已停止本次任务，请稍后重试。')
+        return unavailable('resource_limit', '服务器可用内存不足或特征提取达到内存上限，已停止本次任务，请稍后重试。')
       if (!this.stopped && !abortSignal.aborted)
         console.warn(`${logTimestamp()} [AI]: 手动声纹提取失败: ${detail}`)
-      return unavailable('extraction_failed', '声纹模型暂不可用或提取失败，请稍后重试。')
+      return unavailable('extraction_failed', '特征模型暂不可用或提取失败，请稍后重试。')
     }
     if (voiceprint.status !== 'ready') {
       switch (voiceprint.reason) {
-        case SPEAKER_TOO_LONG_REASON: return unavailable('audio_too_long', '录音超过当前安全上限 60 秒，未生成声纹。')
-        case 'interference_tone': return unavailable('interference_tone', '检测到明显窄带干扰，未生成查询声纹。')
-        case 'interference_high_band': return unavailable('interference_high_band', '检测到高频能量异常，可能存在弱干扰，未生成查询声纹。')
-        case 'invalid_audio': return unavailable('invalid_audio', '音频采样无效，未生成查询声纹。')
-        default: return unavailable('insufficient_audio', '有效音频不足 1 秒或没有可用信号，未生成查询声纹。')
+        case SPEAKER_TOO_LONG_REASON: return unavailable('audio_too_long', '录音超过当前安全上限 60 秒，未生成特征。')
+        case 'interference_tone': return unavailable('interference_tone', '检测到明显窄带干扰，未生成查询特征。')
+        case 'interference_high_band': return unavailable('interference_high_band', '检测到高频能量异常，可能存在弱干扰，未生成查询特征。')
+        case 'invalid_audio': return unavailable('invalid_audio', '音频采样无效，未生成查询特征。')
+        default: return unavailable('insufficient_audio', '有效音频不足 1 秒或没有可用信号，未生成查询特征。')
       }
     }
     // Read-only even for a reviewed source: never prepare/update its embedding.
     // The current recording is always excluded from its own reference results.
+    const searchStarted = performance.now()
     try {
       const { referenceCount, matches } = this.options.repository.searchSpeakerMatches(voiceprint, recordId)
       return {
@@ -103,7 +123,7 @@ export class SpeakerReferenceService {
         reason: matches.length > 0
           ? null
           : referenceCount === 0
-            ? '参考库中暂无其他已标注、质量合格且有有效主叫呼号的同版本声纹。'
+            ? '参考库中暂无其他已标注、质量合格且有有效主叫呼号的同版本特征。'
             : '没有找到相似度大于 0.80 的已标注录音。',
         referenceCount,
         matches,
@@ -111,8 +131,9 @@ export class SpeakerReferenceService {
     }
     catch (error) {
       console.warn(`${logTimestamp()} [AI]: 手动声纹检索失败: ${String(error)}`)
-      return unavailable('search_failed', '声纹检索失败，请稍后重试。')
+      return unavailable('search_failed', '特征匹配失败，请稍后重试。')
     }
+    finally { measurements.databaseSearchMs = performance.now() - searchStarted }
   }
 
   // One job per tick leaves CPU and memory headroom for the radio gateway.

@@ -18,6 +18,7 @@ import type {
   recordPageSchema,
   reviewSchema,
   speakerMatchSchema,
+  speakerRecognitionMeasurementsSchema,
   speakerRecognitionSchema,
   spotEventSchema,
   transmitSourceSchema,
@@ -40,6 +41,7 @@ export type AdminRecord = z.output<typeof adminRecordSchema>
 export type AdminRecordPage = z.output<typeof adminRecordPageSchema>
 export type SpeakerMatch = z.output<typeof speakerMatchSchema>
 export type SpeakerRecognition = z.output<typeof speakerRecognitionSchema>
+export type SpeakerRecognitionMeasurements = z.output<typeof speakerRecognitionMeasurementsSchema>
 export type LoginInput = z.input<typeof loginSchema>
 export type CreateUserInput = z.input<typeof createUserSchema>
 export type UpdateUserInput = z.input<typeof updateUserSchema>
