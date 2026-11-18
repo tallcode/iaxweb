@@ -167,7 +167,7 @@ export class SpeakerReferenceService {
         ? null
         : search.referenceCount === 0
           ? '参考库中暂无其他已标注、质量合格且有有效主叫呼号的同版本特征。'
-          : '没有找到相似度大于 0.80 的已标注录音。',
+          : `没有找到相似度大于 ${SPEAKER_REFERENCE_THRESHOLD.toFixed(2)} 的已标注录音。`,
       referenceCount: search.referenceCount,
       matches,
     }

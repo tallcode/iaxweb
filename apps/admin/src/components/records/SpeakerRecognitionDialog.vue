@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { SpeakerMatch } from '@iaxweb/contracts'
+import type { DeepReadonly } from 'vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useSpeakerRecognitionContext } from '../../composables/records/use-records-context'
 
@@ -7,6 +8,12 @@ const recognition = useSpeakerRecognitionContext()
 const { record, loading, result, error } = recognition.state
 const dialog = ref<HTMLDialogElement>()
 const totalMatches = computed(() => result.value?.matches.reduce((sum, match) => sum + match.count, 0) ?? 0)
+const outcomeMessage = computed(() => {
+  const reasonCode = result.value?.reasonCode
+  if (reasonCode === 'interference_tone' || reasonCode === 'interference_high_band')
+    return '无法启动呼号识别'
+  return result.value?.status === 'no_match' ? '没有识别到呼号' : '无法识别呼号'
+})
 let previousFocus: HTMLElement | undefined
 watch(record, async (value) => {
   if (!value)
@@ -37,7 +44,25 @@ function formatReferenceSimilarity(value: number | null, count: number): string 
 }
 
 function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>): string {
-  return groups.map(group => formatReferenceSimilarity(group.similarity, group.recordCount)).join('/') || '—'
+  return [...groups]
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 2)
+    .map(group => formatReferenceSimilarity(group.similarity, group.recordCount))
+    .join('/') || '—'
+}
+
+function passesThreshold(similarity: number | null, recordCount: number): boolean {
+  if (similarity === null || recordCount < 1)
+    return false
+  const threshold = recordCount >= 10 ? 0.80 : recordCount >= 5 ? 0.85 : 0.90
+  return similarity >= threshold
+}
+
+function passesRecognition(match: DeepReadonly<SpeakerMatch>): boolean {
+  return passesThreshold(match.minSimilarity, match.count)
+    || passesThreshold(match.referenceSimilarity, match.referenceRecordCount)
+    || passesThreshold(match.trimmedReferenceSimilarity, match.trimmedReferenceRecordCount)
+    || match.referenceGroups.some(group => passesThreshold(group.similarity, group.recordCount))
 }
 </script>
 
@@ -64,15 +89,9 @@ function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>
                   </th><th class="px-2 py-3 text-right sm:px-3">
                     <span class="sm:hidden">匹配数</span><span class="hidden sm:inline">匹配数量</span>
                   </th><th class="hidden px-3 py-3 text-right sm:table-cell">
-                    <span class="sm:hidden">Max</span><span class="hidden sm:inline">最大值</span>
-                  </th><th class="hidden px-3 py-3 text-right sm:table-cell">
-                    <span class="sm:hidden">Min</span><span class="hidden sm:inline">最小值</span>
-                  </th><th class="px-2 py-3 text-right sm:px-3">
-                    <span class="sm:hidden">Avg</span><span class="hidden sm:inline">平均值</span>
+                    独立
                   </th><th class="px-2 py-3 text-right sm:px-3" title="合成分数（参考条数）">
                     <span class="lg:hidden">Syn</span><span class="hidden lg:inline">合成</span>
-                  </th><th class="hidden px-3 py-3 text-right lg:table-cell">
-                    筛选合成
                   </th><th class="hidden px-3 py-3 text-right lg:table-cell" title="每组分数（条数）">
                     分组合成
                   </th>
@@ -81,19 +100,17 @@ function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>
               <tbody class="divide-y divide-slate-800">
                 <tr v-for="match in result.matches" :key="match.callsign">
                   <td class="px-2 py-3 font-mono font-medium text-cyan-300 sm:px-3">
+                    <template v-if="passesRecognition(match)">
+                      <span aria-hidden="true" class="mr-1 text-emerald-400">✓</span>
+                      <span class="sr-only">通过</span>
+                    </template>
                     {{ match.callsign }}
                   </td><td class="px-2 py-3 text-right sm:px-3">
                     {{ match.count }}
                   </td><td class="hidden px-3 py-3 text-right sm:table-cell">
-                    {{ formatSimilarity(match.maxSimilarity) }}
-                  </td><td class="hidden px-3 py-3 text-right sm:table-cell">
-                    {{ formatSimilarity(match.minSimilarity) }}
-                  </td><td class="px-2 py-3 text-right sm:px-3">
-                    {{ formatSimilarity(match.averageSimilarity) }}
+                    {{ formatReferenceSimilarity(match.minSimilarity, match.count) }}
                   </td><td class="px-2 py-3 text-right text-cyan-200 sm:px-3">
-                    {{ formatReferenceSimilarity(match.referenceSimilarity, match.referenceRecordCount) }}
-                  </td><td class="hidden px-3 py-3 text-right text-cyan-200 lg:table-cell">
-                    {{ formatReferenceSimilarity(match.trimmedReferenceSimilarity, match.trimmedReferenceRecordCount) }}
+                    {{ formatReferenceSimilarity(match.referenceSimilarity, match.referenceRecordCount) }}<span v-if="match.referenceRecordCount !== match.trimmedReferenceRecordCount" class="hidden lg:inline">/{{ formatReferenceSimilarity(match.trimmedReferenceSimilarity, match.trimmedReferenceRecordCount) }}</span>
                   </td><td class="hidden px-3 py-3 text-right text-cyan-200 lg:table-cell">
                     {{ formatReferenceGroups(match.referenceGroups) }}
                   </td>
@@ -102,7 +119,7 @@ function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>
             </table>
           </div>
           <p v-else class="rounded-lg border border-amber-900/70 bg-amber-950/20 px-4 py-4 text-sm leading-6 text-amber-200">
-            {{ result.status === 'no_match' ? '没有识别到呼号' : '无法识别呼号' }}
+            {{ outcomeMessage }}
           </p>
         </template>
       </div>

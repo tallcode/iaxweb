@@ -10,7 +10,7 @@ import { SPEAKER_REFERENCE_LIMIT } from '../ai/speaker-reference-score.mjs'
 import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { decodeVoiceprint, encodeVoiceprint } from './voiceprint.js'
 
-export const SPEAKER_REFERENCE_THRESHOLD = 0.80
+export const SPEAKER_REFERENCE_THRESHOLD = 0.75
 type SpeakerSearchMatch = Omit<SpeakerMatch, Exclude<keyof SpeakerReferenceScore, 'callsign'>>
 
 export interface StoredSpot {
