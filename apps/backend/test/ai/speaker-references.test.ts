@@ -9,6 +9,19 @@ import { encodeWav } from '../../src/ai/wav.js'
 import { RecordRepository } from '../../src/records/record-repository.js'
 import { RecordingStore } from '../../src/records/recording-store.js'
 
+function speechLikeAudio(): Int16Array {
+  let state = 123
+  const noise = Float32Array.from({ length: 16031 }, () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    return state / 0x100000000 - 0.5
+  })
+  return Int16Array.from({ length: 16000 }, (_, i) => {
+    let sum = 0
+    for (let j = 0; j < 32; j++) sum += noise[i + j]!
+    return Math.round(sum / 32 * 16384)
+  })
+}
+
 test('missing model leaves reviewed jobs pending for recovery', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-speaker-retry-'))
   const repository = new RecordRepository(':memory:')
@@ -21,7 +34,7 @@ test('missing model leaves reviewed jobs pending for recovery', async (t) => {
   const record = { id: 'aabb', timestamp: '2026-11-17T09:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '测试录音' }
   repository.insert('1900', record)
   repository.updateManualReview(record.id, { reviewed: true })
-  new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(new Int16Array(16000)))
+  new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(speechLikeAudio()))
   await service.processPending()
   assert.deepEqual(repository.pendingReviewedVoiceprints(), [{ id: record.id, timestamp: record.timestamp, voicedMs: record.voicedMs }])
   await service.processPending()
@@ -45,6 +58,7 @@ test('invalid recordings are terminal failures and do not block later annotation
   repository.updateManualReview(later.id, { reviewed: true })
   new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(new Int16Array(16000)))
   writeFileSync(speakerWavFile(directory, record), 'invalid WAV')
+  await service.processPending()
   await service.processPending()
   assert.deepEqual(repository.pendingReviewedVoiceprints(), [])
 })

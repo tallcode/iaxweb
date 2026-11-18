@@ -74,12 +74,15 @@ export class SpeakerReferenceService {
         return unavailable('extraction_timeout', '声纹提取超时，请稍后重试。')
       if (detail.includes('queue full'))
         return unavailable('extraction_busy', '声纹任务较多，请稍后重试。')
+      if (detail.includes('resource limit') || detail.includes('insufficient memory'))
+        return unavailable('resource_limit', '服务器可用内存不足或声纹提取达到内存上限，已停止本次任务，请稍后重试。')
       if (!this.stopped)
         console.warn(`${logTimestamp()} [AI]: 手动声纹提取失败: ${detail}`)
       return unavailable('extraction_failed', '声纹模型暂不可用或提取失败，请稍后重试。')
     }
     if (voiceprint.status !== 'ready') {
       switch (voiceprint.reason) {
+        case 'audio_too_long': return unavailable('audio_too_long', '录音超过当前安全上限 20 秒，未生成声纹。')
         case 'interference_tone': return unavailable('interference_tone', '检测到明显窄带干扰，未生成查询声纹。')
         case 'interference_high_band': return unavailable('interference_high_band', '检测到高频能量异常，可能存在弱干扰，未生成查询声纹。')
         case 'invalid_audio': return unavailable('invalid_audio', '音频采样无效，未生成查询声纹。')
@@ -110,7 +113,7 @@ export class SpeakerReferenceService {
     }
   }
 
-  // Bounded batches keep live queries from waiting behind a historical corpus.
+  // One job per tick leaves CPU and memory headroom for the radio gateway.
   // Missing/pending reviewed rows form a durable queue, including after restart.
   async processPending(): Promise<void> {
     if (this.stopped || this.running || this.extractor.backingOff)
@@ -118,7 +121,7 @@ export class SpeakerReferenceService {
     this.running = true
     const { repository, recordingsDirectory } = this.options
     try {
-      for (const record of repository.pendingReviewedVoiceprints()) {
+      for (const record of repository.pendingReviewedVoiceprints(1)) {
         if (this.stopped)
           break
         if (!repository.prepareReviewedVoiceprint(record.id))
@@ -138,6 +141,11 @@ export class SpeakerReferenceService {
           if (this.stopped)
             break
           const detail = String(error)
+          if (detail.includes('resource limit')) {
+            repository.updateVoiceprint(record.id, { version: SPEAKER_VERSION, status: 'unavailable', reason: 'resource_limit' })
+            console.warn(`${logTimestamp()} [AI]: 声纹提取达到内存上限，已停止任务并暂停重算: ${detail}`)
+            break
+          }
           if ((this.extractor.backingOff && !detail.includes('timed out')) || detail.includes('queue full')) {
             // Missing model/native library or temporary saturation is not a
             // recording failure. Keep this durable job pending for retry.
@@ -164,7 +172,7 @@ export class SpeakerReferenceService {
         console.warn(`${logTimestamp()} [AI]: 已标注声纹任务失败: ${String(error)}`)
       }).finally(() => {
         if (!this.stopped)
-          this.schedule(2_000)
+          this.schedule(5_000)
       })
     }, delayMs)
     this.timer.unref()

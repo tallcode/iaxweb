@@ -1,5 +1,6 @@
 import type { BackfillMode, BackfillRecord, BackfillResult } from '../records/embedding-backfill-store.js'
 import { createHash, randomUUID } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { appendFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -341,8 +342,10 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
     // Resolve the database again to detect a changed symlink on resume.
     if (await realpath(manifest.databaseFile) !== manifest.databaseFile)
       throw new Error('Backfill database path changed')
-    const model = await readFile(manifest.modelFile)
-    if (createHash('sha256').update(model).digest('hex') !== SPEAKER_MODEL_SHA256)
+    const modelHash = createHash('sha256')
+    for await (const chunk of createReadStream(manifest.modelFile))
+      modelHash.update(chunk)
+    if (modelHash.digest('hex') !== SPEAKER_MODEL_SHA256)
       throw new Error('Speaker model SHA-256 mismatch')
     store = new EmbeddingBackfillStore(manifest.databaseFile, false)
     if (!progress.backupFile) {
@@ -388,7 +391,12 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
               if (options.signal?.aborted)
                 break
               const reason = `extraction_error: ${error instanceof Error ? error.message : String(error)}`
-              result = { index, id: record.id, outcome: 'failed', reason, voiceprint: { status: 'failed', version: SPEAKER_VERSION, reason } }
+              if (reason.includes('resource limit'))
+                result = { index, id: record.id, outcome: 'unavailable', reason: 'resource_limit', voiceprint: { status: 'unavailable', version: SPEAKER_VERSION, reason: 'resource_limit' } }
+              else if (reason.includes('insufficient memory'))
+                result = { index, id: record.id, outcome: 'skipped', reason: 'insufficient_memory' }
+              else
+                result = { index, id: record.id, outcome: 'failed', reason, voiceprint: { status: 'failed', version: SPEAKER_VERSION, reason } }
               if (extractor.backingOff || ++consecutiveExtractionErrors >= 3)
                 fatal = error
             }
@@ -404,13 +412,15 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
           result = { index, id: record.id, outcome: missing ? 'unavailable' : 'failed', reason, voiceprint: { status: missing ? 'unavailable' : 'failed', version: SPEAKER_VERSION, reason } }
         }
       }
+      if (fatal && result.reason === 'insufficient_memory')
+        throw new Error('Speaker process has insufficient memory; retry this record after recovery', { cause: fatal })
       if (result.voiceprint)
         result.previousVersion = current?.version ?? null
       batch.push(result)
       if (batch.length >= 50 || fatal || index + 1 === last)
         await checkpoint()
       if (fatal)
-        throw new Error('Speaker worker unavailable; backfill paused instead of failing remaining records', { cause: fatal })
+        throw new Error('Speaker process unavailable; backfill paused instead of failing remaining records', { cause: fatal })
       if ((index + 1) % 100 === 0) {
         const rate = (index + 1 - initialNext) / ((performance.now() - started) / 1000)
         log(`进度 ${index + 1}/${manifest.records.length}，${rate.toFixed(2)} 条/秒，剩余约 ${Math.ceil((manifest.records.length - index - 1) / rate / 60)} 分钟`)
