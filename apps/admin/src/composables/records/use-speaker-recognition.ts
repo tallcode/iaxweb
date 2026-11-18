@@ -1,7 +1,7 @@
 import type { PersistedRecord, SpeakerRecognition } from '@iaxweb/contracts'
 import type { SpeakerRecognitionContext } from './types'
 import { onScopeDispose, readonly, ref } from 'vue'
-import { ApiError, apiErrorMessage } from '../../api/client'
+import { ApiError } from '../../api/client'
 import { recordsApi } from '../../api/records'
 
 export function useSpeakerRecognition(options: { canBegin: () => boolean, onBegin: () => void, onUnauthorized: () => Promise<void> }): SpeakerRecognitionContext {
@@ -29,7 +29,7 @@ export function useSpeakerRecognition(options: { canBegin: () => boolean, onBegi
     catch (cause) {
       if (current !== sequence || (cause instanceof ApiError && cause.kind === 'aborted'))
         return
-      error.value = apiErrorMessage(cause, '特征识别失败，请重试')
+      error.value = '识别失败，请重试'
       if (cause instanceof ApiError && cause.status === 401)
         await options.onUnauthorized()
     }
@@ -55,8 +55,5 @@ export function useSpeakerRecognition(options: { canBegin: () => boolean, onBegi
     loading.value = false
   }
   onScopeDispose(close)
-  function retry(): void {
-    void recognize()
-  }
-  return { state: { record: readonly(record), loading: readonly(loading), result: readonly(result), error: readonly(error) }, request, retry, close }
+  return { state: { record: readonly(record), loading: readonly(loading), result: readonly(result), error: readonly(error) }, request, close }
 }

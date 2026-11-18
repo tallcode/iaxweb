@@ -99,7 +99,6 @@ export interface SpeakerRecognitionContext {
     error: ReadonlyRef<string>
   }
   request: (record: PersistedRecord) => void
-  retry: () => void
   close: () => void
 }
 

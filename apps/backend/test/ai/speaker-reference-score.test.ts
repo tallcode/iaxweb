@@ -28,8 +28,8 @@ test('addMulti scores its native centroid independently from model loading', asy
     assert.ok(Math.abs(scores[1]!.referenceSimilarity!) < 1e-6)
     assert.ok(Math.abs(scores[2]!.referenceSimilarity! + 1) < 1e-6)
     assert.deepEqual(scores.slice(3), [
-      { callsign: 'BG5NUL', referenceSimilarity: null, referenceRecordCount: 0, referenceGroups: [] },
-      { callsign: 'BG5BAD', referenceSimilarity: null, referenceRecordCount: 0, referenceGroups: [] },
+      { callsign: 'BG5NUL', referenceSimilarity: null, referenceRecordCount: 0, trimmedReferenceSimilarity: null, trimmedReferenceRecordCount: 0, referenceGroups: [] },
+      { callsign: 'BG5BAD', referenceSimilarity: null, referenceRecordCount: 0, trimmedReferenceSimilarity: null, trimmedReferenceRecordCount: 0, referenceGroups: [] },
     ])
     assert.deepEqual(query, vector(1))
     assert.deepEqual(positive, vector(0.8, 0.6))
@@ -54,9 +54,26 @@ test('reference groups start at five and discard groups at or below twenty perce
     }))
     const scores = await extractor.scoreReferences(vector(1), groups)
     assert.deepEqual(scores.map(score => score.referenceRecordCount), [4, 5, 10, 15, 16, 5])
+    assert.deepEqual(scores.map(score => score.trimmedReferenceRecordCount), [4, 4, 8, 12, 13, 4])
+    assert.equal(scores[0]?.trimmedReferenceSimilarity, scores[0]?.referenceSimilarity)
     assert.deepEqual(scores.map(score => score.referenceGroups.map(group => group.recordCount)), [[], [3, 2], [5, 3], [8, 4], [7, 4], []])
     assert.ok(scores[4]!.referenceGroups[0]!.similarity > 0.999999)
     assert.ok(Math.abs(scores[4]!.referenceGroups[1]!.similarity) < 1e-6)
+  }
+  finally { extractor.stop() }
+})
+
+test('trimmed synthesis discards outliers by reference agreement even when they match the query', async () => {
+  const extractor = new SpeakerExtractor('/missing/model.onnx')
+  try {
+    const typical = vector(1)
+    const query = vector(0, 1)
+    const embeddings = [...Array.from<Float32Array>({ length: 3 }).fill(query), ...Array.from<Float32Array>({ length: 13 }).fill(typical)]
+    const [score] = await extractor.scoreReferences(query, [{ callsign: 'BG5ABC', embeddings }])
+    assert.ok(score!.referenceSimilarity! > 0.2)
+    assert.equal(score!.trimmedReferenceRecordCount, 13)
+    assert.ok(Math.abs(score!.trimmedReferenceSimilarity!) < 1e-6)
+    assert.deepEqual(score!.referenceGroups.map(group => group.recordCount), [13])
   }
   finally { extractor.stop() }
 })

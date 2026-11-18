@@ -487,6 +487,7 @@ function validReferenceScores(scores: unknown, groups: SpeakerReferenceGroup[]):
     const count = group.embeddings.length
     return score && score.callsign === group.callsign
       && validReferenceScore(score.referenceSimilarity, score.referenceRecordCount, count)
+      && validReferenceScore(score.trimmedReferenceSimilarity, score.trimmedReferenceRecordCount, count - Math.floor(count / 5))
       && validReferenceGroups(score.referenceGroups, count)
   })
 }

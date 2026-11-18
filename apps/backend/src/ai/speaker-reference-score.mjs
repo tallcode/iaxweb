@@ -16,7 +16,7 @@ function vectorNorm(vector) {
   return Math.sqrt(squared)
 }
 
-function clusterReferences(embeddings, norms) {
+function pairwiseSimilarities(embeddings, norms) {
   const similarities = embeddings.map(() => new Float64Array(embeddings.length))
   for (let i = 0; i < embeddings.length; i++) {
     for (let j = i + 1; j < embeddings.length; j++) {
@@ -28,7 +28,26 @@ function clusterReferences(embeddings, norms) {
       similarities[j][i] = similarity
     }
   }
-  const clusters = embeddings.map((_, index) => [index])
+  return similarities
+}
+
+function trimReferences(embeddings, similarities) {
+  const removeCount = Math.floor(embeddings.length / 5)
+  const ranked = similarities.map((row, index) => {
+    const scores = row.filter((_, other) => other !== index).sort()
+    const middle = Math.floor(scores.length / 2)
+    const median = scores.length % 2 ? scores[middle] : (scores[middle - 1] + scores[middle]) / 2
+    return { index, median }
+  })
+  // References are ordered newest first. Discard the older entry on a tie.
+  ranked.sort((a, b) => a.median - b.median || b.index - a.index)
+  const removed = new Set(ranked.slice(0, removeCount).map(entry => entry.index))
+  return embeddings.filter((_, index) => !removed.has(index))
+}
+
+// Reuses the pairwise matrix after trimming and updates it in place for linkage.
+function clusterReferences(similarities) {
+  const clusters = similarities.map((_, index) => [index])
   for (;;) {
     let best = GROUP_SIMILARITY_THRESHOLD
     let mergeLeft = -1
@@ -62,7 +81,7 @@ function clusterReferences(embeddings, norms) {
     }
   }
 
-  return clusters.filter(cluster => cluster.length * 5 > embeddings.length)
+  return clusters.filter(cluster => cluster.length * 5 > similarities.length)
 }
 
 // sherpa-onnx-node 2.0.1 exposes addMulti/verify, but no numeric score or
@@ -104,6 +123,8 @@ export function scoreSpeakerReferences(sherpa, query, groups) {
       callsign,
       referenceSimilarity: null,
       referenceRecordCount: 0,
+      trimmedReferenceSimilarity: null,
+      trimmedReferenceRecordCount: 0,
       referenceGroups: [],
     }
     if (embeddings.length === 0 || embeddings.length > SPEAKER_REFERENCE_LIMIT)
@@ -113,18 +134,23 @@ export function scoreSpeakerReferences(sherpa, query, groups) {
       return unavailable
 
     const referenceSimilarity = scoreTemplate(manager, callsign, query, embeddings)
-    const referenceGroups = embeddings.length < MIN_REFERENCES_TO_GROUP
-      ? []
-      : clusterReferences(embeddings, norms).flatMap((cluster) => {
+    const similarities = embeddings.length >= MIN_REFERENCES_TO_GROUP ? pairwiseSimilarities(embeddings, norms) : null
+    const retained = similarities ? trimReferences(embeddings, similarities) : embeddings
+    const trimmedReferenceSimilarity = similarities ? scoreTemplate(manager, callsign, query, retained) : referenceSimilarity
+    const referenceGroups = similarities
+      ? clusterReferences(similarities).flatMap((cluster) => {
           const similarity = cluster.length === embeddings.length
             ? referenceSimilarity
             : scoreTemplate(manager, callsign, query, cluster.map(index => embeddings[index]))
           return similarity === null ? [] : [{ similarity, recordCount: cluster.length }]
         }).sort((a, b) => b.recordCount - a.recordCount || b.similarity - a.similarity)
+      : []
     return {
       callsign,
       referenceSimilarity,
       referenceRecordCount: referenceSimilarity === null ? 0 : embeddings.length,
+      trimmedReferenceSimilarity,
+      trimmedReferenceRecordCount: trimmedReferenceSimilarity === null ? 0 : retained.length,
       referenceGroups,
     }
   })

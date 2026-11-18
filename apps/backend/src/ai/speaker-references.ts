@@ -126,6 +126,8 @@ export class SpeakerReferenceService {
       ...match,
       referenceSimilarity: null,
       referenceRecordCount: 0,
+      trimmedReferenceSimilarity: null,
+      trimmedReferenceRecordCount: 0,
       referenceGroups: [],
     }))
     if (matches.length > 0) {
@@ -146,6 +148,8 @@ export class SpeakerReferenceService {
             if (score) {
               match.referenceSimilarity = score.referenceSimilarity
               match.referenceRecordCount = score.referenceRecordCount
+              match.trimmedReferenceSimilarity = score.trimmedReferenceSimilarity
+              match.trimmedReferenceRecordCount = score.trimmedReferenceRecordCount
               match.referenceGroups = score.referenceGroups
             }
           }
