@@ -8,6 +8,7 @@ const recognition = useSpeakerRecognitionContext()
 const { record, loading, result, error } = recognition.state
 const dialog = ref<HTMLDialogElement>()
 const totalMatches = computed(() => result.value?.matches.reduce((sum, match) => sum + match.count, 0) ?? 0)
+const matchesWithStatus = computed(() => result.value?.matches.map(match => ({ match, status: recognitionStatus(match) })) ?? [])
 const outcomeMessage = computed(() => {
   const reasonCode = result.value?.reasonCode
   if (reasonCode === 'interference_tone' || reasonCode === 'interference_high_band')
@@ -51,23 +52,30 @@ function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>
     .join('/') || '—'
 }
 
-function passesThreshold(similarity: number | null, recordCount: number): boolean {
-  if (similarity === null || recordCount < 1)
-    return false
-  const threshold = recordCount >= 10 ? 0.80 : recordCount >= 5 ? 0.85 : 0.90
-  return similarity >= threshold
-}
-
-function passesRecognition(match: DeepReadonly<SpeakerMatch>): boolean {
-  return passesThreshold(match.minSimilarity, match.count)
-    || passesThreshold(match.referenceSimilarity, match.referenceRecordCount)
-    || passesThreshold(match.trimmedReferenceSimilarity, match.trimmedReferenceRecordCount)
-    || match.referenceGroups.some(group => passesThreshold(group.similarity, group.recordCount))
+function recognitionStatus(match: DeepReadonly<SpeakerMatch>): 'passed' | 'uncertain' | null {
+  const scores = [
+    { similarity: match.minSimilarity, recordCount: match.count },
+    { similarity: match.referenceSimilarity, recordCount: match.referenceRecordCount },
+    { similarity: match.trimmedReferenceSimilarity, recordCount: match.trimmedReferenceRecordCount },
+    ...match.referenceGroups,
+  ]
+  let uncertain = false
+  for (const { similarity, recordCount } of scores) {
+    if (similarity === null || recordCount < 2)
+      continue
+    const passThreshold = recordCount >= 10 ? 0.80 : recordCount >= 5 ? 0.85 : 0.90
+    if (similarity >= passThreshold)
+      return 'passed'
+    const uncertainThreshold = recordCount >= 5 ? 0.80 : 0.85
+    if (similarity >= uncertainThreshold)
+      uncertain = true
+  }
+  return uncertain ? 'uncertain' : null
 }
 </script>
 
 <template>
-  <dialog ref="dialog" aria-labelledby="speaker-recognition-title" class="m-auto max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-3xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5 text-slate-100 shadow-2xl backdrop:bg-slate-950/75 backdrop:backdrop-blur-sm sm:p-6 lg:max-w-4xl" @cancel="recognition.close" @close="onClose">
+  <dialog ref="dialog" aria-labelledby="speaker-recognition-title" class="m-auto max-h-[calc(100dvh_-_1rem)] w-[calc(100%_-_1rem)] max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-3 text-slate-100 shadow-2xl backdrop:bg-slate-950/75 backdrop:backdrop-blur-sm sm:max-h-[calc(100dvh_-_2rem)] sm:w-[calc(100%_-_2rem)] sm:p-5" @cancel="recognition.close" @close="onClose">
     <div v-if="record">
       <h2 id="speaker-recognition-title" class="text-lg font-semibold">
         识别
@@ -84,34 +92,33 @@ function passesRecognition(match: DeepReadonly<SpeakerMatch>): boolean {
             <table class="w-full whitespace-nowrap text-left text-xs tabular-nums sm:text-sm">
               <thead class="bg-slate-800/80 text-xs text-slate-400">
                 <tr>
-                  <th class="px-2 py-3 sm:px-3">
+                  <th class="w-6" aria-label="通过状态" /><th class="px-1.5 py-2.5 sm:px-2.5">
                     呼号
-                  </th><th class="px-2 py-3 text-right sm:px-3">
-                    <span class="sm:hidden">匹配数</span><span class="hidden sm:inline">匹配数量</span>
-                  </th><th class="hidden px-3 py-3 text-right sm:table-cell">
+                  </th><th class="px-1.5 py-2.5 text-right sm:px-2.5">
                     独立
-                  </th><th class="px-2 py-3 text-right sm:px-3" title="合成分数（参考条数）">
-                    <span class="lg:hidden">Syn</span><span class="hidden lg:inline">合成</span>
-                  </th><th class="hidden px-3 py-3 text-right lg:table-cell" title="每组分数（条数）">
+                  </th><th class="px-1.5 py-2.5 text-right sm:px-2.5" title="合成分数（参考条数）">
+                    合成
+                  </th><th class="hidden px-2.5 py-2.5 text-right lg:table-cell" title="每组分数（条数）">
                     分组合成
                   </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800">
-                <tr v-for="match in result.matches" :key="match.callsign">
-                  <td class="px-2 py-3 font-mono font-medium text-cyan-300 sm:px-3">
-                    <template v-if="passesRecognition(match)">
-                      <span aria-hidden="true" class="mr-1 text-emerald-400">✓</span>
-                      <span class="sr-only">通过</span>
-                    </template>
+                <tr v-for="{ match, status } in matchesWithStatus" :key="match.callsign">
+                  <td class="px-1 py-2.5">
+                    <svg v-if="status === 'passed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-emerald-400" role="img" aria-label="通过">
+                      <path d="m5 12 4 4L19 6" />
+                    </svg>
+                    <svg v-else-if="status === 'uncertain'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-yellow-400" role="img" aria-label="不确定">
+                      <path d="M9 9a3 3 0 1 1 5 2.3c-1.2.9-2 1.3-2 2.7m0 4h.01" />
+                    </svg>
+                  </td><td class="px-1.5 py-2.5 font-mono font-medium text-cyan-300 sm:px-2.5">
                     {{ match.callsign }}
-                  </td><td class="px-2 py-3 text-right sm:px-3">
-                    {{ match.count }}
-                  </td><td class="hidden px-3 py-3 text-right sm:table-cell">
+                  </td><td class="px-1.5 py-2.5 text-right sm:px-2.5">
                     {{ formatReferenceSimilarity(match.minSimilarity, match.count) }}
-                  </td><td class="px-2 py-3 text-right text-cyan-200 sm:px-3">
+                  </td><td class="px-1.5 py-2.5 text-right text-cyan-200 sm:px-2.5">
                     {{ formatReferenceSimilarity(match.referenceSimilarity, match.referenceRecordCount) }}<span v-if="match.referenceRecordCount !== match.trimmedReferenceRecordCount" class="hidden lg:inline">/{{ formatReferenceSimilarity(match.trimmedReferenceSimilarity, match.trimmedReferenceRecordCount) }}</span>
-                  </td><td class="hidden px-3 py-3 text-right text-cyan-200 lg:table-cell">
+                  </td><td class="hidden px-2.5 py-2.5 text-right text-cyan-200 lg:table-cell">
                     {{ formatReferenceGroups(match.referenceGroups) }}
                   </td>
                 </tr>
