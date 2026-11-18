@@ -106,6 +106,41 @@ it('persists review and cancel actions and rolls back a failed save', async () =
   wrapper.unmount()
 })
 
+it.each([
+  { callsign: null, manualCallsign: null, effectiveCallsign: null, disabled: true },
+  { callsign: 'BG5AAA', manualCallsign: null, effectiveCallsign: 'BG5AAA', disabled: false },
+  { callsign: null, manualCallsign: 'BG5BBB', effectiveCallsign: 'BG5BBB', disabled: false },
+])('requires either AI or manual caller on desktop and mobile: $effectiveCallsign', async ({ disabled, ...callers }) => {
+  const fetchMock = setup({ ...record(), ...callers })
+  const wrapper = mount(RecordsPage)
+  await flushPromises()
+  const stars = wrapper.findAll('button[aria-label="标注记录"]')
+  expect(stars).toHaveLength(2)
+  for (const star of stars) {
+    expect(star.attributes('disabled') !== undefined).toBe(disabled)
+    if (disabled) {
+      expect(star.attributes('title')).toContain('请先填写主叫呼号')
+      await star.trigger('click')
+    }
+  }
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  wrapper.unmount()
+})
+
+it('allows cancelling an existing empty-caller legacy review', async () => {
+  const row = { ...record(), callsign: null, manualCallsign: null, effectiveCallsign: null, reviewed: true }
+  setup(row, Response.json({ ...row, reviewed: false }))
+  const wrapper = mount(RecordsPage)
+  await flushPromises()
+  const star = wrapper.get('tbody button[aria-label="标注记录"]')
+  expect(star.attributes('disabled')).toBeUndefined()
+  await star.trigger('click')
+  await flushPromises()
+  expect(star.attributes('aria-pressed')).toBe('false')
+  expect(star.attributes('disabled')).toBeDefined()
+  wrapper.unmount()
+})
+
 it('renders a manually rejected AI callsign in white with a strike and yellow background', () => {
   const wrapper = mount(CallsignText, { props: { original: 'BD1ESL', manual: 'N0CALL' } })
   expect(wrapper.get('del').text()).toBe('BD1ESL')

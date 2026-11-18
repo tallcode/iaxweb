@@ -3,10 +3,10 @@ import type { SpotStore } from '../spots/spot-store.js'
 import type { ReviewRepository } from './ports.js'
 import type { ManualReviewPatch } from './record-repository.js'
 import type { RecordingStore } from './recording-store.js'
-import { NO_CALLSIGN } from '@iaxweb/contracts'
+import { hasCallerCallsign, NO_CALLSIGN, REVIEW_CALLSIGN_CLEAR_MESSAGE, REVIEW_CALLSIGN_REQUIRED_MESSAGE } from '@iaxweb/contracts'
 
 export class RecordReviewError extends Error {
-  constructor(readonly statusCode: 401 | 403 | 404, message: string) { super(message) }
+  constructor(readonly statusCode: 400 | 401 | 403 | 404, message: string) { super(message) }
 }
 
 export class RecordReviewService {
@@ -28,6 +28,10 @@ export class RecordReviewService {
       const existing = this.repository.find(id)
       if (!existing)
         throw new RecordReviewError(404, 'Not Found')
+      if (user.role === 'admin' && (patch.reviewed === true || (existing.reviewed && patch.callsign !== undefined))
+        && !hasCallerCallsign({ callsign: existing.callsign, manualCallsign: patch.callsign === undefined ? existing.manualCallsign : patch.callsign })) {
+        throw new RecordReviewError(400, patch.reviewed === true ? REVIEW_CALLSIGN_REQUIRED_MESSAGE : REVIEW_CALLSIGN_CLEAR_MESSAGE)
+      }
       throw new RecordReviewError(403, '记录已标注，只有管理员可以编辑')
     }
     const record = this.find(id)

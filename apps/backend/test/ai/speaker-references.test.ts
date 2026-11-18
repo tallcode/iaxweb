@@ -33,7 +33,7 @@ test('missing model leaves reviewed jobs pending for recovery', async (t) => {
   })
   const record = { id: 'aabb', timestamp: '2026-11-17T09:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '测试录音' }
   repository.insert('1900', record)
-  repository.updateManualReview(record.id, { reviewed: true })
+  repository.updateManualReview(record.id, { reviewed: true, callsign: 'BG5XXX' })
   new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(speechLikeAudio()))
   await service.processPending()
   assert.deepEqual(repository.pendingReviewedVoiceprints(), [{ id: record.id, timestamp: record.timestamp, voicedMs: record.voicedMs }])
@@ -54,8 +54,8 @@ test('invalid recordings are terminal failures and do not block later annotation
   const later = { ...record, id: 'aadd' }
   repository.insert('1900', record)
   repository.insert('1900', later)
-  repository.updateManualReview(record.id, { reviewed: true })
-  repository.updateManualReview(later.id, { reviewed: true })
+  repository.updateManualReview(record.id, { reviewed: true, callsign: 'BG5XXX' })
+  repository.updateManualReview(later.id, { reviewed: true, callsign: 'BG5XXX' })
   new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(new Int16Array(16000)))
   writeFileSync(speakerWavFile(directory, record), 'invalid WAV')
   await service.processPending()

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hasCallerCallsign } from '@iaxweb/contracts'
 import { useRecordInteractions, useRecordsQueryContext } from '../../composables/records/use-records-context'
 import { formatRecordTime as formatTime } from '../../utils/records-format'
 import RecognitionEditor from './RecognitionEditor.vue'
@@ -50,7 +51,7 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
           </td><td v-if="isAdministrator" class="px-3 py-3">
             <div class="flex items-center gap-1">
               <SpeakerRecognitionButton :disabled="isLoading || isSaving(record.id) || isMutating || hasActiveEditor" @recognize="requestSpeakerRecognition(record)" />
-              <ReviewStar :reviewed="record.reviewed" :disabled="isSaving(record.id) || isMutating || hasActiveEditor" @toggle="setReviewed(record, !record.reviewed)" />
+              <ReviewStar :reviewed="record.reviewed" :has-caller="hasCallerCallsign(record)" :disabled="isSaving(record.id) || isMutating || hasActiveEditor" @toggle="setReviewed(record, !record.reviewed)" />
               <button type="button" aria-label="删除记录" title="删除记录和录音" :disabled="isLoading || isMutating || hasActiveEditor" class="inline-flex size-8 items-center justify-center rounded-md text-red-400 transition hover:bg-red-500/10 hover:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:cursor-not-allowed disabled:opacity-40" @click="requestDeletion(record)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4" aria-hidden="true"><path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M5 6l1 14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-14M10 10v7M14 10v7" /></svg>
               </button>

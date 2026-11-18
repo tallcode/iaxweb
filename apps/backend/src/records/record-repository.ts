@@ -3,6 +3,7 @@ import type { RecognitionRecord, Voiceprint } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { hasCallerCallsign } from '@iaxweb/contracts'
 import * as sqliteVec from 'sqlite-vec'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../ai/speaker-model.mjs'
 import { migrateEmbeddingSchema } from './embedding-schema.js'
@@ -304,6 +305,13 @@ export class RecordRepository {
       const result = this.database.prepare(`
         UPDATE ai_segments SET ${assignments.join(', ')} WHERE id = ? ${allowReviewed ? '' : 'AND reviewed = 0'}
       `).run(...values, id)
+      if (Number(result.changes) === 1 && (patch.reviewed === true || patch.callsign !== undefined)) {
+        const updated = this.find(id)!
+        if (updated.reviewed && !hasCallerCallsign(updated)) {
+          this.database.exec('ROLLBACK')
+          return false
+        }
+      }
       if (Number(result.changes) === 1 && patch.reviewed === true) {
         this.database.prepare(`
           INSERT INTO ai_segment_embeddings (record_id, version, dimensions, status, embedding)

@@ -39,13 +39,47 @@ test('only reviewed records receive durable voiceprint jobs; cancellation keeps 
   reopened.close()
 })
 
+test('review requires a caller and rejected patches do not create jobs or clear existing values', () => {
+  const repository = new RecordRepository(':memory:')
+  repository.insert('1900', record())
+  assert.equal(repository.updateManualReview('segment-1', { reviewed: true }), false)
+  assert.equal(repository.find('segment-1')?.reviewed, false)
+  assert.deepEqual(repository.pendingReviewedVoiceprints(), [])
+  assert.equal(repository.updateManualReview('segment-1', { reviewed: true, callsign: 'BG5ABC' }), true)
+  assert.equal(repository.updateManualReview('segment-1', { callsign: null }), false)
+  assert.equal(repository.find('segment-1')?.manualCallsign, 'BG5ABC')
+  assert.equal(repository.find('segment-1')?.reviewed, true)
+  assert.equal(repository.updateManualReview('segment-1', { reviewed: false }), true)
+  assert.equal(repository.updateManualReview('segment-1', { callsign: null }), true)
+  repository.close()
+})
+
+test('reviewed AI-only callers are searchable and manual callers override them', () => {
+  const repository = new RecordRepository(':memory:')
+  const segment = record({ callsign: 'BG5ABC' })
+  repository.insert('1900', segment)
+  repository.updateAnalysis(segment)
+  assert.equal(repository.updateManualReview(segment.id, { reviewed: true }), true)
+  assert.equal(repository.find(segment.id)?.manualCallsign, null)
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
+  embedding[0] = 1
+  const voiceprint = { status: 'ready', version: SPEAKER_VERSION, embedding } as const
+  repository.updateVoiceprint(segment.id, voiceprint)
+  assert.equal(repository.searchSpeakerMatches(voiceprint, 'query').matches[0]?.callsign, 'BG5ABC')
+  repository.updateManualReview(segment.id, { callsign: 'BG5XYZ' })
+  assert.equal(repository.searchSpeakerMatches(voiceprint, 'query').matches[0]?.callsign, 'BG5XYZ')
+  assert.equal(repository.updateManualReview(segment.id, { callsign: null }), true)
+  assert.equal(repository.searchSpeakerMatches(voiceprint, 'query').matches[0]?.callsign, 'BG5ABC')
+  repository.close()
+})
+
 test('quality reasons persist; cancelled or deleted jobs cannot save a vector', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-reviewed-quality-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const filename = join(directory, 'ai.sqlite')
   const repository = new RecordRepository(filename)
   repository.insert('1900', record())
-  repository.updateManualReview('segment-1', { reviewed: true })
+  repository.updateManualReview('segment-1', { reviewed: true, callsign: 'BG5XXX' })
   repository.updateVoiceprint('segment-1', { status: 'unavailable', version: SPEAKER_VERSION, reason: 'interference_high_band' })
   repository.close()
   const reopened = new RecordRepository(filename)
@@ -101,7 +135,7 @@ test('legacy embedding tables gain the reason column and keep unreviewed stored 
   const filename = join(directory, 'ai.sqlite')
   const first = new RecordRepository(filename)
   first.insert('1900', record())
-  first.updateManualReview('segment-1', { reviewed: true })
+  first.updateManualReview('segment-1', { reviewed: true, callsign: 'BG5XXX' })
   first.updateVoiceprint('segment-1', { status: 'unavailable', version: SPEAKER_VERSION, reason: 'interference_tone' })
   first.updateManualReview('segment-1', { reviewed: false })
   first.close()
@@ -135,7 +169,7 @@ test('legacy vectors are cleared once without an automatic backup; only reviewed
       CHECK ((status = 'ready' AND embedding IS NOT NULL AND length(embedding) = 1024)
         OR (status != 'ready' AND embedding IS NULL))
     );
-    UPDATE ai_segments SET reviewed = 1 WHERE id = 'reviewed';
+    UPDATE ai_segments SET reviewed = 1, manual_callsign = 'BG5XXX' WHERE id = 'reviewed';
   `)
   const legacy = new Uint8Array(new Float32Array(256).fill(0.0625).buffer)
   for (const id of ['reviewed', 'cancelled'])
@@ -180,7 +214,7 @@ test('resource policy upgrade retries only eligible legacy limit rejections once
     ['over-minute', 'audio_too_long'],
   ] as const) {
     first.insert('1900', record({ id, durationMs: id === 'over-minute' ? 61_000 : 30_000 }))
-    first.updateManualReview(id, { reviewed: true })
+    first.updateManualReview(id, { reviewed: true, callsign: 'BG5XXX' })
     first.updateVoiceprint(id, { status: 'unavailable', version: SPEAKER_VERSION, reason })
   }
   first.updateManualReview('cancelled', { reviewed: false })
@@ -284,6 +318,7 @@ test('keeps manual text and review status independent of AI analysis', () => {
   const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5AAA' })
   repository.insert('1900', segment)
+  repository.updateAnalysis(segment)
   repository.updateManualReview(segment.id, { recognition: ' 人工复听文本 ', reviewed: true })
   repository.updateAnalysis(segment)
   assert.equal(repository.find(segment.id)?.recognition, segment.recognition)

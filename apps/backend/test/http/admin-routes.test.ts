@@ -146,6 +146,26 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   assert.equal(unauthenticated.statusCode, 401)
   const missing = await app.inject({ headers, method: 'PATCH', payload: { reviewed: true }, url: '/api/admin/records/missing/manual-review' })
   assert.equal(missing.statusCode, 404)
+  const emptyCaller = { ...segment, id: 'empty-caller' }
+  repository.insert('1900', emptyCaller)
+  const callerUrl = '/api/admin/records/empty-caller/manual-callsign'
+  const reviewUrl = '/api/admin/records/empty-caller/manual-review'
+  const mark = () => app.inject({ headers, method: 'PATCH', payload: { reviewed: true }, url: reviewUrl })
+  assert.equal((await mark()).statusCode, 400)
+  assert.equal(repository.find(emptyCaller.id)?.reviewed, false)
+  await app.inject({ headers, method: 'PATCH', payload: { callsign: 'BG5BBB' }, url: '/api/admin/records/empty-caller/manual-callee-callsign' })
+  assert.equal((await mark()).statusCode, 400, 'callee cannot substitute for caller')
+  await app.inject({ headers, method: 'PATCH', payload: { callsign: 'BG5CCC' }, url: callerUrl })
+  assert.equal((await mark()).statusCode, 200)
+  assert.equal((await app.inject({ headers, method: 'PATCH', payload: { callsign: null }, url: callerUrl })).statusCode, 400)
+  assert.equal(repository.find(emptyCaller.id)?.manualCallsign, 'BG5CCC')
+  assert.equal((await app.inject({ headers, method: 'PATCH', payload: { reviewed: false }, url: reviewUrl })).statusCode, 200)
+  assert.equal((await app.inject({ headers, method: 'PATCH', payload: { callsign: null }, url: callerUrl })).statusCode, 200)
+  repository.updateAnalysis(emptyCaller)
+  const aiOnlyReview = await mark()
+  assert.equal(aiOnlyReview.statusCode, 200)
+  assert.equal(aiOnlyReview.json().manualCallsign, null)
+  assert.equal(aiOnlyReview.json().effectiveCallsign, segment.callsign)
   const partialSearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
     url: '/api/admin/records?callsign=BG5AA',

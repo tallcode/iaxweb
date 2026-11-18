@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hasCallerCallsign } from '@iaxweb/contracts'
 import { useRecordInteractions, useRecordsQueryContext } from '../../composables/records/use-records-context'
 import { formatRecordTime as formatTime } from '../../utils/records-format'
 import RecognitionEditor from './RecognitionEditor.vue'
@@ -23,7 +24,7 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
             {{ playingRecordId === record.id ? '停止' : '播放' }}
           </button><span v-else class="shrink-0 text-xs text-slate-600">已过期</span>
           <SpeakerRecognitionButton v-if="isAdministrator" :disabled="isLoading || isSaving(record.id) || isMutating || hasActiveEditor" @recognize="requestSpeakerRecognition(record)" />
-          <ReviewStar v-if="isAdministrator" :reviewed="record.reviewed" :disabled="isSaving(record.id) || isMutating || hasActiveEditor" @toggle="setReviewed(record, !record.reviewed)" />
+          <ReviewStar v-if="isAdministrator" :reviewed="record.reviewed" :has-caller="hasCallerCallsign(record)" :disabled="isSaving(record.id) || isMutating || hasActiveEditor" @toggle="setReviewed(record, !record.reviewed)" />
         </div>
       </div>
       <div class="mt-3">

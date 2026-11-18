@@ -1,5 +1,6 @@
 import type { PersistedRecord } from '@iaxweb/contracts'
 import type { ActiveEditor, CallsignRole, EditorField, RecordEditingController, RecordsFeedback, RecordView } from './types'
+import { hasCallerCallsign, REVIEW_CALLSIGN_CLEAR_MESSAGE, REVIEW_CALLSIGN_REQUIRED_MESSAGE } from '@iaxweb/contracts'
 import { computed, readonly, ref } from 'vue'
 import { ApiError, apiErrorMessage } from '../../api/client'
 import { recordsApi } from '../../api/records'
@@ -73,9 +74,17 @@ export function useRecordEditing(options: EditingOptions): RecordEditingControll
     return save(record, () => recordsApi.updateRecognition(record.id, value))
   }
   function saveCallsign(record: PersistedRecord, role: CallsignRole, value: string | null): Promise<boolean> {
+    if (role === 'caller' && record.reviewed && !hasCallerCallsign({ ...record, manualCallsign: value })) {
+      options.feedback.showError(REVIEW_CALLSIGN_CLEAR_MESSAGE)
+      return Promise.resolve(false)
+    }
     return save(record, () => role === 'callee' ? recordsApi.updateCalleeCallsign(record.id, value) : recordsApi.updateCallsign(record.id, value))
   }
   async function setReviewed(record: PersistedRecord, reviewed: boolean): Promise<void> {
+    if (reviewed && !hasCallerCallsign(record)) {
+      options.feedback.showError(REVIEW_CALLSIGN_REQUIRED_MESSAGE)
+      return
+    }
     if (options.isAdministrator() && !activeEditor.value)
       await save(record, () => recordsApi.setReviewed(record.id, reviewed))
   }
