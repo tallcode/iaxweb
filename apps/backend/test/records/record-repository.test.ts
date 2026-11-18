@@ -134,7 +134,7 @@ test('SQL voice search uses current reviewed main callsigns, groups duplicates, 
     values[1] = Math.sqrt(1 - cosine * cosine)
     return values
   }
-  for (const [id, callsign, similarity] of [['a', 'BG5ABC', 0.99], ['b', 'BG5ABC', 0.95], ['c', 'BG5XYZ', 0.76], ['d', 'BG5LOW', 0.7499], ['e', 'N0CALL', 0.99]] as const) {
+  for (const [id, callsign, similarity] of [['a', 'BG5ABC', 0.99], ['b', 'BG5ABC', 0.95], ['c', 'BG5XYZ', 0.81], ['d', 'BG5LOW', 0.7999], ['e', 'N0CALL', 0.99]] as const) {
     repository.insert('1900', record({ id, timestamp: '2020-01-01T00:00:00Z' }))
     repository.updateManualReview(id, { reviewed: true, callsign, calleeCallsign: 'BG5ZZZ' })
     repository.updateVoiceprint(id, { status: 'ready', version: SPEAKER_VERSION, embedding: embedding(similarity) })

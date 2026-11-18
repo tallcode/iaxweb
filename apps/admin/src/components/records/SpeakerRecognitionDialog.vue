@@ -8,7 +8,9 @@ const recognition = useSpeakerRecognitionContext()
 const { record, loading, result, error } = recognition.state
 const dialog = ref<HTMLDialogElement>()
 const totalMatches = computed(() => result.value?.matches.reduce((sum, match) => sum + match.count, 0) ?? 0)
-const matchesWithStatus = computed(() => result.value?.matches.map(match => ({ match, status: recognitionStatus(match) })) ?? [])
+const rankedMatches = computed(() => (result.value?.matches ?? [])
+  .map(recognitionRow)
+  .sort((a, b) => b.highestScore - a.highestScore))
 const outcomeMessage = computed(() => {
   const reasonCode = result.value?.reasonCode
   if (reasonCode === 'interference_tone' || reasonCode === 'interference_high_band')
@@ -52,25 +54,28 @@ function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>
     .join('/') || '—'
 }
 
-function recognitionStatus(match: DeepReadonly<SpeakerMatch>): 'passed' | 'uncertain' | null {
+function recognitionRow(match: DeepReadonly<SpeakerMatch>) {
   const scores = [
     { similarity: match.minSimilarity, recordCount: match.count },
     { similarity: match.referenceSimilarity, recordCount: match.referenceRecordCount },
     { similarity: match.trimmedReferenceSimilarity, recordCount: match.trimmedReferenceRecordCount },
     ...match.referenceGroups,
   ]
-  let uncertain = false
+  const highestScore = Math.max(...scores.map(score => score.similarity ?? -Infinity))
+  let status: 'passed' | 'uncertain' | null = null
   for (const { similarity, recordCount } of scores) {
     if (similarity === null || recordCount < 2)
       continue
     const passThreshold = recordCount >= 10 ? 0.80 : recordCount >= 5 ? 0.85 : 0.90
-    if (similarity >= passThreshold)
-      return 'passed'
+    if (similarity >= passThreshold) {
+      status = 'passed'
+      break
+    }
     const uncertainThreshold = recordCount >= 5 ? 0.80 : 0.85
     if (similarity >= uncertainThreshold)
-      uncertain = true
+      status = 'uncertain'
   }
-  return uncertain ? 'uncertain' : null
+  return { match, status, highestScore }
 }
 </script>
 
@@ -104,7 +109,7 @@ function recognitionStatus(match: DeepReadonly<SpeakerMatch>): 'passed' | 'uncer
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800">
-                <tr v-for="{ match, status } in matchesWithStatus" :key="match.callsign">
+                <tr v-for="{ match, status } in rankedMatches" :key="match.callsign">
                   <td class="px-1 py-2.5">
                     <svg v-if="status === 'passed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-emerald-400" role="img" aria-label="通过">
                       <path d="m5 12 4 4L19 6" />
