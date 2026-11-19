@@ -8,6 +8,9 @@ const OTHER_PATTERN = /(?:[你您他她]|对方).{0,8}呼号|我(?:抄收|拷贝
 const COMPACT_PATTERN = new RegExp(`(?<![A-Z0-9])${CALLSIGN_SOURCE}(?![A-Z0-9])`, 'gi')
 const ADJACENT_LONG_CALLSIGN = new RegExp(String.raw`^[ \t，,、：:]*(${CALLSIGN_PREFIX_SOURCE}[0-9][A-Z]{3})(?![A-Z0-9])`, 'i')
 const DIRECT_ADDRESS = /^[ \t，,、：:]*(?:[你您]好|(?:hello|hi)\b)/i
+const LEADING_CQ = /^[ \t]*(?:CQ\b[ \t，,、：:]*)+/i
+const CQ_SEPARATOR = /^[ \t，,、：:-]*$/
+const CQ_CALL_QUOTE = new RegExp(String.raw`^(${CALLSIGN_SOURCE})[ \t]*呼叫[ \t]*(?:(?:频率|中继)上的?[ \t]*)?(?:友台|有台)[ \t，,。.!！？?]*(?:OVER[ \t，,。.!！？?]*)?$`, 'i')
 
 export interface CallsignDecision {
   callsign?: string
@@ -59,6 +62,30 @@ export function hasTrailingTruncatedCallsign(context: CallsignContext, evidence:
     && !DIRECT_ADDRESS.test(following.slice(adjacent[0].length))
 }
 
+function hasCqCallQuote(quote: string, at: number, evidence: CallsignEvidence, context: CallsignContext): boolean {
+  const { current } = context
+  if (evidence.end > at || CQ_CALL_QUOTE.exec(quote)?.[1]?.toUpperCase() !== evidence.callsign
+    || !CQ_CALL_QUOTE.test(current.text.slice(at))) {
+    return false
+  }
+
+  const opening = LEADING_CQ.exec(current.text)
+  if (!opening || evidence.start < opening[0].length)
+    return false
+
+  // The CQ, spelling repetitions and quoted station call must form one utterance.
+  const repetitions = context.candidates.filter(candidate => candidate.segmentId === current.id
+    && candidate.kind !== 'verified-continuation' && candidate.start >= opening[0].length && candidate.end <= at)
+    .sort((left, right) => left.start - right.start)
+  let end = opening[0].length
+  for (const repetition of repetitions) {
+    if (repetition.callsign !== evidence.callsign || repetition.start < end || !CQ_SEPARATOR.test(current.text.slice(end, repetition.start)))
+      return false
+    end = repetition.end
+  }
+  return CQ_SEPARATOR.test(current.text.slice(end, at))
+}
+
 function quoteError(quote: unknown, evidence: CallsignEvidence, context: CallsignContext): string | undefined {
   const { current, history } = context
   if (typeof quote !== 'string' || !quote.trim() || !current.text.includes(quote))
@@ -100,6 +127,8 @@ function quoteError(quote: unknown, evidence: CallsignEvidence, context: Callsig
   if (introductions.some(marker => marker.start > evidence.start))
     return 'candidate-precedes-self-introduction'
   if (/\bCQ\b/i.test(quote) && at <= evidence.start && quoteEnd >= evidence.end)
+    return trailingError
+  if (hasCqCallQuote(quote, at, evidence, context))
     return trailingError
   const previous = history.at(-1)?.text ?? ''
   const directlyAsked = /(?:请报|报一下|请问|什么|再.{0,4}一下).{0,20}呼号|呼号.{0,20}(?:什么|再|过来)/.test(previous)
