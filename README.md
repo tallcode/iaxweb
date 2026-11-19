@@ -106,7 +106,7 @@ cp examples/ai/schema.json config/schema.json
 
 三段共用 `config/schema.json`。已有部署需同时更新任务提示词和 Schema。一阶段提示词用 `speakerEvidence` 和 `callsignEvidence` 指定原文引用和拼读候选 ID。
 
-可选文件：`config/hotwords.json` 为热词配置，`config/background.txt` 为背景文本。
+ASR 可选配置包括 `config/hotwords.json`（热词）和 `config/background.txt`（背景文本）。可将 [ASR 背景示例](examples/ai/background.txt) 复制为 `config/background.txt`，保存后下一次转写即生效。
 
 ### 记录管理
 
