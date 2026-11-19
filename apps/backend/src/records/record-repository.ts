@@ -3,7 +3,7 @@ import type { ReadyVoiceprint, RecognitionRecord, SpeakerReferenceGroup, Speaker
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { hasCallerCallsign } from '@iaxweb/contracts'
+import { CALLSIGN_PREFIX_SOURCE, hasCallerCallsign } from '@iaxweb/contracts'
 import * as sqliteVec from 'sqlite-vec'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../ai/speaker-model.mjs'
 import { SPEAKER_REFERENCE_LIMIT } from '../ai/speaker-reference-score.mjs'
@@ -11,6 +11,8 @@ import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { decodeVoiceprint, encodeVoiceprint } from './voiceprint.js'
 
 export const SPEAKER_REFERENCE_THRESHOLD = 0.80
+const TWO_LETTER_CALLSIGN_GLOB = `${CALLSIGN_PREFIX_SOURCE}[0-9][A-Z][A-Z]`
+const THREE_LETTER_CALLSIGN_GLOB = `${TWO_LETTER_CALLSIGN_GLOB}[A-Z]`
 type SpeakerSearchMatch = Omit<SpeakerMatch, 'confidence' | Exclude<keyof SpeakerReferenceScore, 'callsign'>>
 
 export interface StoredSpot {
@@ -245,7 +247,7 @@ export class RecordRepository {
           AND COALESCE(s.manual_callsign, s.callsign) IS NOT NULL
       ), eligible AS MATERIALIZED (
         SELECT * FROM reviewed
-        WHERE callsign GLOB 'B[ADGHIY][0-9][A-Z][A-Z]' OR callsign GLOB 'B[ADGHIY][0-9][A-Z][A-Z][A-Z]'
+        WHERE callsign GLOB ? OR callsign GLOB ?
       ), scored AS MATERIALIZED (
         SELECT callsign, MIN(1.0, MAX(-1.0, 1.0 - vec_distance_cosine(embedding, ?))) AS similarity
         FROM eligible
@@ -257,7 +259,15 @@ export class RecordRepository {
       SELECT matches.*, (SELECT COUNT(*) FROM eligible) AS reference_count
       FROM (SELECT 1) LEFT JOIN matches ON 1 = 1
       ORDER BY count DESC, max_similarity DESC, average_similarity DESC, callsign
-    `).all(SPEAKER_VERSION, SPEAKER_DIMENSIONS, excludeId, encodeVoiceprint(voiceprint), SPEAKER_REFERENCE_THRESHOLD)
+    `).all(
+      SPEAKER_VERSION,
+      SPEAKER_DIMENSIONS,
+      excludeId,
+      TWO_LETTER_CALLSIGN_GLOB,
+      THREE_LETTER_CALLSIGN_GLOB,
+      encodeVoiceprint(voiceprint),
+      SPEAKER_REFERENCE_THRESHOLD,
+    )
     return {
       referenceCount: requiredNumber(rows[0]!.reference_count),
       matches: rows.flatMap(row => row.callsign === null

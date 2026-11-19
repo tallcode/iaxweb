@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { isValidCallsign } from '@iaxweb/contracts'
+import { CALLSIGN_PREFIX_SOURCE, CALLSIGN_SECOND_LETTERS, isValidCallsign } from '@iaxweb/contracts'
 import { correctExplanationText, correctExplanationWord } from './phonetic-corrector.js'
+
+const CHINESE_PREFIX = new RegExp(`^${CALLSIGN_PREFIX_SOURCE}$`)
+const CALLSIGN_LIKE_PREFIX = new RegExp(`^[A-Z][${CALLSIGN_SECOND_LETTERS}][0-9]`)
 
 export interface CallsignHintCandidate {
   callsign: string
@@ -181,14 +184,14 @@ function normalizeToken(token: string, precedingRun: Array<{ normalized: string 
 
 function hasChineseCallsignPrefix(run: Array<{ normalized: string }>): boolean {
   const prefix = run.slice(-2).map(token => token.normalized).join('')
-  return /^B[ADGHIY]$/.test(prefix)
+  return CHINESE_PREFIX.test(prefix)
 }
 
 function isCallsignLike(value: string): boolean {
   if (!/^[A-Z0-9]{5,8}$/.test(value) || !/\d/.test(value))
     return false
   return value.startsWith('B')
-    || /^[A-Z][ADGHIY]\d/.test(value)
+    || CALLSIGN_LIKE_PREFIX.test(value)
     || /^[A-Z]\d[A-Z0-9]{3,6}$/.test(value)
 }
 

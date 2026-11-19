@@ -1,8 +1,11 @@
 import type { PhoneticCorrection } from './phonetic-corrector.js'
+import { CALLSIGN_SECOND_LETTERS, CALLSIGN_SOURCE } from '@iaxweb/contracts'
 import { extractCallsignEvidence } from './callsign-evidence.js'
 import { correctExplanationWord } from './phonetic-corrector.js'
 import { spellingGate, tokenize } from './phonetic-near-context.js'
 import { nearSpellingCorrections } from './phonetic-near.js'
+
+const COMPACT_CALLSIGN = new RegExp(String.raw`\b${CALLSIGN_SOURCE}\b`, 'i')
 
 export interface TranscriptCorrection {
   source: string
@@ -46,8 +49,8 @@ export function correctExplanationText(input: string): { text: string, correctio
       const following = contextual.slice(index + 1)
       const first = following[0]
       const second = following[1]
-      const prefix = first?.symbol && /^[ADGHIY]$/.test(first.symbol) && second?.kind === 'digit'
-      const compact = /\bB[ADGHIY]\d[A-Z]{2,3}\b/i.test(input.slice(Math.max(0, token.start - 32), token.start))
+      const prefix = first?.symbol?.length === 1 && CALLSIGN_SECOND_LETTERS.includes(first.symbol) && second?.kind === 'digit'
+      const compact = COMPACT_CALLSIGN.test(input.slice(Math.max(0, token.start - 32), token.start))
       const adjacent = first && /^[\s,，、:：-]*$/u.test(input.slice(token.end, first.start))
       inContext = !!(adjacent && (prefix || (compact && first.strong)))
     }

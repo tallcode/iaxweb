@@ -1,10 +1,13 @@
 import type { SpeakerMatch } from '@iaxweb/contracts'
 import type { CallsignContext } from './callsign-evidence.js'
 import type { CallsignModelOutput } from './callsign-model-output.js'
-import { CALLSIGN_PATTERN } from '@iaxweb/contracts'
+import { CALLSIGN_PATTERN, CALLSIGN_SOURCE } from '@iaxweb/contracts'
 import { recoverSelfSpelling } from './callsign-evidence.js'
 import { levenshteinDistance } from './callsign-hints.js'
 import { checkTextCallsignOutput, hasCurrentCompactSelfQuote, hasTrailingTruncatedCallsign, supportedSelfEvidence } from './callsign-speaker.js'
+
+const COMPACT_INTRODUCTION = new RegExp(String.raw`(?:这里是|我是|我的(?:电台)?呼号(?:是|为)?|\bthis\s+is\b|\bmy\s+call(?:sign)?(?:\s+is)?\b|\bCQ\b)[\s:：,，]*(${CALLSIGN_SOURCE})(?![A-Z0-9])`, 'gi')
+const OTHER_COMPACT_CALLSIGN = new RegExp(String.raw`(?:(?:您|你|对方)的?呼号|我(?:抄收|抄到|拷贝)(?:(?:您|你)的?呼号)?)(?:是|为)?[\s:：]*(${CALLSIGN_SOURCE})(?![A-Z0-9])`, 'gi')
 
 type Match = Pick<SpeakerMatch, 'callsign' | 'confidence'>
 type Stage2Match = Pick<Match, 'callsign'> & { id: 1, confidence: 'medium' | 'high' }
@@ -115,7 +118,7 @@ function hasExplicitSelfCallsign(text: string, callsign: string): boolean {
 }
 
 function compactIntroductions(text: string) {
-  return [...text.matchAll(/(?:这里是|我是|我的(?:电台)?呼号(?:是|为)?|\bthis\s+is\b|\bmy\s+call(?:sign)?(?:\s+is)?\b|\bCQ\b)[\s:：,，]*(B[ADGHIY]\d[A-Z]{2,3})(?![A-Z0-9])/gi)]
+  return [...text.matchAll(COMPACT_INTRODUCTION)]
 }
 
 function currentCompactIntroduction(text: string): CompactIntroduction | undefined {
@@ -136,8 +139,7 @@ function explicitFeatureConflict(context: CallsignContext, callsign: string): bo
 
 function explicitOtherFeatureUse(context: CallsignContext, callsign: string): boolean {
   const { current: { id, text }, candidates } = context
-  const other = /(?:(?:您|你|对方)的?呼号|我(?:抄收|抄到|拷贝)(?:(?:您|你)的?呼号)?)(?:是|为)?[\s:：]*(B[ADGHIY]\d[A-Z]{2,3})(?![A-Z0-9])/gi
-  if ([...text.matchAll(other)].some(match => match[1]!.toUpperCase() === callsign))
+  if ([...text.matchAll(OTHER_COMPACT_CALLSIGN)].some(match => match[1]!.toUpperCase() === callsign))
     return true
   const otherSpelling = /(?:(?:您|你|对方)的?呼号|我(?:抄收|抄到|拷贝)(?:(?:您|你)的?呼号)?)(?:是|为)?[\s:：]*$/
   return candidates.some(candidate => candidate.segmentId === id && candidate.callsign === callsign

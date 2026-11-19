@@ -16,7 +16,7 @@
         },
         "callsign": {
           "type": "string",
-          "pattern": "^B[ADGHIY][0-9][A-Z]{2,3}$"
+          "pattern": "^B[ABDEGHIY][0-9][A-Z]{2,3}$"
         },
         "speakerEvidence": {
           "oneOf": [

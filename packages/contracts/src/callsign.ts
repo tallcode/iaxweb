@@ -1,7 +1,10 @@
 export const NO_CALLSIGN = 'N0CALL'
-export const CALLSIGN_PATTERN = /^B[ADGHIY]\d[A-Z]{2,3}$/
-export const MANUAL_CALLSIGN_PATTERN = /^(?:B[ADGHIY]\d[A-Z]{2,3}|N0CALL)$/
-export const CALLSIGN_HINT = '请输入 N0CALL，或 BA/BD/BG/BH/BI/BY + 数字 + 2–3 个字母'
+export const CALLSIGN_SECOND_LETTERS = 'ABDEGHIY'
+export const CALLSIGN_PREFIX_SOURCE = `B[${CALLSIGN_SECOND_LETTERS}]`
+export const CALLSIGN_SOURCE = String.raw`${CALLSIGN_PREFIX_SOURCE}\d[A-Z]{2,3}`
+export const CALLSIGN_PATTERN = new RegExp(`^${CALLSIGN_SOURCE}$`)
+export const MANUAL_CALLSIGN_PATTERN = new RegExp(`^(?:${CALLSIGN_SOURCE}|${NO_CALLSIGN})$`)
+export const CALLSIGN_HINT = `请输入呼号或者 ${NO_CALLSIGN}`
 export const MAX_RECOGNITION_LENGTH = 1_000
 export const REVIEW_CALLSIGN_REQUIRED_MESSAGE = '请先填写主叫呼号，再标注'
 export const REVIEW_CALLSIGN_CLEAR_MESSAGE = '已标注记录需保留主叫呼号，请先取消标注'

@@ -1,12 +1,12 @@
 import type { CallsignContext, CallsignEvidence } from './callsign-evidence.js'
 import type { CallsignModelOutput } from './callsign-model-output.js'
-import { isValidCallsign } from '@iaxweb/contracts'
+import { CALLSIGN_PREFIX_SOURCE, CALLSIGN_SOURCE, isValidCallsign } from '@iaxweb/contracts'
 import { levenshteinDistance } from './callsign-hints.js'
 
 const OWN_PATTERN = /这里是?|我是|我的(?:电台)?呼号(?:是|为)?|\bthis\s+is\b|\bmy\s+call(?:sign)?(?:\s+is)?\b|\bcall\s*是/gi
 const OTHER_PATTERN = /(?:[你您他她]|对方).{0,8}呼号|我(?:抄收|拷贝|抄到)|请问.{0,12}(?:呼号|你是|您是)/
-const COMPACT_PATTERN = /(?<![A-Z0-9])B[ADGHIY]\d[A-Z]{2,3}(?![A-Z0-9])/gi
-const ADJACENT_LONG_CALLSIGN = /^[ \t，,、：:]*(B[ADGHIY]\d[A-Z]{3})(?![A-Z0-9])/i
+const COMPACT_PATTERN = new RegExp(`(?<![A-Z0-9])${CALLSIGN_SOURCE}(?![A-Z0-9])`, 'gi')
+const ADJACENT_LONG_CALLSIGN = new RegExp(String.raw`^[ \t，,、：:]*(${CALLSIGN_PREFIX_SOURCE}[0-9][A-Z]{3})(?![A-Z0-9])`, 'i')
 const DIRECT_ADDRESS = /^[ \t，,、：:]*(?:[你您]好|(?:hello|hi)\b)/i
 
 export interface CallsignDecision {

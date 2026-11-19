@@ -1,4 +1,4 @@
-import { CALLSIGN_PATTERN } from '@iaxweb/contracts'
+import { CALLSIGN_PATTERN, CALLSIGN_PREFIX_SOURCE, CALLSIGN_SECOND_LETTERS } from '@iaxweb/contracts'
 import { CHINESE_EXPLANATION_WORDS, correctExplanationWord, pinyinSyllables } from './phonetic-corrector.js'
 
 export interface TranscriptTurn {
@@ -62,6 +62,9 @@ const DIGITS: Record<string, string> = {
   九: '9',
 }
 const CALLSIGN = CALLSIGN_PATTERN
+const REGION_PREFIX = new RegExp(`^${CALLSIGN_PREFIX_SOURCE}[0-9]`)
+const REPEATED_PREFIX = new RegExp(String.raw`^B([${CALLSIGN_SECOND_LETTERS}])\1[0-9][A-Z]{3}$`)
+const COMPACT_PREFIX = new RegExp(String.raw`\b(${CALLSIGN_PREFIX_SOURCE}[0-9])[A-Z]{0,3}\b`, 'gi')
 const CHINESE_SPELLINGS = CHINESE_EXPLANATION_WORDS
   .map(word => pinyinSyllables(word.spoken))
   .sort((left, right) => right.length - left.length)
@@ -129,7 +132,7 @@ export function extractCallsignEvidence(turn: TranscriptTurn): CallsignEvidence[
         const part = run.slice(index, index + size)
         const callsign = part.map(token => token.symbol).join('')
         const tail = run.slice(index + size).map(token => token.symbol).join('')
-        if (CALLSIGN.test(callsign) && (!tail || /^B[ADGHIY]\d/.test(tail)))
+        if (CALLSIGN.test(callsign) && (!tail || REGION_PREFIX.test(tail)))
           add(part, callsign, 'full')
       }
     }
@@ -139,15 +142,22 @@ export function extractCallsignEvidence(turn: TranscriptTurn): CallsignEvidence[
       const part = run.slice(index, index + 7)
       const spelled = part.map(token => token.symbol).join('')
       const tail = run.slice(index + 7).map(token => token.symbol).join('')
-      if (/^B([ADGHIY])\1\d[A-Z]{3}$/.test(spelled) && (!tail || /^B[ADGHIY]\d/.test(tail)))
-        add(part, spelled.slice(0, 2) + spelled.slice(3), 'repeated-prefix-letter')
+      if (REPEATED_PREFIX.test(spelled) && (!tail || REGION_PREFIX.test(tail))) {
+        const callsign = spelled.slice(0, 2) + spelled.slice(3)
+        // BBB can also produce a BB candidate starting at the second Bravo.
+        const duplicate = evidence.findIndex(item => item.kind === 'full' && item.callsign === callsign
+          && item.start === part[1]!.start && item.end === part.at(-1)!.end)
+        if (duplicate >= 0)
+          evidence.splice(duplicate, 1)
+        add(part, callsign, 'repeated-prefix-letter')
+      }
     }
     const spelled = run.map(token => token.symbol).join('')
-    if (/^B[ADGHIY]\d$/.test(spelled))
+    if (spelled.length === 3 && REGION_PREFIX.test(spelled))
       pendingPrefix = { prefix: spelled, start: run[0]!.start, end: run.at(-1)!.end }
     if (/^[A-Z]{2,3}$/.test(spelled)) {
       const start = run[0]!.start
-      const compact = [...text.slice(0, start).matchAll(/\b(B[ADGHIY]\d)[A-Z]{0,3}\b/gi)].at(-1)
+      const compact = [...text.slice(0, start).matchAll(COMPACT_PREFIX)].at(-1)
       const gap = compact ? text.slice(compact.index + compact[0].length, start) : ''
       if (compact && /^[\s，,。.:：;；-]*(?:(?:尾号|后缀|字母解释法|拼读)(?:是|为)?[\s，,。.:：;；-]*)?$/.test(gap))
         add(run, compact[1]!.toUpperCase() + spelled, 'suffix', compact[0])

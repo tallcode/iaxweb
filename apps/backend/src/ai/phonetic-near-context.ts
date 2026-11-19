@@ -1,4 +1,5 @@
 /** Text boundaries for conservative near-sound evidence; no audio/model calls. */
+import { CALLSIGN_PREFIX_SOURCE } from '@iaxweb/contracts'
 import { CHINESE_EXPLANATION_WORDS, correctExplanationWord, pinyinSyllables } from './phonetic-corrector.js'
 
 export interface Token { source: string, start: number, end: number, symbol?: string | undefined, strong: boolean, kind: 'word' | 'digit' | 'unknown' | 'compact' | 'boundary' }
@@ -6,6 +7,7 @@ export interface Gate { allowed: boolean, reason: string, anchors: number }
 const digits: Record<string, string> = { zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', 零: '0', 洞: '0', 一: '1', 幺: '1', 二: '2', 两: '2', 三: '3', 四: '4', 五: '5', 六: '6', 拐: '7', 七: '7', 八: '8', 九: '9', 勾: '9' }
 const markers = ['字母解释法', '解释法', '这里是', '重复一遍', '再报一遍', '后缀', '尾号', '拼读', '我是', '这里', '呼叫', '信号', '收到', '谢谢', '设备', '请问', '是否', '是吧', '好吧', '那个']
 const chineseEntries = CHINESE_EXPLANATION_WORDS.map(row => ({ ...row, syllables: pinyinSyllables(row.spoken) })).sort((a, b) => b.syllables.length - a.syllables.length)
+const SPELLING_PREFIX = new RegExp(`^${CALLSIGN_PREFIX_SOURCE}[0-9][A-Z]*$`)
 
 export function tokenize(text: string): Token[] {
   const output: Token[] = []
@@ -97,7 +99,7 @@ export function spellingGate(text: string, tokens: Token[], index: number): Gate
   const previousClause = text.slice(Math.max(0, token.start - 28), token.start).split(/[。！？!?;]/u).at(-1) ?? ''
   const explicit = /字母解释法|解释法|尾号|后缀|拼读/u.test(previousClause)
   const bothSides = left.some(row => row.strong) && right.some(row => row.strong)
-  const prefix = /^B[ADGHIY]\d[A-Z]*$/.test(left.map(row => row.symbol).join(''))
+  const prefix = SPELLING_PREFIX.test(left.map(row => row.symbol).join(''))
   if (anchors >= 2 && bothSides)
     return { allowed: true, reason: 'between-spelling-anchors', anchors }
   if (explicit && anchors >= 1)
