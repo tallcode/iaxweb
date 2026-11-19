@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import type { NodeDefinitions } from '../allmon3/types.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -6,6 +7,7 @@ import fastifyStatic from '@fastify/static'
 
 interface StaticRoutesOptions {
   adminRoot: string
+  nodeDefinitions: NodeDefinitions
   publicRoot: string
 }
 
@@ -28,11 +30,12 @@ export async function registerStaticRoutes(app: FastifyInstance, options: Static
   })
 
   const publicIndex = readFileSync(join(options.publicRoot, 'index.html'), 'utf8')
+  const homepageDocument = createHtmlDocument(injectRepeaterMetadata(publicIndex, options.nodeDefinitions))
   const publicDocument = createHtmlDocument(publicIndex)
   const sendPublicIndex = (request: FastifyRequest, reply: FastifyReply) =>
     sendHtml(request, reply, publicDocument)
 
-  app.get('/', sendPublicIndex)
+  app.get('/', (request, reply) => sendHtml(request, reply, homepageDocument))
   app.get('/map', sendPublicIndex)
   app.get('/map/', sendPublicIndex)
   app.get('/topology', sendPublicIndex)
@@ -70,4 +73,34 @@ function createEtag(content: string): string {
 
 function matchesEtag(value: string | undefined, etag: string): boolean {
   return value?.split(',').some(candidate => candidate.trim() === '*' || candidate.trim() === etag) ?? false
+}
+
+function injectRepeaterMetadata(html: string, definitions: NodeDefinitions): string {
+  const itemListElement = Object.entries(definitions)
+    .filter(([, definition]) => definition.TYPE === 'REPEATER')
+    .map(([nodeId, definition]) => ({
+      '@type': 'Thing',
+      'name': definition.NAME?.trim() || `节点 ${nodeId}`,
+      'description': describeRepeaterFrequency(definition.FREQ),
+    }))
+  if (itemListElement.length === 0)
+    return html
+
+  const metadata = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    'name': '浙江业余无线电中继台',
+    itemListElement,
+  }).replaceAll('<', '\\u003c')
+  return html.replace('</head>', () => `  <script type="application/ld+json">${metadata}</script>\n  </head>`)
+}
+
+function describeRepeaterFrequency(value = ''): string {
+  const [frequency, offset, ...tones] = value
+    .replace(/(\d)(MHz|Hz)\b/gi, '$1 $2')
+    .replace(/\b(TSQ|CTCSS|DCS)(?=\d)/gi, '$1 ')
+    .split('/')
+    .map(field => field.trim())
+
+  return `频率 ${frequency || '未配置'}，频差 ${offset || '未配置'}，亚音 ${tones.filter(Boolean).join('/') || '未配置'}`
 }
