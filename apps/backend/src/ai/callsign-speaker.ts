@@ -1,10 +1,13 @@
 import type { CallsignContext, CallsignEvidence } from './callsign-evidence.js'
 import type { CallsignModelOutput } from './callsign-model-output.js'
 import { isValidCallsign } from '@iaxweb/contracts'
+import { levenshteinDistance } from './callsign-hints.js'
 
 const OWN_PATTERN = /这里是?|我是|我的(?:电台)?呼号(?:是|为)?|\bthis\s+is\b|\bmy\s+call(?:sign)?(?:\s+is)?\b|\bcall\s*是/gi
 const OTHER_PATTERN = /(?:[你您他她]|对方).{0,8}呼号|我(?:抄收|拷贝|抄到)|请问.{0,12}(?:呼号|你是|您是)/
 const COMPACT_PATTERN = /(?<![A-Z0-9])B[ADGHIY]\d[A-Z]{2,3}(?![A-Z0-9])/gi
+const ADJACENT_LONG_CALLSIGN = /^[ \t，,、：:]*(B[ADGHIY]\d[A-Z]{3})(?![A-Z0-9])/i
+const DIRECT_ADDRESS = /^[ \t，,、：:]*(?:[你您]好|(?:hello|hi)\b)/i
 
 export interface CallsignDecision {
   callsign?: string
@@ -40,6 +43,22 @@ export function hasCurrentCompactSelfQuote(text: string, quote: string, callsign
   })
 }
 
+export function hasTrailingTruncatedCallsign(context: CallsignContext, evidence: CallsignEvidence): boolean {
+  if (evidence.callsign.length !== 5 || evidence.segmentId !== context.current.id)
+    return false
+  const priorLength = evidence.kind === 'verified-continuation' ? (context.history.at(-1)?.text.length ?? 0) + 1 : 0
+  const following = context.current.text.slice(evidence.end - priorLength)
+  const adjacent = ADJACENT_LONG_CALLSIGN.exec(following)
+  if (!adjacent)
+    return false
+  const compact = adjacent[1]!.toUpperCase()
+  // One missing letter is evidence of truncation. A different callsign,
+  // sentence boundary or explicit greeting can instead mark the other party.
+  return compact.startsWith(evidence.callsign.slice(0, 3))
+    && levenshteinDistance(evidence.callsign, compact) === 1
+    && !DIRECT_ADDRESS.test(following.slice(adjacent[0].length))
+}
+
 function quoteError(quote: unknown, evidence: CallsignEvidence, context: CallsignContext): string | undefined {
   const { current, history } = context
   if (typeof quote !== 'string' || !quote.trim() || !current.text.includes(quote))
@@ -49,10 +68,11 @@ function quoteError(quote: unknown, evidence: CallsignEvidence, context: Callsig
   const at = current.text.indexOf(quote)
   const quoteEnd = at + quote.length
   const introductions = [...current.text.matchAll(OWN_PATTERN)].map(match => ({ start: match.index, end: match.index + match[0].length }))
+  const trailingError = hasTrailingTruncatedCallsign(context, evidence) ? 'possibly-truncated-suffix' : undefined
   if (evidence.kind === 'verified-continuation') {
     const previous = history.at(-1)
     if (previous && hasOwnIntroduction(previous.text))
-      return undefined
+      return trailingError
     return 'continuation-without-self-introduction'
   }
   if (evidence.segmentId !== current.id) {
@@ -74,17 +94,17 @@ function quoteError(quote: unknown, evidence: CallsignEvidence, context: Callsig
       const compact = [...scope.matchAll(COMPACT_PATTERN)].at(-1)?.[0].toUpperCase()
       if (compact?.length === 6 && evidence.callsign.length === 5 && compact.slice(0, 3) === evidence.callsign.slice(0, 3))
         return 'possibly-truncated-suffix'
-      return undefined
+      return trailingError
     }
   }
   if (introductions.some(marker => marker.start > evidence.start))
     return 'candidate-precedes-self-introduction'
   if (/\bCQ\b/i.test(quote) && at <= evidence.start && quoteEnd >= evidence.end)
-    return undefined
+    return trailingError
   const previous = history.at(-1)?.text ?? ''
   const directlyAsked = /(?:请报|报一下|请问|什么|再.{0,4}一下).{0,20}呼号|呼号.{0,20}(?:什么|再|过来)/.test(previous)
   if (directlyAsked && at <= evidence.start && quoteEnd >= evidence.end && !OTHER_PATTERN.test(current.text))
-    return undefined
+    return trailingError
   return 'no-current-self-evidence'
 }
 

@@ -198,6 +198,22 @@ test('stage 2 rejects a nearby feature match unsupported by the same self-introd
   assert.equal(await unchecked.parser.parseStage2(text, [], text, metadata, [right]), undefined)
 })
 
+test('stage 2 rejects spelling that loses a letter from the trailing self-call', async () => {
+  const callsign = 'BG5GW'
+  const decision = {
+    speaker: 'self',
+    callsign,
+    speakerEvidence: { source: 'featureMatch', matchId: 1 },
+    callsignEvidence: { source: 'spelling', candidateId: 1 },
+  }
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(JSON.stringify(decision))))
+  for (const prefix of ['这里是', '这里是 BG5GZW，']) {
+    const text = `${prefix} Bravo Golf Five Golf Whiskey，BG5GZW。`
+    assert.equal(await parser.parseStage2(text, [], text, { id: 'current' }, [{ callsign, confidence: 'high' }]), undefined)
+  }
+  assert.equal(calls.length, 2)
+})
+
 test('shares one model schema while enforcing different evidence rules', async () => {
   const normal = '收到，信号很好。'
   const conflict = '这里是BG5BUD，Bravo杠Five，Bravo Uniform Tango。'

@@ -4,7 +4,7 @@ import type { CallsignModelOutput } from './callsign-model-output.js'
 import { CALLSIGN_PATTERN } from '@iaxweb/contracts'
 import { recoverSelfSpelling } from './callsign-evidence.js'
 import { levenshteinDistance } from './callsign-hints.js'
-import { checkTextCallsignOutput, hasCurrentCompactSelfQuote, supportedSelfEvidence } from './callsign-speaker.js'
+import { checkTextCallsignOutput, hasCurrentCompactSelfQuote, hasTrailingTruncatedCallsign, supportedSelfEvidence } from './callsign-speaker.js'
 
 type Match = Pick<SpeakerMatch, 'callsign' | 'confidence'>
 type Stage2Match = Pick<Match, 'callsign'> & { id: 1, confidence: 'medium' | 'high' }
@@ -82,7 +82,8 @@ export function checkStage2Callsign(
     // The model must cite the same-utterance candidate chosen by the server.
     return callsign === match.callsign && speakerEvidence.source === 'featureMatch'
       && callsignEvidence.source === 'spelling' && callsignEvidence.candidateId === review.spellingCandidateId
-      && context.candidates.some(candidate => candidate.id === review.spellingCandidateId && candidate.callsign === callsign)
+      && context.candidates.some(candidate => candidate.id === review.spellingCandidateId && candidate.callsign === callsign
+        && !hasTrailingTruncatedCallsign(context, candidate))
       ? callsign
       : undefined
   }
@@ -98,7 +99,8 @@ export function checkStage2Callsign(
     return undefined
   }
   if (callsignEvidence.source === 'spelling') {
-    return context.candidates.some(candidate => candidate.id === callsignEvidence.candidateId && candidate.callsign === callsign)
+    return context.candidates.some(candidate => candidate.id === callsignEvidence.candidateId && candidate.callsign === callsign
+      && !hasTrailingTruncatedCallsign(context, candidate))
       ? callsign
       : undefined
   }

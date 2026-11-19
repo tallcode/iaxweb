@@ -88,6 +88,28 @@ test('does not salvage a missing third suffix letter as a shorter legal callsign
   assert.deepEqual(supportedSelfEvidence(c), [])
 })
 
+test('rejects truncated spelling when the full callsign immediately follows it', () => {
+  const quote = 'this is Bravo Golf Five Golf Whiskey'
+  const c = context(`CQ CQ CQ, ${quote}, BG5GZW. 请问是否有友台可以抄收？`)
+  assert.equal(checkCallsignDecision({ speaker: 'self', quote, callsign: 'BG5GW', evidence: 1 }, c).error, 'possibly-truncated-suffix')
+  assert.deepEqual(supportedSelfEvidence(c), [])
+
+  const previous = { id: 'first', text: '这里是 Bravo Golf Five', transmissionId: 'tx', partIndex: 0 }
+  const current = { id: 'second', text: 'Golf Whiskey，BG5GZW', transmissionId: 'tx', partIndex: 1 }
+  const continuation = buildCallsignContext(current, [previous])
+  const evidence = continuation.candidates.find(candidate => candidate.kind === 'verified-continuation')
+  assert.ok(evidence)
+  assert.equal(checkCallsignDecision({ speaker: 'self', quote: 'Golf Whiskey', callsign: 'BG5GW', evidence: evidence.id }, continuation).error, 'possibly-truncated-suffix')
+})
+
+test('keeps genuine two-letter suffixes and distinct or addressed callsigns', () => {
+  const quote = '这里是 Bravo Golf Five Golf Whiskey'
+  for (const rest of ['', '，BG5GW', '，BG5ABC', '。BG5GZW', '，我抄收您的呼号是 BG5GZW', '，BG5GZW，您好']) {
+    const c = context(quote + rest)
+    assert.equal(checkCallsignDecision({ speaker: 'self', quote, callsign: 'BG5GW', evidence: 1 }, c).callsign, 'BG5GW')
+  }
+})
+
 test('finds retry evidence independently of an incorrect first self claim', () => {
   const text = '这里是 BG5GZX，这里是 BG5GBL，Bravo Golf Five Delta Bravo Lima'
   const c = context(text)
