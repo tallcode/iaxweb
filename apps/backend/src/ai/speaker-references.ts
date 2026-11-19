@@ -30,7 +30,8 @@ function matchConfidence(match: ScoredSpeakerMatch): SpeakerMatch['confidence'] 
   for (const { similarity, recordCount } of scores) {
     if (similarity === null || recordCount < 2)
       continue
-    if (recordCount >= 5 && similarity >= 0.90)
+    const highThreshold = recordCount >= 10 ? 0.85 : 0.90
+    if (recordCount >= 5 && similarity >= highThreshold)
       return 'high'
     const mediumThreshold = recordCount >= 10 ? 0.80 : recordCount >= 5 ? 0.85 : 0.90
     const lowThreshold = recordCount >= 5 ? 0.80 : 0.85
