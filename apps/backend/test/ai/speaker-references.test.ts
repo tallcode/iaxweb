@@ -96,7 +96,7 @@ test('manual recognition includes measurements on early recording failures witho
   finally { inspect.close() }
 })
 
-test('manual recognition returns the highest confidence across all scores with at least two references', async (t) => {
+test('manual recognition sorts scores and caps confidence by the preceding match', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-speaker-confidence-'))
   const repository = new RecordRepository(':memory:')
   const service = new SpeakerReferenceService({ repository, recordingsDirectory: directory, modelFile: join(directory, 'missing.onnx') })
@@ -118,7 +118,7 @@ test('manual recognition returns the highest confidence across all scores with a
       { callsign: 'BG5BBB', count: 4, similarity: 0.90 },
       { callsign: 'BG5CCC', count: 5, similarity: 0.84 },
       { callsign: 'BG5DDD', count: 5, similarity: 0.86 },
-      { callsign: 'BG5EEE', count: 1, similarity: 0.98 },
+      { callsign: 'BG5EEE', count: 1, similarity: 0.82 },
     ].map(({ callsign, count, similarity }) => ({ callsign, count, minSimilarity: similarity, maxSimilarity: similarity, averageSimilarity: similarity })),
   }))
   t.mock.method(repository, 'recentSpeakerReferences', () => [{ callsign: 'BG5DDD', embeddings: Array.from<Float32Array>({ length: 8 }).fill(embedding) }])
@@ -132,5 +132,11 @@ test('manual recognition returns the highest confidence across all scores with a
   }])
 
   const result = speakerRecognitionSchema.parse(await service.recognizeRecord(record.id))
-  assert.deepEqual(result.matches.map(match => match.confidence), ['high', 'medium', 'low', 'high', null])
+  assert.deepEqual(result.matches.map(match => [match.callsign, match.confidence]), [
+    ['BG5AAA', 'high'],
+    ['BG5BBB', 'medium'],
+    ['BG5DDD', 'medium'],
+    ['BG5CCC', 'low'],
+    ['BG5EEE', null],
+  ])
 })

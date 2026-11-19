@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { SpeakerMatch } from '@iaxweb/contracts'
-import type { DeepReadonly } from 'vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useSpeakerRecognitionContext } from '../../composables/records/use-records-context'
 
@@ -8,9 +7,7 @@ const recognition = useSpeakerRecognitionContext()
 const { record, loading, result, error } = recognition.state
 const dialog = ref<HTMLDialogElement>()
 const totalMatches = computed(() => result.value?.matches.reduce((sum, match) => sum + match.count, 0) ?? 0)
-const rankedMatches = computed(() => (result.value?.matches ?? [])
-  .map(recognitionRow)
-  .sort((a, b) => b.highestScore - a.highestScore))
+const rankedMatches = computed(() => result.value?.matches ?? [])
 const outcomeMessage = computed(() => {
   const reasonCode = result.value?.reasonCode
   if (reasonCode === 'interference_tone' || reasonCode === 'interference_high_band')
@@ -53,16 +50,6 @@ function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>
     .map(group => formatReferenceSimilarity(group.similarity, group.recordCount))
     .join('/') || '—'
 }
-
-function recognitionRow(match: DeepReadonly<SpeakerMatch>) {
-  const highestScore = Math.max(
-    match.minSimilarity,
-    match.referenceSimilarity ?? -Infinity,
-    match.trimmedReferenceSimilarity ?? -Infinity,
-    ...match.referenceGroups.map(group => group.similarity),
-  )
-  return { match, highestScore }
-}
 </script>
 
 <template>
@@ -95,7 +82,7 @@ function recognitionRow(match: DeepReadonly<SpeakerMatch>) {
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800">
-                <tr v-for="{ match } in rankedMatches" :key="match.callsign">
+                <tr v-for="match in rankedMatches" :key="match.callsign">
                   <td class="px-1 py-2.5">
                     <svg v-if="match.confidence === 'high'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto size-4 text-emerald-400" role="img" aria-label="高置信度">
                       <path d="M3.85 8.62a4 4 0 0 1 4.78-4.78 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.76 4 4 0 0 1-4.78 4.78 4 4 0 0 1-6.74 0 4 4 0 0 1-4.78-4.78 4 4 0 0 1 0-6.76Z" />

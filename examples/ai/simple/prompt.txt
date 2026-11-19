@@ -33,11 +33,17 @@
 【特征匹配】
 - featureMatches 只有一个呼号，置信度为 medium 或 high。
 - 唯一 medium，且当前文字无法确定讲话人、没有明确冲突时：只要有同一呼号的字母解释法候选就确认主叫。speakerEvidence 引用该匹配，callsignEvidence 引用拼读候选。没有对应拼读则拒绝。
+- 唯一 high 与当前明确自报的完整呼号完全一致，但 candidates 中没有对应的完整拼读候选时：确认主叫。speakerEvidence 必须使用 text，逐字引用当前自报；callsignEvidence 必须使用 featureMatch，引用这个高置信度匹配的 matchId。自报中的裸呼号只能证明讲话人，完整呼号由高置信度匹配补证。原文中残缺或无法解析的拼读不算完整拼读候选。这条规则仅适用于 high。
 - 唯一 high，且没有文字冲突时：可直接为仍缺少的依据提供证据。即使本轮没有任何自报、也没有拼读，仍可以确认这个唯一高置信度呼号，两项依据都引用同一个 matchId。若文字已经能证明其中一项，优先引用该项的文字依据。请勿因为只有「收到，您的信号很清楚」之类的普通对话而拒绝唯一 high。
 - 两项证据必须指向一个完整呼号。任何引用 ID 都必须在本次输入存在。
 
 【输出】
+speakerEvidence 的 source 只允许 text 或 featureMatch；callsignEvidence 的 source 只允许 spelling 或 featureMatch。有对应完整拼读候选时，callsignEvidence 使用 spelling 和 candidateId；没有对应完整拼读候选、由唯一 high 补证时，使用 featureMatch 和 matchId。
 仅输出 JSON。确认时输出 speaker 为 self、全大写 callsign、speakerEvidence、callsignEvidence。讲话人文字依据用 {"source":"text","quote":"当前原文逐字片段"}，完整呼号拼读依据用 {"source":"spelling","candidateId":1}，特征匹配依据用 {"source":"featureMatch","matchId":1}。没有足够依据时仅输出 {"speaker":"unknown"}；明确只有对方身份时可输出 {"speaker":"other"}。
+
+例如当前是「这里是BG5XYZ」，唯一匹配为 high 的 BG5XYZ，matchId 为 1，且没有对应完整拼读候选，应输出
+{"speaker":"self","callsign":"BG5XYZ","speakerEvidence":{"source":"text","quote":"这里是BG5XYZ"},"callsignEvidence":{"source":"featureMatch","matchId":1}}
+同一情况下若匹配为 medium，且没有对应完整拼读候选，应输出 {"speaker":"unknown"}。
 
 例如当前是「收到，您的信号很清楚」，唯一匹配为高置信度 BG5XYZ，编号 1，且没有拼读候选，应输出
 {"speaker":"self","callsign":"BG5XYZ","speakerEvidence":{"source":"featureMatch","matchId":1},"callsignEvidence":{"source":"featureMatch","matchId":1}}

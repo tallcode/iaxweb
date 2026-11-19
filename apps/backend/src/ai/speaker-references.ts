@@ -18,6 +18,7 @@ interface SpeakerReferenceOptions {
 
 type ScoredSpeakerMatch = Omit<SpeakerMatch, 'confidence'>
 type RecognitionResult = Omit<SpeakerRecognition, 'measurements'>
+const CONFIDENCE_LEVELS = [null, 'low', 'medium', 'high'] as const
 
 function matchConfidence(match: ScoredSpeakerMatch): SpeakerMatch['confidence'] {
   const scores = [
@@ -244,6 +245,21 @@ export class SpeakerReferenceService {
         }
       }
     }
+    let confidenceCeiling = CONFIDENCE_LEVELS.length - 1
+    const rankedMatches = matches.map(match => ({
+      match,
+      highestScore: Math.max(
+        match.minSimilarity,
+        match.referenceSimilarity ?? -Infinity,
+        match.trimmedReferenceSimilarity ?? -Infinity,
+        ...match.referenceGroups.map(group => group.similarity),
+      ),
+    }))
+      .sort((left, right) => right.highestScore - left.highestScore)
+      .map(({ match }) => {
+        confidenceCeiling = Math.min(confidenceCeiling, CONFIDENCE_LEVELS.indexOf(matchConfidence(match)))
+        return { ...match, confidence: CONFIDENCE_LEVELS[confidenceCeiling]! }
+      })
     return {
       recordId,
       threshold: SPEAKER_REFERENCE_THRESHOLD,
@@ -255,7 +271,7 @@ export class SpeakerReferenceService {
           ? '参考库中暂无其他已标注、质量合格且有有效主叫呼号的同版本特征。'
           : `没有找到相似度大于 ${SPEAKER_REFERENCE_THRESHOLD.toFixed(2)} 的已标注录音。`,
       referenceCount: search.referenceCount,
-      matches: matches.map(match => ({ ...match, confidence: matchConfidence(match) })),
+      matches: rankedMatches,
     }
   }
 
