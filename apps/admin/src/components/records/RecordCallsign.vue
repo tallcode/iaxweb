@@ -22,6 +22,6 @@ const emit = defineEmits<{ begin: [], close: [] }>()
     <template v-if="role === 'callee'">
       {{ record.calleeCallsign ?? '—' }}
     </template>
-    <CallsignText v-else :original="record.callsign" :manual="record.manualCallsign" />
+    <CallsignText v-else :original="record.callsign" :manual="record.manualCallsign" :algorithm="record.callsignAlgorithm" />
   </button>
 </template>

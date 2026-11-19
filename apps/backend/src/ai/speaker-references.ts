@@ -1,12 +1,12 @@
 import type { SpeakerMatch, SpeakerRecognition, SpeakerRecognitionMeasurements } from '@iaxweb/contracts'
 import type { SpeakerReferenceRepository } from '../records/ports.js'
-import type { SpeakerReferenceGroup, Voiceprint } from '../records/types.js'
+import type { ReadyVoiceprint, SpeakerReferenceGroup, Voiceprint } from '../records/types.js'
 import { performance } from 'node:perf_hooks'
 import { SPEAKER_REFERENCE_THRESHOLD } from '../records/record-repository.js'
 import { logTimestamp } from './asr-context-files.js'
 import { createSpeakerMeasurements } from './speaker-measurements.js'
 import { SPEAKER_VERSION } from './speaker-model.mjs'
-import { SPEAKER_RESOURCE_LIMIT_REASON, SPEAKER_TOO_LONG_REASON } from './speaker-resources.js'
+import { SPEAKER_MAX_SAMPLES, SPEAKER_RESOURCE_LIMIT_REASON, SPEAKER_TOO_LONG_REASON } from './speaker-resources.js'
 import { readSpeakerWav, speakerWavFile } from './speaker-wav.js'
 import { SpeakerExtractor } from './speaker.js'
 
@@ -17,6 +17,7 @@ interface SpeakerReferenceOptions {
 }
 
 type ScoredSpeakerMatch = Omit<SpeakerMatch, 'confidence'>
+type RecognitionResult = Omit<SpeakerRecognition, 'measurements'>
 
 function matchConfidence(match: ScoredSpeakerMatch): SpeakerMatch['confidence'] {
   const scores = [
@@ -41,8 +42,7 @@ function matchConfidence(match: ScoredSpeakerMatch): SpeakerMatch['confidence'] 
   return confidence
 }
 
-// One shared queue for manual queries and reviewed-reference jobs.
-// The DB's reviewed flag is checked again on every read and final write.
+// Live queries, manual queries and reviewed backfill share one native worker.
 export class SpeakerReferenceService {
   private readonly extractor: SpeakerExtractor
   private timer: ReturnType<typeof setTimeout> | undefined
@@ -67,6 +67,43 @@ export class SpeakerReferenceService {
     this.extractor.stop()
   }
 
+  startLiveRecognition(recordId: string, pcm: Int16Array, voicedMs: number, signal: AbortSignal) {
+    const abortSignal = AbortSignal.any([this.abort.signal, signal])
+    if (abortSignal.aborted || pcm.length > SPEAKER_MAX_SAMPLES)
+      return { voiceprint: Promise.resolve(undefined), matches: Promise.resolve([]) }
+    const voiceprint = this.extractor.extract(Float32Array.from(pcm, sample => sample / 32_768), voicedMs, abortSignal)
+      .then(result => result.status === 'ready' ? result : undefined)
+      .catch(() => undefined)
+    const search = voiceprint.then(async (result) => {
+      if (!result || abortSignal.aborted)
+        return []
+      const recognition = await this.searchVoiceprint(recordId, result, abortSignal)
+      return abortSignal.aborted ? [] : recognition.matches
+    }).catch(() => [])
+    // The worker retires asynchronously on cancellation. The AI queue can
+    // continue as soon as the deadline expires, independent of worker exit.
+    const matches = new Promise<SpeakerMatch[]>((resolve) => {
+      const onAbort = () => resolve([])
+      abortSignal.addEventListener('abort', onAbort, { once: true })
+      void search.then((result) => {
+        abortSignal.removeEventListener('abort', onAbort)
+        resolve(result)
+      })
+    })
+    return { voiceprint, matches }
+  }
+
+  cacheQueryVoiceprint(recordId: string, voiceprint: ReadyVoiceprint): void {
+    if (this.stopped)
+      return
+    try {
+      this.options.repository.saveQueryVoiceprint(recordId, voiceprint)
+    }
+    catch (error) {
+      console.warn(`${logTimestamp()} [AI]: 特征缓存写入失败: ${String(error)}`)
+    }
+  }
+
   async recognizeRecord(recordId: string, signal?: AbortSignal): Promise<SpeakerRecognition> {
     const measurements = createSpeakerMeasurements()
     const started = performance.now()
@@ -80,9 +117,9 @@ export class SpeakerReferenceService {
     return { ...result, measurements }
   }
 
-  private async recognizeRecordOnce(recordId: string, signal: AbortSignal | undefined, measurements: SpeakerRecognitionMeasurements): Promise<Omit<SpeakerRecognition, 'measurements'>> {
+  private async recognizeRecordOnce(recordId: string, signal: AbortSignal | undefined, measurements: SpeakerRecognitionMeasurements): Promise<RecognitionResult> {
     const abortSignal = signal ? AbortSignal.any([this.abort.signal, signal]) : this.abort.signal
-    const unavailable = (reasonCode: NonNullable<SpeakerRecognition['reasonCode']>, reason: string): Omit<SpeakerRecognition, 'measurements'> => ({
+    const unavailable = (reasonCode: NonNullable<SpeakerRecognition['reasonCode']>, reason: string): RecognitionResult => ({
       recordId,
       threshold: SPEAKER_REFERENCE_THRESHOLD,
       status: 'unavailable',
@@ -93,11 +130,14 @@ export class SpeakerReferenceService {
     })
     const lookupStarted = performance.now()
     const record = this.options.repository.find(recordId)
+    const cached = record && this.options.repository.findReadyVoiceprint(recordId)
     measurements.recordLookupMs = performance.now() - lookupStarted
     if (!record)
       return unavailable('record_missing', '记录已不存在，请刷新列表。')
     if (this.stopped)
       return unavailable('extraction_failed', '特征识别服务正在停止，请稍后重试。')
+    if (cached)
+      return this.searchVoiceprint(recordId, cached, abortSignal, measurements)
     let samples: Float32Array
     const readStarted = performance.now()
     try {
@@ -135,18 +175,32 @@ export class SpeakerReferenceService {
         default: return unavailable('insufficient_audio', '有效音频不足 1 秒或没有可用信号，未生成查询特征。')
       }
     }
-    // Read-only even for a reviewed source: never prepare/update its embedding.
-    // The current recording is always excluded from its own reference results.
+    this.cacheQueryVoiceprint(recordId, voiceprint)
+    return this.searchVoiceprint(recordId, voiceprint, abortSignal, measurements)
+  }
+
+  private async searchVoiceprint(recordId: string, voiceprint: ReadyVoiceprint, abortSignal: AbortSignal, measurements?: SpeakerRecognitionMeasurements): Promise<RecognitionResult> {
     const searchStarted = performance.now()
     let search: ReturnType<SpeakerReferenceRepository['searchSpeakerMatches']>
     try {
       search = this.options.repository.searchSpeakerMatches(voiceprint, recordId)
     }
     catch (error) {
-      console.warn(`${logTimestamp()} [AI]: 手动声纹检索失败: ${String(error)}`)
-      return unavailable('search_failed', '特征匹配失败，请稍后重试。')
+      console.warn(`${logTimestamp()} [AI]: 特征检索失败: ${String(error)}`)
+      return {
+        recordId,
+        threshold: SPEAKER_REFERENCE_THRESHOLD,
+        status: 'unavailable',
+        reasonCode: 'search_failed',
+        reason: '特征匹配失败，请稍后重试。',
+        referenceCount: null,
+        matches: [],
+      }
     }
-    finally { measurements.databaseSearchMs = performance.now() - searchStarted }
+    finally {
+      if (measurements)
+        measurements.databaseSearchMs = performance.now() - searchStarted
+    }
     const matches: ScoredSpeakerMatch[] = search.matches.map(match => ({
       ...match,
       referenceSimilarity: null,
@@ -162,7 +216,10 @@ export class SpeakerReferenceService {
         groups = this.options.repository.recentSpeakerReferences(matches.map(match => match.callsign), recordId)
       }
       catch { /* Supplementary scores must not discard the original matches. */ }
-      finally { measurements.referenceLookupMs = performance.now() - lookupStarted }
+      finally {
+        if (measurements)
+          measurements.referenceLookupMs = performance.now() - lookupStarted
+      }
       if (groups.length > 0) {
         const referenceStarted = performance.now()
         try {
@@ -180,7 +237,10 @@ export class SpeakerReferenceService {
           }
         }
         catch { /* A failed/aborted reference job leaves its score unavailable. */ }
-        finally { measurements.referenceMatchMs = performance.now() - referenceStarted }
+        finally {
+          if (measurements)
+            measurements.referenceMatchMs = performance.now() - referenceStarted
+        }
       }
     }
     return {

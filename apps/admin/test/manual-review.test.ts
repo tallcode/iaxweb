@@ -26,6 +26,7 @@ function record(): AdminRecord {
     corrected: null,
     revise: null,
     callsign: 'BG5AAA',
+    callsignAlgorithm: null,
     effectiveCallsign: 'BG5AAA',
     manualCallsign: null,
     calleeCallsign: null,
@@ -145,5 +146,6 @@ it('renders a manually rejected AI callsign in white with a strike and yellow ba
   const wrapper = mount(CallsignText, { props: { original: 'BD1ESL', manual: 'N0CALL' } })
   expect(wrapper.get('del').text()).toBe('BD1ESL')
   expect(wrapper.get('del').classes()).toEqual(expect.arrayContaining(['text-slate-100', 'bg-yellow-200/25']))
+  expect(wrapper.attributes('title')).toBe('算法：unknown\n算法识别的呼号：BD1ESL\n人工标注为 N0CALL：无有效主叫呼号')
   wrapper.unmount()
 })

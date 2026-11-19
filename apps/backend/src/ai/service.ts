@@ -1,9 +1,11 @@
+import type { SpeakerMatch } from '@iaxweb/contracts'
 import type { AiConfig } from '../config.js'
 import type { AudioStateEvent } from '../gateway/nats-audio.js'
 import type { RecognitionRepository } from '../records/ports.js'
 import type { SpotEvent } from '../spots/spot-store.js'
 import type { SegmentRecord } from './segment-store.js'
 import type { ClosedSegment, DiscardReason } from './segmenter.js'
+import type { SpeakerReferenceService } from './speaker-references.js'
 import { randomUUID } from 'node:crypto'
 import { RecordingStore } from '../records/recording-store.js'
 import { AsrClient } from './asr-client.js'
@@ -17,6 +19,7 @@ import { NodeSegmenter } from './segmenter.js'
 import { encodeWav } from './wav.js'
 
 const MAX_QUEUE_DEPTH = 10
+const LIVE_SPEAKER_TIMEOUT_MS = 20_000
 
 interface NodeAiRuntime {
   queue: SerialQueue
@@ -29,6 +32,7 @@ export interface AiServiceOptions {
   nodeIds: string[]
   onSpot?: (spot: SpotEvent) => void
   repository?: RecognitionRepository
+  speakerReferences?: Pick<SpeakerReferenceService, 'startLiveRecognition' | 'cacheQueryVoiceprint'>
 }
 
 // AI 值机员：监听节点音频，按发射分段送百炼识别，输出到控制台。
@@ -41,6 +45,8 @@ export class AiService {
   private readonly onSpot: ((spot: SpotEvent) => void) | undefined
   private readonly repository: RecognitionRepository | undefined
   private readonly recordings: RecordingStore | undefined
+  private readonly speakerReferences: AiServiceOptions['speakerReferences']
+  private readonly abort = new AbortController()
   private readonly nodes = new Map<string, NodeAiRuntime>()
   private stopped = false
 
@@ -52,6 +58,7 @@ export class AiService {
       throw new Error('AI persistence requires an injected recognition repository')
     this.repository = options.repository
     this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
+    this.speakerReferences = config.llm.stage2Enabled && config.llm.enabled && this.recordings ? options.speakerReferences : undefined
     this.onSpot = options.onSpot
     this.asr = new AsrClient({
       apiKey: config.asr.apiKey ?? '',
@@ -173,6 +180,7 @@ export class AiService {
     if (this.stopped)
       return
     this.stopped = true
+    this.abort.abort()
     for (const runtime of this.nodes.values())
       runtime.queue.clear()
   }
@@ -195,7 +203,20 @@ export class AiService {
       partIndex: segment.partIndex,
     }
     const shortId = record.id.slice(0, 8)
-    const wav = encodeWav(decodeMuLaw(concatenate(segment.payloads)))
+    const pcm = decodeMuLaw(concatenate(segment.payloads))
+    const wav = encodeWav(pcm)
+    const speakerReferences = this.speakerReferences
+    const liveAbort = speakerReferences && new AbortController()
+    let live: ReturnType<SpeakerReferenceService['startLiveRecognition']> | undefined
+    if (speakerReferences && liveAbort) {
+      try {
+        const signal = AbortSignal.any([this.abort.signal, liveAbort.signal, AbortSignal.timeout(LIVE_SPEAKER_TIMEOUT_MS)])
+        live = speakerReferences.startLiveRecognition(record.id, pcm, record.voicedMs, signal)
+      }
+      catch (error) {
+        console.warn(`${logTimestamp()} [${nodeId}]: 自动特征提取启动失败 ${shortId}: ${errorMessage(error)}`)
+      }
+    }
     try {
       const text = (await this.asr.transcribe(wav, {
         background: this.asrContextFiles.readBackground(),
@@ -214,6 +235,10 @@ export class AiService {
         if (this.repository && this.recordings) {
           try {
             this.repository.insert(nodeId, record)
+            void live?.voiceprint.then((voiceprint) => {
+              if (voiceprint && !this.stopped)
+                speakerReferences?.cacheQueryVoiceprint(record.id, voiceprint)
+            })
           }
           catch (error) {
             console.warn(`${logTimestamp()} [${nodeId}]: SQLite 写入失败 ${shortId}: ${errorMessage(error)}`)
@@ -225,18 +250,22 @@ export class AiService {
             console.warn(`${logTimestamp()} [${nodeId}]: 录音保存失败 ${shortId}: ${errorMessage(error)}`)
           }
         }
-        await this.parseTranscript(nodeId, runtime, record, text)
+        await this.parseTranscript(nodeId, runtime, record, text, live?.matches)
       }
     }
     catch (error) {
       console.warn(`${logTimestamp()} [${nodeId}]: ASR 失败 ${shortId}: ${errorMessage(error)}`)
+    }
+    finally {
+      if (!record.recognition)
+        liveAbort?.abort()
     }
   }
 
   // LLM 解析：将识别文本交给对话模型，完整版输出规范化文本、发言人呼号与
   // 风控，简化版只输出呼号。最近解析过的轮次作为上下文传入以保持连续性。
   // 解析结果打印为主日志行；解析失败时降级打印原始识别文本。
-  private async parseTranscript(nodeId: string, runtime: NodeAiRuntime, record: SegmentRecord, text: string): Promise<void> {
+  private async parseTranscript(nodeId: string, runtime: NodeAiRuntime, record: SegmentRecord, text: string, featureMatches?: Promise<SpeakerMatch[]>): Promise<void> {
     const shortId = record.id.slice(0, 8)
     const seconds = (record.durationMs / 1000).toFixed(1)
     // 未启用 LLM 解析时，原始识别文本是唯一的输出。
@@ -245,11 +274,14 @@ export class AiService {
       return
     }
     try {
-      const parsed = await this.llm.parse(text, runtime.store.llmTurns(undefined, record.id), record.corrected ?? text, {
+      const history = runtime.store.llmTurns(undefined, record.id)
+      const corrected = record.corrected ?? text
+      const metadata = {
         id: record.id,
         transmissionId: record.transmissionId,
         partIndex: record.partIndex,
-      })
+      }
+      const parsed = await this.llm.parse(text, history, corrected, metadata)
       // 解析返回 undefined 说明提示词/schema 文件缺失：LLM 解析未生效。
       if (this.stopped)
         return
@@ -261,6 +293,24 @@ export class AiService {
       record.revise = parsed.message
       record.callsign = parsed.callsign
       record.risk = parsed.risk
+      if (record.callsign) {
+        record.callsignAlgorithm = 'stage1_text'
+      }
+      else if (featureMatches) {
+        try {
+          const matches = await featureMatches
+          if (!this.stopped && matches.length === 1) {
+            record.callsign = await this.llm.parseStage2(text, history, corrected, metadata, matches)
+            if (record.callsign)
+              record.callsignAlgorithm = 'stage2_feature'
+          }
+        }
+        catch (error) {
+          console.warn(`${logTimestamp()} [${nodeId}]: 第二阶段呼号识别失败 ${shortId}: ${errorMessage(error)}`)
+        }
+      }
+      if (this.stopped)
+        return
       if (this.repository) {
         try {
           if (!this.repository.updateAnalysis(record))
@@ -270,13 +320,13 @@ export class AiService {
           console.warn(`${logTimestamp()} [${nodeId}]: SQLite 更新失败 ${shortId}: ${errorMessage(error)}`)
         }
       }
-      console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${parsed.callsign ? ` 呼号=${parsed.callsign}` : ''} | ${parsed.message ?? text}`)
+      console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s${record.callsign ? ` 呼号=${record.callsign}` : ''} | ${parsed.message ?? text}`)
       const persisted = this.repository?.find(record.id)
       const mayPublish = !this.repository || (persisted !== undefined && persisted.manualCallsign === null)
-      if (parsed.callsign && this.config.llm.publishSpot && mayPublish) {
+      if (record.callsign && this.config.llm.publishSpot && mayPublish) {
         this.onSpot?.({
           at: record.timestamp,
-          callsign: parsed.callsign,
+          callsign: record.callsign,
           id: record.id,
           node: nodeId,
         })

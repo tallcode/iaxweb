@@ -151,7 +151,9 @@ npm run download:speaker-model
 
 Docker 不下载、不打包模型，通过 `config/` 的只读挂载使用该文件。模型随配置独立保存，更新应用镜像无需重新下载。
 
-管理后台的声纹匹配目前是管理员手动测试功能；已标注录音会自动计算并保存声纹，测试查询不入库。
+启用 `AI_LLM_STAGE2_ENABLED=true` 可以在 ASR 时并行计算录音特征，在文字识别留空时尝试第二阶段补证。该开关默认关闭，需要同时启用 `AI_LLM_ENABLED` 和 `AI_PERSISTENCE_ENABLED`。自动特征匹配的等待上限为 20 秒，超时后继续使用文字识别结果。两阶段识别成功后均按 `AI_LLM_PUBLISH_SPOT` 发布。
+
+自动和手动查询生成的有效特征都缓存到 `ai_segment_embeddings`。后续查询复用同版本向量，匹配范围始终是已标注录音。
 
 匹配接口保留逐条命中的统计，并为每个候选呼号返回 `referenceSimilarity`（合成相似度）和 `referenceRecordCount`（参与合成数量）。参考来自该呼号最近最多 16 条已标注、当前模型版本的有效特征，排除查询录音自身。达到 5 条参考时，`referenceGroups` 返回完全链接分组后的合成分数和条数，组内最低相似度为 0.72，保留条数严格大于参考总数 20% 的组。参考不足 5 条或无合格组时返回空数组。合成使用 `addMulti`，分数供手动对照。`measurements.referenceLookupMs` 记录参考查询耗时，`referenceMatchMs` 包含合成比对任务的排队与执行耗时。
 

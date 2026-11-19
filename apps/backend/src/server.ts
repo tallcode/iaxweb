@@ -73,6 +73,7 @@ const aiService = aiNodeIds.length > 0
       nodeIds: aiNodeIds,
       onSpot: spot => spotStore.publish(spot),
       ...(recordRepository ? { repository: recordRepository } : {}),
+      ...(speakerReferences ? { speakerReferences } : {}),
     })
   : undefined
 

@@ -76,6 +76,7 @@ export const persistedRecordSchema = z.object({
   corrected: z.string().nullable(),
   revise: z.string().nullable(),
   callsign,
+  callsignAlgorithm: nonempty.nullable().default(null),
   manualCallsign,
   calleeCallsign: manualCallsign,
   effectiveCallsign: manualCallsign,

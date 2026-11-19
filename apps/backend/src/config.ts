@@ -38,6 +38,7 @@ export interface AiLlmConfig extends AiApiConfig {
   promptFile: string
   publishSpot: boolean
   schemaFile: string
+  stage2Enabled: boolean
   thinkingBudget?: number
   timeoutMs: number
 }
@@ -188,6 +189,10 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   if (llmEnabledText !== 'true' && llmEnabledText !== 'false')
     throw new Error('AI_LLM_ENABLED must be "true" or "false"')
 
+  const llmStage2EnabledText = optional(env, 'AI_LLM_STAGE2_ENABLED') ?? 'false'
+  if (llmStage2EnabledText !== 'true' && llmStage2EnabledText !== 'false')
+    throw new Error('AI_LLM_STAGE2_ENABLED must be "true" or "false"')
+
   const llmPublishSpotText = optional(env, 'AI_LLM_PUBLISH_SPOT') ?? 'true'
   if (llmPublishSpotText !== 'true' && llmPublishSpotText !== 'false')
     throw new Error('AI_LLM_PUBLISH_SPOT must be "true" or "false"')
@@ -241,6 +246,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
       promptFile: resolveProjectPath(optional(env, 'AI_LLM_PROMPT_FILE') ?? 'config/prompt.txt'),
       publishSpot: llmPublishSpotText === 'true',
       schemaFile: resolveProjectPath(optional(env, 'AI_LLM_SCHEMA_FILE') ?? 'config/schema.json'),
+      stage2Enabled: llmStage2EnabledText === 'true',
       ...(llmThinkingBudget !== undefined ? { thinkingBudget: llmThinkingBudget } : {}),
       timeoutMs: llmTimeoutMs,
     },

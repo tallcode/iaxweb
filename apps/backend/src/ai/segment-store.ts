@@ -1,27 +1,14 @@
+import type { RecognitionRecord } from '../records/types.js'
 import type { TranscriptTurn } from './callsign-evidence.js'
 
 // Unified per-segment record accumulating every pipeline stage:
 // segmentation fills the audio fields, ASR fills recognition and corrected,
 // the LLM stage fills revise/callsign/risk. Optional fields stay absent while the
 // corresponding stage has not run or failed.
-export interface SegmentRecord {
-  id: string
-  timestamp: string
-  durationMs: number
+export interface SegmentRecord extends RecognitionRecord {
   payloads: Uint8Array[]
-  voicedMs: number
-  recognition?: string | undefined
-  corrected?: string | undefined
-  revise?: string | undefined
-  callsign?: string | undefined
-  risk?: RiskRating | undefined
   transmissionId?: string | undefined
   partIndex?: number | undefined
-}
-
-export interface RiskRating {
-  level: number
-  reason: string
 }
 
 const MAX_RECORDS = 500

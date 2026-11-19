@@ -19,6 +19,26 @@ function isReportedIntroduction(text: string, start: number): boolean {
   return /(?:(?:他|她|对方).{0,4}说|转述|引用)[\s“"'：:]*$/.test(text.slice(Math.max(0, start - 16), start))
 }
 
+export function hasCurrentCompactSelfQuote(text: string, quote: string, callsign: string): boolean {
+  const at = text.indexOf(quote)
+  if (at < 0 || !quote.trim() || OTHER_PATTERN.test(quote))
+    return false
+  const quoteEnd = at + quote.length
+  const introductions = [...text.matchAll(OWN_PATTERN)].map(match => ({ start: match.index, end: match.index + match[0].length }))
+  return [...text.matchAll(COMPACT_PATTERN)].some((mention) => {
+    if (mention.index < at || mention.index + mention[0].length > quoteEnd || mention[0].toUpperCase() !== callsign)
+      return false
+    const marker = introductions.filter(item => item.end <= mention.index).at(-1)
+    if (marker && marker.start >= at) {
+      if (isReportedIntroduction(text, marker.start))
+        return false
+      const gap = text.slice(marker.end, mention.index)
+      return gap.length <= 100 && !OTHER_PATTERN.test(gap) && !new RegExp(COMPACT_PATTERN.source, 'i').test(gap)
+    }
+    return /\bCQ\b/i.test(quote) && !introductions.some(item => item.start > mention.index)
+  })
+}
+
 function quoteError(quote: unknown, evidence: CallsignEvidence, context: CallsignContext): string | undefined {
   const { current, history } = context
   if (typeof quote !== 'string' || !quote.trim() || !current.text.includes(quote))
@@ -35,21 +55,7 @@ function quoteError(quote: unknown, evidence: CallsignEvidence, context: Callsig
     return 'continuation-without-self-introduction'
   }
   if (evidence.segmentId !== current.id) {
-    const mentions = [...current.text.matchAll(COMPACT_PATTERN)]
-      .filter(match => match.index >= at && match.index + match[0].length <= quoteEnd)
-    const linked = mentions.some((mention) => {
-      if (mention[0].toUpperCase() !== evidence.callsign)
-        return false
-      const marker = introductions.filter(item => item.end <= mention.index).at(-1)
-      if (marker && marker.start >= at) {
-        if (isReportedIntroduction(current.text, marker.start))
-          return false
-        const gap = current.text.slice(marker.end, mention.index)
-        return gap.length <= 100 && !OTHER_PATTERN.test(gap) && !new RegExp(COMPACT_PATTERN.source, 'i').test(gap)
-      }
-      return /\bCQ\b/i.test(quote) && !introductions.some(item => item.start > mention.index)
-    })
-    return linked
+    return hasCurrentCompactSelfQuote(current.text, quote, evidence.callsign)
       ? undefined
       : 'history-not-linked-to-current-self'
   }

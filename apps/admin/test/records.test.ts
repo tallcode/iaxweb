@@ -626,6 +626,7 @@ function record(): AdminRecord {
     hasAudio: false,
     calleeCallsign: null,
     callsign: 'BG5AAA',
+    callsignAlgorithm: null,
     capturedAt: new Date().toISOString(),
     corrected: null,
     createdAt: new Date().toISOString(),

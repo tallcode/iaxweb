@@ -11,6 +11,7 @@ export type Voiceprint = { version: string, reason?: string | undefined } & (
   | { status: 'ready', embedding: Float32Array }
   | { status: 'pending' | 'unavailable' | 'failed' }
 )
+export type ReadyVoiceprint = Extract<Voiceprint, { status: 'ready' }>
 
 // Persistence accepts recognition data without depending on audio buffers or AI runtime state.
 export interface RecognitionRecord {
@@ -22,5 +23,6 @@ export interface RecognitionRecord {
   corrected?: string | undefined
   revise?: string | undefined
   callsign?: string | undefined
+  callsignAlgorithm?: string | undefined
   risk?: { level: number, reason: string } | undefined
 }

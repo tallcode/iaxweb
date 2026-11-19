@@ -1,8 +1,10 @@
+import type { SpeakerMatch } from '@iaxweb/contracts'
 import type { CallsignContext, TranscriptTurn } from './callsign-evidence.js'
 import type { LlmClientOptions } from './llm-client.js'
 import { logTimestamp } from './asr-context-files.js'
 import { buildCallsignContext } from './callsign-evidence.js'
 import { checkCallsignDecision, supportedSelfEvidence } from './callsign-speaker.js'
+import { CALLSIGN_STAGE2_PROMPT, callsignStage2Schema, checkStage2Callsign, selectStage2Match } from './callsign-stage2.js'
 import { LlmClient } from './llm-client.js'
 import { LlmConfigFiles } from './llm-config-files.js'
 import { callsignPayload } from './llm-payload.js'
@@ -70,27 +72,17 @@ export class LlmParser {
     const schema = this.files.loadSchema()
     if (!prompt || !schema)
       return undefined
-    const turns = typeof history === 'string' ? [{ id: 'history', text: history }] : history ?? []
-    const context = buildCallsignContext({ ...metadata, text: transcript }, turns.filter(turn => turn.id !== metadata.id))
+    const context = transcriptContext(transcript, history, metadata)
     // Candidate evidence replaces the old /B/ shortcut, allowing a verified
     // continuation or history-supported self-introduction to be considered.
     if (context.candidates.length === 0 && !hasAnalysisFields(schema.object))
       return {}
-    const payload = {
-      ...callsignPayload(context),
-      ...(shouldIncludeCallsignCorrection(transcript, corrected) ? { corrected: { text: corrected, purpose: '音素纠错辅助文本，仅供判断，不是独立证据' } } : {}),
-    }
-    const body = (content: unknown, recheck = false) => ({
-      ...(this.thinkingParams()),
-      ...(this.thinkingBudget !== undefined && !this.isDeepSeek ? { thinking_budget: this.thinkingBudget } : {}),
-      messages: [
-        { content: `${prompt}\n\n${CALLSIGN_OUTPUT_POLICY}${recheck ? '\n这是一次引用校验失败后的单次复核。只从独立核验过当前自报引用的候选中选择，suggestedQuote可直接核对；不确定仍然拒绝。' : ''}\n\n严格按以下 JSON Schema 输出：\n${JSON.stringify(schema.object)}`, role: 'system' },
-        { content: JSON.stringify(content), role: 'user' },
-      ],
-      model: this.options.model,
-      response_format: { type: 'json_object' },
-      temperature: 0.1,
-    })
+    const payload = transcriptPayload(context, corrected)
+    const body = (content: unknown, recheck = false) => this.requestBody(
+      `${prompt}\n\n${CALLSIGN_OUTPUT_POLICY}${recheck ? '\n这是一次引用校验失败后的单次复核。只从独立核验过当前自报引用的候选中选择，suggestedQuote可直接核对；不确定仍然拒绝。' : ''}`,
+      schema.object,
+      content,
+    )
 
     const parsed = normalizeCallsign(parseJsonObject(await this.client.requestWithRetry(body(payload))))
     if (parsed === undefined)
@@ -108,6 +100,22 @@ export class LlmParser {
     if (supported.length === 0)
       return analysis
     return this.recheckCallsign(context, supported, body, schema.object, analysis)
+  }
+
+  async parseStage2(
+    transcript: string,
+    history: readonly TranscriptTurn[],
+    corrected: string,
+    metadata: Omit<TranscriptTurn, 'text'>,
+    matches: readonly Pick<SpeakerMatch, 'callsign' | 'confidence'>[],
+  ): Promise<string | undefined> {
+    const context = transcriptContext(transcript, history, metadata)
+    const match = selectStage2Match(context, matches)
+    if (!match)
+      return undefined
+    const payload = { ...transcriptPayload(context, corrected), featureMatches: [match] }
+    const result = await this.client.requestOnce(this.requestBody(CALLSIGN_STAGE2_PROMPT, callsignStage2Schema, payload))
+    return checkStage2Callsign(normalizeCallsign(parseJsonObject(result)), context, match)
   }
 
   private async recheckCallsign(
@@ -137,6 +145,32 @@ export class LlmParser {
     if (this.isDeepSeek)
       return { thinking: { type: this.enableThinking ? 'enabled' : 'disabled' } }
     return { enable_thinking: this.enableThinking }
+  }
+
+  private requestBody(prompt: string, schema: Record<string, unknown>, content: unknown) {
+    return {
+      ...this.thinkingParams(),
+      ...(this.thinkingBudget !== undefined && !this.isDeepSeek ? { thinking_budget: this.thinkingBudget } : {}),
+      messages: [
+        { content: `${prompt}\n\n严格按以下 JSON Schema 输出：\n${JSON.stringify(schema)}`, role: 'system' },
+        { content: JSON.stringify(content), role: 'user' },
+      ],
+      model: this.options.model,
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
+    }
+  }
+}
+
+function transcriptContext(transcript: string, history: string | readonly TranscriptTurn[] | undefined, metadata: Omit<TranscriptTurn, 'text'>): CallsignContext {
+  const turns = typeof history === 'string' ? [{ id: 'history', text: history }] : history ?? []
+  return buildCallsignContext({ ...metadata, text: transcript }, turns.filter(turn => turn.id !== metadata.id))
+}
+
+function transcriptPayload(context: CallsignContext, corrected: string) {
+  return {
+    ...callsignPayload(context),
+    ...(shouldIncludeCallsignCorrection(context.current.text, corrected) ? { corrected: { text: corrected, purpose: '音素纠错辅助文本，仅供判断，不是独立证据' } } : {}),
   }
 }
 

@@ -1,5 +1,5 @@
 import type { PersistedRecord, RecordPage, SpeakerMatch } from '@iaxweb/contracts'
-import type { RecognitionRecord, SpeakerReferenceGroup, SpeakerReferenceScore, Voiceprint } from './types.js'
+import type { ReadyVoiceprint, RecognitionRecord, SpeakerReferenceGroup, SpeakerReferenceScore, Voiceprint } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -44,6 +44,7 @@ const SCHEMA = `
     corrected         TEXT,
     revise            TEXT,
     callsign          TEXT COLLATE NOCASE,
+    callsign_algorithm TEXT,
 
     risk_level        INTEGER CHECK (risk_level BETWEEN 1 AND 5),
     risk_reason       TEXT,
@@ -96,6 +97,7 @@ const SELECT_EFFECTIVE = `
     corrected,
     revise,
     callsign,
+    callsign_algorithm,
     risk_level,
     risk_reason,
     manual_callsign,
@@ -121,8 +123,7 @@ export class RecordRepository {
     if (databaseFile !== ':memory:')
       mkdirSync(dirname(databaseFile), { recursive: true })
     this.database = new DatabaseSync(databaseFile, { timeout: 5_000, allowExtension: true })
-    // Optional experiment: loading its native extension must not gate startup
-    // or the existing recognition flow. Enable it only for a manual search.
+    // Load the native extension on the first reference search.
     this.database.enableLoadExtension(false)
     this.database.exec('PRAGMA journal_mode = WAL')
     this.database.exec('PRAGMA foreign_keys = ON')
@@ -137,11 +138,11 @@ export class RecordRepository {
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN manual_recognition TEXT')
       if (!columns.has('reviewed'))
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0, 1))')
+      if (!columns.has('callsign_algorithm'))
+        this.database.exec('ALTER TABLE ai_segments ADD COLUMN callsign_algorithm TEXT')
       migrateEmbeddingSchema(this.database)
       // Build after adding legacy columns used by the partial indexes.
       this.database.exec(INDEXES)
-      // Pending annotations are durable jobs and resume after restart. No new
-      // unreviewed recording writes an embedding row.
       this.database.exec('COMMIT')
     }
     catch (error) {
@@ -181,6 +182,31 @@ export class RecordRepository {
       WHERE record_id = ? AND version = ? AND status = 'pending'
         AND EXISTS (SELECT 1 FROM ai_segments WHERE id = ? AND reviewed = 1)
     `).run(voiceprint.status, encodeVoiceprint(voiceprint), voiceprint.reason ?? null, id, voiceprint.version, id).changes) === 1
+  }
+
+  findReadyVoiceprint(id: string): ReadyVoiceprint | undefined {
+    const row = this.database.prepare(`
+      SELECT embedding FROM ai_segment_embeddings
+      WHERE record_id = ? AND version = ? AND dimensions = ? AND status = 'ready'
+    `).get(id, SPEAKER_VERSION, SPEAKER_DIMENSIONS)
+    if (!row)
+      return undefined
+    try {
+      return { status: 'ready', version: SPEAKER_VERSION, embedding: decodeVoiceprint(row.embedding) }
+    }
+    catch { return undefined }
+  }
+
+  saveQueryVoiceprint(id: string, voiceprint: ReadyVoiceprint): void {
+    if (voiceprint.version !== SPEAKER_VERSION)
+      return
+    // The record may have been deleted while the worker was extracting.
+    this.database.prepare(`
+      INSERT INTO ai_segment_embeddings (record_id, version, dimensions, status, embedding)
+      SELECT id, ?, ?, 'ready', ? FROM ai_segments WHERE id = ?
+      ON CONFLICT(record_id) DO UPDATE SET version = excluded.version, dimensions = excluded.dimensions,
+        status = 'ready', embedding = excluded.embedding, reason = NULL
+    `).run(voiceprint.version, SPEAKER_DIMENSIONS, encodeVoiceprint(voiceprint), id)
   }
 
   pendingReviewedVoiceprints(limit: number = 10): Array<{ id: string, timestamp: string, voicedMs: number }> {
@@ -276,11 +302,12 @@ export class RecordRepository {
   updateAnalysis(record: RecognitionRecord): boolean {
     const result = this.database.prepare(`
       UPDATE ai_segments
-      SET revise = ?, callsign = ?, risk_level = ?, risk_reason = ?
+      SET revise = ?, callsign = ?, callsign_algorithm = ?, risk_level = ?, risk_reason = ?
       WHERE id = ?
     `).run(
       record.revise ?? null,
       record.callsign ?? null,
+      record.callsign ? record.callsignAlgorithm ?? null : null,
       record.risk?.level ?? null,
       record.risk?.reason ?? null,
       record.id,
@@ -396,7 +423,7 @@ export class RecordRepository {
     const rows = this.database.prepare(`
       SELECT
         id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected,
-        revise, callsign, risk_level, risk_reason, manual_callsign, callee_callsign,
+        revise, callsign, callsign_algorithm, risk_level, risk_reason, manual_callsign, callee_callsign,
         manual_recognition, reviewed, manual_risk_level, manual_note, created_at, effective_callsign,
         effective_risk_level
       FROM ai_segments_effective
@@ -444,6 +471,7 @@ function mapRow(row: Record<string, unknown>): PersistedRecord {
   return {
     calleeCallsign: nullableString(row.callee_callsign),
     callsign: nullableString(row.callsign),
+    callsignAlgorithm: nullableString(row.callsign_algorithm),
     capturedAt: requiredString(row.captured_at),
     corrected: nullableString(row.corrected),
     createdAt: requiredString(row.created_at),

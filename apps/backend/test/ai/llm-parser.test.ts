@@ -77,6 +77,28 @@ test('skips callsign-only requests without explanation evidence', async () => {
   assert.equal(calls.length, 0)
 })
 
+test('stage 2 uses a unique high match, and requires a spelling candidate for a medium match', async () => {
+  const match = { source: 'featureMatch', matchId: 1 }
+  const context = { id: 'current' }
+  const text = '收到，您的信号很清楚。'
+  const high = { callsign: 'BG5XYZ', confidence: 'high' } as const
+  const medium = { ...high, confidence: 'medium' } as const
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(JSON.stringify({ speaker: 'self', callsign: high.callsign, speakerEvidence: match, callsignEvidence: match }))))
+  assert.equal(await parser.parseStage2(text, [], text, context, [high]), 'BG5XYZ')
+  assert.equal(await parser.parseStage2(text, [], text, context, [medium]), undefined)
+  assert.equal(await parser.parseStage2(text, [], text, context, [high, { callsign: 'BG5ABC', confidence: null }]), undefined)
+  assert.equal(await parser.parseStage2('这里是 BG5ABC', [], text, context, [high]), undefined)
+  assert.equal(await parser.parseStage2('我抄收您的呼号是 Bravo Golf Five X Ray Yankee Zulu', [], text, context, [high]), undefined)
+  assert.equal(calls.length, 1)
+
+  const history = [{ id: 'prior', text: '这里是 Bravo Golf Five X Ray Yankee Zulu' }]
+  const spell = { source: 'spelling', candidateId: 1 }
+  const mixed = makeParser(() => Promise.resolve(completion(JSON.stringify({ speaker: 'self', callsign: high.callsign, speakerEvidence: match, callsignEvidence: spell }))))
+  assert.equal(await mixed.parser.parseStage2(text, history, text, context, [medium]), 'BG5XYZ')
+  assert.equal(await parser.parseStage2(text, history, text, context, [medium]), undefined)
+  assert.equal(await parser.parseStage2('这里是 BG5XYZ', [], text, context, [high]), undefined)
+})
+
 test('still runs full text and risk analysis without callsign evidence', async () => {
   const { calls, parser } = makeParser(() => Promise.resolve(completion(JSON.stringify({ speaker: 'unknown', message: '无呼号', risk: { level: 1, reason: '正常' } }))))
   assert.deepEqual(await parser.parse('只有普通对话'), { message: '无呼号', risk: { level: 1, reason: '正常' } })

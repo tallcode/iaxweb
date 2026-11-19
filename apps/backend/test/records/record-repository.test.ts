@@ -73,6 +73,29 @@ test('reviewed AI-only callers are searchable and manual callers override them',
   repository.close()
 })
 
+test('cached query vectors become searchable only while their recording is reviewed', () => {
+  const repository = new RecordRepository(':memory:')
+  try {
+    const segment = record({ callsign: 'BG5ABC' })
+    repository.insert('1900', segment)
+    repository.updateAnalysis(segment)
+    const embedding = new Float32Array(SPEAKER_DIMENSIONS)
+    embedding[0] = 1
+    const voiceprint = { status: 'ready', version: SPEAKER_VERSION, embedding } as const
+    repository.saveQueryVoiceprint(segment.id, voiceprint)
+    assert.deepEqual(repository.findReadyVoiceprint(segment.id), voiceprint)
+    assert.deepEqual(repository.searchSpeakerMatches(voiceprint, 'other').matches, [])
+    assert.equal(repository.updateManualReview(segment.id, { reviewed: true }), true)
+    assert.deepEqual(repository.pendingReviewedVoiceprints(), [])
+    assert.equal(repository.searchSpeakerMatches(voiceprint, 'other').matches[0]?.callsign, 'BG5ABC')
+    assert.deepEqual(repository.searchSpeakerMatches(voiceprint, segment.id).matches, [])
+    assert.equal(repository.updateManualReview(segment.id, { reviewed: false }), true)
+    assert.deepEqual(repository.searchSpeakerMatches(voiceprint, 'other').matches, [])
+    assert.deepEqual(repository.findReadyVoiceprint(segment.id), voiceprint)
+  }
+  finally { repository.close() }
+})
+
 test('quality reasons persist; cancelled or deleted jobs cannot save a vector', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-reviewed-quality-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -279,6 +302,7 @@ test('persists ASR and later LLM results in one row', () => {
   assert.deepEqual(repository.find(segment.id), {
     calleeCallsign: null,
     callsign: null,
+    callsignAlgorithm: null,
     capturedAt: segment.timestamp,
     corrected: segment.corrected,
     createdAt: repository.find(segment.id)?.createdAt,
@@ -301,12 +325,14 @@ test('persists ASR and later LLM results in one row', () => {
 
   segment.revise = '这里是 BG5XXX。'
   segment.callsign = 'BG5XXX'
+  segment.callsignAlgorithm = 'stage2_feature'
   segment.risk = { level: 2, reason: '轻微不适宜' }
   assert.equal(repository.updateAnalysis(segment), true)
 
   const persisted = repository.find(segment.id)
   assert.equal(persisted?.revise, '这里是 BG5XXX。')
   assert.equal(persisted?.callsign, 'BG5XXX')
+  assert.equal(persisted?.callsignAlgorithm, 'stage2_feature')
   assert.equal(persisted?.riskLevel, 2)
   assert.equal(persisted?.riskReason, '轻微不适宜')
   assert.equal(persisted?.effectiveCallsign, 'BG5XXX')
