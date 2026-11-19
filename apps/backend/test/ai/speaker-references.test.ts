@@ -140,3 +140,34 @@ test('manual recognition sorts scores and caps confidence by the preceding match
     ['BG5EEE', null],
   ])
 })
+
+test('ten-reference confidence boundaries and an unconfident predecessor constrain later matches', async (t) => {
+  const repository = new RecordRepository(':memory:')
+  const service = new SpeakerReferenceService({ repository, recordingsDirectory: 'unused', modelFile: 'unused' })
+  t.after(() => {
+    service.stop()
+    repository.close()
+  })
+  repository.insert('1900', { id: 'query', timestamp: '2026-11-19T12:20:52Z', durationMs: 1000, voicedMs: 1000, recognition: '收到' })
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
+  embedding[0] = 1
+  repository.saveQueryVoiceprint('query', { status: 'ready', version: SPEAKER_VERSION, embedding })
+  let matches: Array<{ callsign: string, count: number, minSimilarity: number, maxSimilarity: number, averageSimilarity: number }> = []
+  t.mock.method(repository, 'searchSpeakerMatches', () => ({ referenceCount: 20, matches }))
+  t.mock.method(repository, 'recentSpeakerReferences', () => [])
+  for (const [count, similarity, expected] of [[10, 0.85, 'high'], [10, 0.8499, 'medium'], [9, 0.85, 'medium']] as const) {
+    matches = [{ callsign: 'BG5AAA', count, minSimilarity: similarity, maxSimilarity: similarity, averageSimilarity: similarity }]
+    assert.equal((await service.recognizeRecord('query')).matches[0]?.confidence, expected)
+  }
+  matches = [
+    { callsign: 'BG5GXT', count: 10, minSimilarity: 0.81, maxSimilarity: 0.81, averageSimilarity: 0.81 },
+    { callsign: 'BG5EBE', count: 3, minSimilarity: 0.88, maxSimilarity: 0.88, averageSimilarity: 0.88 },
+    { callsign: 'BG5GYT', count: 3, minSimilarity: 0.84, maxSimilarity: 0.84, averageSimilarity: 0.84 },
+  ]
+  const result = await service.recognizeRecord('query')
+  assert.deepEqual(result.matches.map(match => [match.callsign, match.confidence]), [
+    ['BG5EBE', 'low'],
+    ['BG5GYT', null],
+    ['BG5GXT', null],
+  ])
+})

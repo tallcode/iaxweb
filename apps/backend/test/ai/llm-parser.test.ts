@@ -89,16 +89,18 @@ test('skips callsign-only requests without explanation evidence', async () => {
   assert.equal(calls.length, 0)
 })
 
-test('stage 2 uses a unique high match, and requires a spelling candidate for a medium match', async () => {
+test('stage 2 requires text support for a high match and spelling for a medium match', async () => {
   const match = { source: 'featureMatch', matchId: 1 }
   const context = { id: 'current' }
   const text = '收到，您的信号很清楚。'
   const high = { callsign: 'BG5XYZ', confidence: 'high' } as const
   const medium = { ...high, confidence: 'medium' } as const
   const { calls, parser } = makeParser(() => Promise.resolve(completion(JSON.stringify({ speaker: 'self', callsign: high.callsign, speakerEvidence: match, callsignEvidence: match }))))
-  assert.equal(await parser.parseStage2(text, [], text, context, [high]), 'BG5XYZ')
+  assert.equal(await parser.parseStage2(text, [], text, context, [high]), undefined)
   assert.equal(await parser.parseStage2(text, [], text, context, [medium]), undefined)
-  assert.equal(await parser.parseStage2(text, [], text, context, [{ callsign: 'BG5ABC', confidence: 'medium' }, high, { callsign: 'BG5KLM', confidence: null }]), 'BG5XYZ')
+  const mentionHistory = [{ id: 'other', text: 'XYZ，你的信号怎么样？' }]
+  assert.equal(await parser.parseStage2(text, mentionHistory, text, context, [high]), 'BG5XYZ')
+  assert.equal(await parser.parseStage2(text, mentionHistory, text, context, [{ callsign: 'BG5ABC', confidence: 'medium' }, high, { callsign: 'BG5KLM', confidence: null }]), 'BG5XYZ')
   assert.equal(await parser.parseStage2('这里是 BG5ABC', [], text, context, [high]), undefined)
   assert.equal(await parser.parseStage2('我抄收您的呼号是 Bravo Golf Five X Ray Yankee Zulu', [], text, context, [high]), undefined)
   assert.equal(calls.length, 2)
@@ -111,6 +113,36 @@ test('stage 2 uses a unique high match, and requires a spelling candidate for a 
   assert.equal(await mixed.parser.parseStage2(text, history, text, context, [{ callsign: 'BG5ABC', confidence: 'low' }, medium]), 'BG5XYZ')
   assert.equal(await parser.parseStage2(text, history, text, context, [medium]), undefined)
   assert.equal(await parser.parseStage2('这里是 BG5XYZ', [], text, context, [high]), undefined)
+})
+
+test('stage 2 accepts exact historical callsign forms but skips unrelated words and model numbers', async () => {
+  const text = '我使用手台，五瓦发射功率。'
+  const high = { callsign: 'BG5XYZ', confidence: 'high' } as const
+  const evidence = { source: 'featureMatch', matchId: 1 }
+  const output = { speaker: 'self', callsign: high.callsign, speakerEvidence: evidence, callsignEvidence: evidence }
+  const { calls, parser } = makeParser(() => Promise.resolve(completion(JSON.stringify(output))))
+  for (const form of ['BG5XYZ', '5XYZ', 'XYZ']) {
+    const history = [{ id: 'other', text: `${form}，你使用什么设备？` }]
+    assert.equal(await parser.parseStage2(text, history, text, { id: 'current' }, [high]), high.callsign)
+  }
+  assert.equal(calls.length, 3)
+  for (const unrelated of ['ABC，收到。', '我的设备是 IC-XYZ。', 'BG6XYZ，收到。', 'YZ，收到。']) {
+    const history = [{ id: 'other', text: unrelated }]
+    assert.equal(await parser.parseStage2(text, history, text, { id: 'current' }, [high]), undefined)
+  }
+  assert.equal(calls.length, 3)
+})
+
+test('stage 2 uses current explicit self text and a high match when spelling is absent', async () => {
+  const text = 'BG5GKM，这里是 BG5HEZ，收听到请回答。'
+  const output = {
+    speaker: 'self',
+    callsign: 'BG5HEZ',
+    speakerEvidence: { source: 'text', quote: '这里是 BG5HEZ' },
+    callsignEvidence: { source: 'featureMatch', matchId: 1 },
+  }
+  const { parser } = makeParser(() => Promise.resolve(completion(JSON.stringify(output))))
+  assert.equal(await parser.parseStage2(text, [], text, { id: 'current' }, [{ callsign: 'BG5HEZ', confidence: 'high' }]), 'BG5HEZ')
 })
 
 test('stage 2 anchors one-character self-call conflicts to the same introduction', async () => {
@@ -225,8 +257,9 @@ test('shares one model schema while enforcing different evidence rules', async (
 
   const matches = [{ callsign, confidence: 'high' }] as const
   const metadata = { id: 'current' }
+  const history = [{ id: 'other', text: 'BUT，你的信号怎么样？' }]
   reply = JSON.stringify({ speaker: 'self', callsign, speakerEvidence: feature, callsignEvidence: feature })
-  assert.equal(await parser.parseStage2(normal, [], normal, metadata, matches), callsign)
+  assert.equal(await parser.parseStage2(normal, history, normal, metadata, matches), callsign)
   assert.equal(await parser.parseStage2(conflict, [], conflict, metadata, matches), undefined)
 
   const spelling = { source: 'spelling', candidateId: 1 }
@@ -260,8 +293,9 @@ test('hot loads the combined prompt file and skips model calls when it becomes i
   const normal = '收到，信号很好。'
   const review = '这里是BG5BUD，Bravo杠Five，Bravo Uniform Tango。'
   const match = [{ callsign: 'BG5BUT', confidence: 'high' }] as const
+  const history = [{ id: 'other', text: 'BUT，你的信号怎么样？' }]
   const check = async (text: string, prompt: string) => {
-    await parser.parseStage2(text, [], text, { id: 'current' }, match)
+    await parser.parseStage2(text, history, text, { id: 'current' }, match)
     const system = calls.at(-1)?.body.messages[0]?.content
     assert.ok(system?.startsWith(prompt), system ?? 'missing model request')
   }
@@ -276,7 +310,7 @@ test('hot loads the combined prompt file and skips model calls when it becomes i
   const skips = async () => {
     assert.equal(await parser.parse(TRANSCRIPT), undefined)
     for (const text of [normal, review])
-      assert.equal(await parser.parseStage2(text, [], text, { id: 'current' }, match), undefined)
+      assert.equal(await parser.parseStage2(text, history, text, { id: 'current' }, match), undefined)
     assert.equal(calls.length, 5)
   }
   for (const invalid of ['', '一阶段\n######### 二阶段\n普通补证', combinedPrompts('一阶段', '普通补证', '')]) {

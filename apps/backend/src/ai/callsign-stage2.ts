@@ -34,11 +34,22 @@ function uniqueStage2Match(matches: readonly Match[]): Stage2Match | undefined {
   return { id: 1, callsign: match.callsign, confidence: match.confidence }
 }
 
+function hasCallsignText(context: CallsignContext, callsign: string): boolean {
+  if (!CALLSIGN_PATTERN.test(callsign))
+    return false
+  if (context.candidates.some(candidate => candidate.callsign === callsign))
+    return true
+  const mention = new RegExp(`(?<![A-Z0-9_/-])(?:${callsign}|${callsign.slice(2)}|${callsign.slice(3)})(?![A-Z0-9_/-])`, 'i')
+  return [context.current, ...context.history].some(turn => mention.test(turn.text))
+}
+
 export function selectStage2Match(context: CallsignContext, matches: readonly Match[]): Stage2Match | undefined {
   const match = uniqueStage2Match(matches)
   if (!match)
     return undefined
   if (match.confidence === 'medium' && !context.candidates.some(candidate => candidate.callsign === match.callsign))
+    return undefined
+  if (match.confidence === 'high' && !hasCallsignText(context, match.callsign))
     return undefined
   if (explicitFeatureConflict(context, match.callsign) || supportedSelfEvidence(context).length > 0)
     return undefined
@@ -107,8 +118,10 @@ export function checkStage2Callsign(
       ? callsign
       : undefined
   }
-  if (match.confidence !== 'high' || context.candidates.some(candidate => candidate.callsign === callsign))
+  if (match.confidence !== 'high' || !hasCallsignText(context, callsign)
+    || context.candidates.some(candidate => candidate.callsign === callsign)) {
     return undefined
+  }
   return callsign
 }
 

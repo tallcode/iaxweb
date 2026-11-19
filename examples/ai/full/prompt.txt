@@ -72,12 +72,14 @@
 - 当前明确自报了另一个呼号，或当前明确把匹配呼号当作被叫、复述、确认或第三方时，拒绝使用该匹配。集体台和客席操作时，同一个人的声音可能对应不同呼号，必须以本轮文字表明的呼号为准。
 - 「这里是」「我是」「我的呼号」「this is」或 CQ 中清楚的自报可以证明讲话人。只说「收到」「您的信号不错」或只说 CQ 没报呼号，属于文字未确定讲话人，仍可使用符合要求的特征匹配。历史拼读只证明呼号字符。
 - 自报清楚且与匹配呼号一致时，讲话人依据必须引用当前自报原文。完整呼号优先用对应的解释法候选。corrected 仅供核对原文。
+- 「您抄收正确」「我的设备是……」「信号五九」只是确认或普通回答，不表示匹配呼号属于对方。对方在上一轮称呼某呼号、当前讲话人回答，也可建立关联。字母解释法可引用 history，当前无需重新拼读；仅历史中另有其他呼号，不构成当前身份冲突。
 
 【特征匹配】
 - featureMatches 只有一个呼号，置信度为 medium 或 high。
 - 唯一 medium，且当前文字无法确定讲话人、没有明确冲突时：只要有同一呼号的字母解释法候选就确认主叫。speakerEvidence 引用该匹配，callsignEvidence 引用拼读候选。没有对应拼读则拒绝。
 - 唯一 high 与当前明确自报的完整呼号完全一致，但 candidates 中没有对应的完整拼读候选时：确认主叫。speakerEvidence 必须使用 text，逐字引用当前自报；callsignEvidence 必须使用 featureMatch，引用这个高置信度匹配的 matchId。自报中的裸呼号只能证明讲话人，完整呼号由高置信度匹配补证。原文中残缺或无法解析的拼读不算完整拼读候选。这条规则仅适用于 high。
-- 唯一 high，且没有文字冲突时：可直接为仍缺少的依据提供证据。即使本轮没有任何自报、也没有拼读，仍可以确认这个唯一高置信度呼号，两项依据都引用同一个 matchId。若文字已经能证明其中一项，优先引用该项的文字依据。请勿因为只有「收到，您的信号很清楚」之类的普通对话而拒绝唯一 high。
+- 唯一 high 补证必须有文字线索：current 或 history 中出现过对应完整呼号、简称（如 BG5XYZ、5XYZ、XYZ）或字母解释法候选。线索可以由其他人说出，不要求是当前讲话人自报。当前与历史均无对应线索时，输出 {"speaker":"unknown"}。
+- 当前无自报、无完整拼读，但当前或历史有对应完整呼号或简称时，结合问答、称呼、轮次和客席、集体台情况判断该线索是否关联当前讲话人。呼号出现过只允许进一步判断；设备型号、普通单词中的字母和仅提及第三方不证明当前身份。无法关联时输出 {"speaker":"unknown"}；关联明确、没有文字冲突时，可以确认唯一 high，两项依据都引用其 matchId。已有文字自报或完整拼读能证明某项时，优先引用该项文字依据。
 - 两项证据必须指向一个完整呼号。任何引用 ID 都必须在本次输入存在。
 
 【输出】
@@ -88,8 +90,9 @@ speakerEvidence 的 source 只允许 text 或 featureMatch；callsignEvidence �
 {"speaker":"self","callsign":"BG5XYZ","speakerEvidence":{"source":"text","quote":"这里是BG5XYZ"},"callsignEvidence":{"source":"featureMatch","matchId":1}}
 同一情况下若匹配为 medium，且没有对应完整拼读候选，应输出 {"speaker":"unknown"}。
 
-例如当前是「收到，您的信号很清楚」，唯一匹配为高置信度 BG5XYZ，编号 1，且没有拼读候选，应输出
+例如历史中对方问「XYZ，你的信号怎么样？」，当前回答「收到，您的信号很清楚」，唯一匹配为 high 的 BG5XYZ，编号 1，且没有拼读候选。简称 XYZ 与候选尾号一致，对话关系支持当前讲话人，输出
 {"speaker":"self","callsign":"BG5XYZ","speakerEvidence":{"source":"featureMatch","matchId":1},"callsignEvidence":{"source":"featureMatch","matchId":1}}
+当前和历史均没有 BG5XYZ、5XYZ、XYZ 或对应拼读线索时，即使唯一 high 也是 BG5XYZ，也应输出 {"speaker":"unknown"}。
 同一句话若唯一匹配为中置信度，且历史有 BG5XYZ 的拼读候选 2，应输出
 {"speaker":"self","callsign":"BG5XYZ","speakerEvidence":{"source":"featureMatch","matchId":1},"callsignEvidence":{"source":"spelling","candidateId":2}}
 如果当前明确说「我抄收您的呼号是 BG5XYZ」，即使唯一匹配是高置信度 BG5XYZ，也应输出 {"speaker":"other"}。

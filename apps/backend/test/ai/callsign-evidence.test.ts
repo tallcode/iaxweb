@@ -110,6 +110,14 @@ test('keeps genuine two-letter suffixes and distinct or addressed callsigns', ()
   }
 })
 
+test('accepts a CQ spelling followed by a quoted call to stations on the channel', () => {
+  const quote = 'BG5GXT 呼叫频率上的友台'
+  const c = context(`CQ CQ, Bravo Golf 5 Golf X-ray Tango, Bravo Germany 5 Germany X-ray Tango, ${quote}， Over。`)
+  assert.equal(checkCallsignDecision({ speaker: 'self', quote, callsign: 'BG5GXT', evidence: 1 }, c).callsign, 'BG5GXT')
+  const callee = context('CQ CQ, Bravo Golf 5 Golf X-ray Tango, BG5GXT 您好')
+  assert.equal(checkCallsignDecision({ speaker: 'self', quote: 'BG5GXT 您好', callsign: 'BG5GXT', evidence: 1 }, callee).callsign, undefined)
+})
+
 test('finds retry evidence independently of an incorrect first self claim', () => {
   const text = '这里是 BG5GZX，这里是 BG5GBL，Bravo Golf Five Delta Bravo Lima'
   const c = context(text)
