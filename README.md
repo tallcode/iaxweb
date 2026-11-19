@@ -22,8 +22,8 @@ scripts/             模型下载、数据库备份等工具
 config/              部署配置，不提交到 Git
   nodes.json         节点配置
   admin.json         系统管理员账号
-  prompt.txt         AI 提示词（可选）
-  schema.json        AI 输出 schema（可选）
+  prompt.txt         两阶段 AI 提示词（启用 LLM 时必需）
+  schema.json        AI 识别共用的输出 Schema
   models/            声纹模型（可选）
 data/                数据库、录音、用户和会话等运行数据，不提交到 Git
 ```
@@ -97,12 +97,16 @@ ASR 和 LLM 的端点、模型可分别配置；只使用语音转写时设置 `
 
 ```bash
 cp examples/ai/simple/prompt.txt config/prompt.txt
-cp examples/ai/simple/schema.json config/schema.json
+cp examples/ai/schema.json config/schema.json
 ```
 
-`examples/ai/full/` 提供包含文本整理和风险评级的完整示例。
+`examples/ai/full/prompt.txt` 提供包含文本整理和风险评级的完整提示词，使用时设置 `AI_LLM_ANALYSIS_ENABLED=true`。
 
-可选文件：`config/hotwords.json` 为热词配置，`config/background.txt` 为背景文本，`config/callsigns.txt` 供离线呼号检索工具使用。
+`config/prompt.txt` 按顺序存放一阶段、二阶段普通补证、二阶段冲突复核三段提示词。以 `#########` 开头的行分隔各段，后面可以写任意注释。已有部署升级时，将原有提示词合并成三段，或选用相同模式的新示例。每次模型调用前重新读取文件，编辑后无需重启。文件缺失、不可读或格式无效时，跳过识别。
+
+三段共用 `config/schema.json`。已有部署需同时更新任务提示词和 Schema。一阶段提示词用 `speakerEvidence` 和 `callsignEvidence` 指定原文引用和拼读候选 ID。
+
+可选文件：`config/hotwords.json` 为热词配置，`config/background.txt` 为背景文本。
 
 ### 记录管理
 
@@ -256,7 +260,6 @@ docker compose exec iaxweb npm run backfill:speaker
 | 命令 | 用途 |
 | --- | --- |
 | `npm run phonetic-corrector-test -- "待检查的文本"` | 音素纠错 |
-| `npm run callsign-match-test -- "待检查的文本"` | 离线呼号检索 |
 | `npm run llm-parse-test -- "待检查的文本"` | LLM 解析，会调用配置的模型接口 |
 
 ## 许可证

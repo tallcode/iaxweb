@@ -26,7 +26,6 @@
     "test": "npm run test --workspaces --if-present",
     "phonetic-corrector-test": "npm run phonetic-corrector-test --workspace @iaxweb/backend --",
     "llm-parse-test": "npm run llm-parse-test --workspace @iaxweb/backend --",
-    "callsign-match-test": "npm run callsign-match-test --workspace @iaxweb/backend --",
     "hash-admin-password": "npm run hash-admin-password --workspace @iaxweb/backend --"
   },
   "devDependencies": {

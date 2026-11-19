@@ -67,6 +67,7 @@ export class AiService {
     })
     this.llm = config.llm.enabled
       ? new LlmParser({
+          analysisEnabled: config.llm.analysisEnabled,
           apiKey: config.llm.apiKey ?? '',
           baseUrl: config.llm.baseUrl,
           ...(config.llm.enableThinking !== undefined ? { enableThinking: config.llm.enableThinking } : {}),
@@ -282,11 +283,11 @@ export class AiService {
         partIndex: record.partIndex,
       }
       const parsed = await this.llm.parse(text, history, corrected, metadata)
-      // 解析返回 undefined 说明提示词/schema 文件缺失：LLM 解析未生效。
+      // 配置不可用时，保留此前已写入的转写记录。
       if (this.stopped)
         return
       if (!parsed) {
-        console.warn(`${logTimestamp()} [${nodeId}]: LLM 未生效 ${shortId}：提示词或 schema 文件缺失`)
+        console.warn(`${logTimestamp()} [${nodeId}]: LLM 未生效 ${shortId}：提示词或 schema 不可用`)
         console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${seconds}s | ${text}`)
         return
       }
@@ -299,7 +300,7 @@ export class AiService {
       else if (featureMatches) {
         try {
           const matches = await featureMatches
-          if (!this.stopped && matches.length === 1) {
+          if (!this.stopped && matches.length > 0) {
             record.callsign = await this.llm.parseStage2(text, history, corrected, metadata, matches)
             if (record.callsign)
               record.callsignAlgorithm = 'stage2_feature'

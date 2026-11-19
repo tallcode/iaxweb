@@ -5,7 +5,7 @@ import { manualRecognitionSchema, updateUserSchema } from '@iaxweb/contracts'
 import { compileSchema } from '../../src/ai/schema-validator.js'
 
 test('validates the shipped draft-2020 schema and advanced constraints', () => {
-  const schema = JSON.parse(readFileSync(new URL('../../../../examples/ai/simple/schema.json', import.meta.url), 'utf8'))
+  const schema = JSON.parse(readFileSync(new URL('../../../../examples/ai/schema.json', import.meta.url), 'utf8'))
   const validate = compileSchema(schema)
   assert.equal(validate({ speaker: 'other' }), undefined)
   assert.ok(validate({ speaker: 'other', callsign: 'BG5AAA' }))

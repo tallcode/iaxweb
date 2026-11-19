@@ -1,4 +1,5 @@
 import type { CallsignContext, CallsignEvidence } from './callsign-evidence.js'
+import type { CallsignModelOutput } from './callsign-model-output.js'
 import { isValidCallsign } from '@iaxweb/contracts'
 
 const OWN_PATTERN = /这里是?|我是|我的(?:电台)?呼号(?:是|为)?|\bthis\s+is\b|\bmy\s+call(?:sign)?(?:\s+is)?\b|\bcall\s*是/gi
@@ -96,6 +97,17 @@ export function checkCallsignDecision(result: Record<string, unknown>, context: 
     return { error: 'invalid-candidate-reference' }
   const error = quoteError(result.quote, evidence, context)
   return error ? { error } : { callsign, evidence }
+}
+
+export function checkTextCallsignOutput(output: CallsignModelOutput, context: CallsignContext): string | undefined {
+  if (output.speaker === 'self' && output.speakerEvidence.source === 'text' && output.callsignEvidence.source === 'spelling') {
+    return checkCallsignDecision({
+      speaker: output.speaker,
+      callsign: output.callsign,
+      quote: output.speakerEvidence.quote,
+      evidence: output.callsignEvidence.candidateId,
+    }, context).callsign
+  }
 }
 
 export interface SupportedCallsignEvidence extends CallsignEvidence {

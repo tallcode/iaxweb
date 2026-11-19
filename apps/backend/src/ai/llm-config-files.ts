@@ -8,31 +8,38 @@ export interface LoadedSchema {
   validate: (value: unknown) => string | undefined
 }
 
+export interface LlmConfigFilePaths {
+  promptFile: string
+  schemaFile: string
+}
+
+interface LoadedPrompts {
+  stage1: string
+  stage2: string
+  stage2Review: string
+}
+
 export class LlmConfigFiles {
-  private lastPrompt: string | undefined
   private lastSchema: LoadedSchema | undefined
 
-  constructor(private readonly options: { promptFile: string, schemaFile: string }) {}
+  constructor(private readonly options: LlmConfigFilePaths) {}
 
-  loadPrompt(): string | undefined {
+  loadPrompts(): LoadedPrompts | undefined {
+    const { promptFile } = this.options
     let text: string
     try {
-      text = readFileSync(this.options.promptFile, 'utf8').trim()
+      text = readFileSync(promptFile, 'utf8')
     }
     catch (error) {
-      if (isMissingFile(error)) {
-        this.lastPrompt = undefined
-        return undefined
-      }
-      console.warn(`${logTimestamp()} [AI]: 提示词文件读取失败 ${this.options.promptFile}: ${errorMessage(error)}`)
-      return this.lastPrompt
-    }
-    if (!text) {
-      this.lastPrompt = undefined
+      if (!isMissingFile(error))
+        console.warn(`${logTimestamp()} [AI]: 提示词文件读取失败 ${promptFile}: ${errorMessage(error)}`)
       return undefined
     }
-    this.lastPrompt = text
-    return text
+    const parts = text.split(/^#{9}[^\r\n]*/mu).map(part => part.trim())
+    const [stage1, stage2, stage2Review] = parts
+    if (parts.length !== 3 || !stage1 || !stage2 || !stage2Review)
+      return undefined
+    return { stage1, stage2, stage2Review }
   }
 
   loadSchema(): LoadedSchema | undefined {

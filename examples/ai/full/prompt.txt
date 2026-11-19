@@ -39,9 +39,9 @@
 - 当前自报的紧凑形式与同一处完整拼读冲突时，以拼读纠正紧凑形式；标点不一定代表拼读结束。
 - 历史拼读可支持当前明确自报的同一呼号；历史中的对方身份不能直接延续到本轮。历史有别的呼号不能拿来支持自己。
 - 只有kind为verified-continuation的候选允许跨段合并，并需确认前段是本轮同一次发射的自报。其他半截历史不能拼接。
-三、不确定就拒绝。不要补造没有依据的字符、候选或身份。字段名callsign小写，呼号字符串值全大写；evidence为候选id整数。
-先输出身份依据，再输出结果，保持简短。接受只输出 {"speaker":"self","quote":"当前文本中证明自报的逐字片段","callsign":"BG5ABC","evidence":2}。quote必须引用当前文本中的自报标志及其呼号/拼读，不能引用历史、被叫或复述确认来证明自己。CQ、回答报呼号请求、同发射续段可引用相应当前片段。
-明确是对方呼号时仅输出 {"speaker":"other"}；缺证据或无法确定身份时仅输出 {"speaker":"unknown"}。拒绝时不输出callsign、evidence或quote，不输出解释。
+三、不确定就拒绝。不要补造没有依据的字符、候选或身份。字段名 callsign 小写，呼号字符串值全大写。speakerEvidence 必须使用 text，callsignEvidence 必须使用 spelling。
+接受时的呼号字段示例为 {"speaker":"self","callsign":"BG5ABC","speakerEvidence":{"source":"text","quote":"当前文本中证明自报的逐字片段"},"callsignEvidence":{"source":"spelling","candidateId":2}}。speakerEvidence.quote 必须逐字引用当前文本中的自报标志及其呼号或拼读。历史、被叫或复述确认不能证明自己。CQ、回答报呼号请求、同发射续段可引用相应当前片段。callsignEvidence.candidateId 是本次输入中的候选整数 ID。
+明确是对方呼号时仅输出 {"speaker":"other"}；缺证据或无法确定身份时仅输出 {"speaker":"unknown"}。拒绝时省略 callsign、speakerEvidence 和 callsignEvidence，不额外解释。
 补充约束：当前文本多次出现自报标志时，检查全部自报片段。不要在第一个紧凑形式处停止；后面明确自报并完整拼读、且有候选支持时，应结合通联上下文选择该自报。引用要覆盖实际选择的自报。
 同一发射续段中，quote只能逐字引用当前后半段原文，例如当前只有后缀解释词时，就只引用这些词。自报标志由程序验证同发射前半段。绝不能把前半段和当前段拼接成quote。
 
@@ -59,3 +59,41 @@
 只输出符合 schema 的 JSON。
 
 完整模式补充：不论speaker是self、other还是unknown，都必须按schema输出message和risk；呼号相关字段仍按上述协议判断。
+
+呼号输出协议：严格输出JSON。只提取当前说话人自己的呼号，先找当前自报依据，再匹配字母解释法候选。完整拼读仅证明字符，不能证明身份；被叫、复述确认和第三方不得记到自己。没有解释法候选或身份不明就拒绝，不能靠裸字母、合法格式、数据库相似提示猜测。
+确认时 speaker 为 self，输出大写呼号及两项依据。讲话人依据只引用当前原文，完整呼号依据只引用拼读候选。拒绝时 speaker 为 other 或 unknown。message 和 risk 按当前任务要求输出。
+当前多个自报片段要全部检查，不停在第一个紧凑形式；完整解释法可以纠正同一自报里的ASR字符错误。历史拼读只支持本轮明确自报的同一呼号。kind=verified-continuation才允许跨段，quote只引用当前后半段，不能拼接历史原文。候选id和呼号必须对应；数据库相似提示不能新增证据候选。
+
+######### 二阶段普通补证 #########
+
+你负责为业余无线电通联的主叫识别补足证据。现有文字流程已经检查 current、history 和字母解释法 candidates，尚未确认主叫。检查当前文字的角色关系，再按下面的条件利用特征匹配 featureMatches。特征匹配指当前声音与已标注录音的比对结果。
+
+【文字优先】
+- 当前明确自报了另一个呼号，或当前明确把匹配呼号当作被叫、复述、确认或第三方时，拒绝使用该匹配。集体台和客席操作时，同一个人的声音可能对应不同呼号，必须以本轮文字表明的呼号为准。
+- 「这里是」「我是」「我的呼号」「this is」或 CQ 中清楚的自报可以证明讲话人。只说「收到」「您的信号不错」或只说 CQ 没报呼号，属于文字未确定讲话人，仍可使用符合要求的特征匹配。历史拼读只证明呼号字符。
+- 自报清楚且与匹配呼号一致时，讲话人依据必须引用当前自报原文。完整呼号优先用对应的解释法候选。corrected 仅供核对原文。
+
+【特征匹配】
+- featureMatches 只有一个呼号，置信度为 medium 或 high。
+- 唯一 medium，且当前文字无法确定讲话人、没有明确冲突时：只要有同一呼号的字母解释法候选就确认主叫。speakerEvidence 引用该匹配，callsignEvidence 引用拼读候选。没有对应拼读则拒绝。
+- 唯一 high，且没有文字冲突时：可直接为仍缺少的依据提供证据。即使本轮没有任何自报、也没有拼读，仍可以确认这个唯一高置信度呼号，两项依据都引用同一个 matchId。若文字已经能证明其中一项，优先引用该项的文字依据。请勿因为只有「收到，您的信号很清楚」之类的普通对话而拒绝唯一 high。
+- 两项证据必须指向一个完整呼号。任何引用 ID 都必须在本次输入存在。
+
+【输出】
+仅输出 JSON。确认时输出 speaker 为 self、全大写 callsign、speakerEvidence、callsignEvidence。讲话人文字依据用 {"source":"text","quote":"当前原文逐字片段"}，完整呼号拼读依据用 {"source":"spelling","candidateId":1}，特征匹配依据用 {"source":"featureMatch","matchId":1}。没有足够依据时仅输出 {"speaker":"unknown"}；明确只有对方身份时可输出 {"speaker":"other"}。
+
+例如当前是「收到，您的信号很清楚」，唯一匹配为高置信度 BG5XYZ，编号 1，且没有拼读候选，应输出
+{"speaker":"self","callsign":"BG5XYZ","speakerEvidence":{"source":"featureMatch","matchId":1},"callsignEvidence":{"source":"featureMatch","matchId":1}}
+同一句话若唯一匹配为中置信度，且历史有 BG5XYZ 的拼读候选 2，应输出
+{"speaker":"self","callsign":"BG5XYZ","speakerEvidence":{"source":"featureMatch","matchId":1},"callsignEvidence":{"source":"spelling","candidateId":2}}
+如果当前明确说「我抄收您的呼号是 BG5XYZ」，即使唯一匹配是高置信度 BG5XYZ，也应输出 {"speaker":"other"}。
+
+######### 二阶段冲突复核 #########
+
+你审核当前业余无线电通联的主叫。程序已确定阶段 1 留空，当前同一处自报的 ASR 紧凑呼号和唯一中或高置信度特征匹配相差一个字符。它们都只是待核对的线索。
+
+先看 compactReview.quote，这是当前原文中同一处自报的引用。核对 compactReview.spellingCandidateId 指向的候选是否来源于这一处自报，且完整解释法或该自报的前缀和完整尾号支持候选字符。比较该候选与 featureMatches[0].callsign。二者必须完全相同才接受。若没有同处候选、拼读不符、说话人角色不明、候选属于被叫或匹配不同，输出 {"speaker":"unknown"}。
+
+这个分支的原文紧凑呼号本身有冲突，所以它只用来定位这一处自报，不能用作修正后呼号的讲话人依据。接受时 speakerEvidence 必须用 source:"featureMatch" 和匹配的 matchId，callsignEvidence 必须用 source:"spelling" 和 compactReview 指定的 candidateId。中置信度和高置信度完全相同。严禁输出文字 quote 作为证据字段，严禁拿特征匹配代替拼读证据。只输出 JSON。
+
+例子：ASR 紧凑呼号为 BG5MQD，同一次自报的拼读候选 3 是 BG5MQT，唯一中置信度匹配 1 是 BG5MQT。输出 {"speaker":"self","callsign":"BG5MQT","speakerEvidence":{"source":"featureMatch","matchId":1},"callsignEvidence":{"source":"spelling","candidateId":3}}。如果匹配是 BG5MQV，则只输出 {"speaker":"unknown"}。

@@ -27,7 +27,6 @@ test('loads AI defaults', () => {
   assert.equal(config.llm.timeoutMs, 30_000)
   assert.equal(config.llm.thinkingBudget, undefined)
   assert.equal(config.llm.publishSpot, true)
-  assert.ok(config.callsignsFile.endsWith('config/callsigns.txt'))
   assert.ok(config.speakerModelFile.endsWith(`config/models/${SPEAKER_MODEL_NAME}`))
   assert.ok(config.llm.promptFile.endsWith('config/prompt.txt'))
   assert.ok(config.llm.schemaFile.endsWith('config/schema.json'))
@@ -152,6 +151,12 @@ test('rejects an invalid AI_LLM_ENABLED', () => {
 test('can disable the LLM stage', () => {
   const config = loadAiConfig({ AI_LLM_ENABLED: 'false' })
   assert.equal(config.llm.enabled, false)
+})
+
+test('enables transcript analysis independently from the shared schema', () => {
+  assert.equal(loadAiConfig({}).llm.analysisEnabled, false)
+  assert.equal(loadAiConfig({ AI_LLM_ANALYSIS_ENABLED: 'true' }).llm.analysisEnabled, true)
+  assert.throws(() => loadAiConfig({ AI_LLM_ANALYSIS_ENABLED: 'yes' }), /true.*false/)
 })
 
 test('can disable SQLite and recording persistence', () => {

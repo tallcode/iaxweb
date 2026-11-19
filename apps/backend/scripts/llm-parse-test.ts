@@ -22,6 +22,7 @@ if (!config.llm.apiKey) {
 }
 
 const parser = new LlmParser({
+  analysisEnabled: config.llm.analysisEnabled,
   apiKey: config.llm.apiKey,
   baseUrl: config.llm.baseUrl,
   ...(config.llm.enableThinking !== undefined ? { enableThinking: config.llm.enableThinking } : {}),
@@ -35,7 +36,7 @@ const parser = new LlmParser({
 try {
   const parsed = await parser.parse(text, undefined, correctExplanationText(text).text)
   if (!parsed) {
-    console.error('LLM 解析未生效：缺少提示词或 schema 文件')
+    console.error('LLM 解析未生效：提示词或 schema 不可用')
     process.exit(1)
   }
   console.log(JSON.stringify(parsed, null, 2))

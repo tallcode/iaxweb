@@ -179,3 +179,41 @@ export function buildCallsignContext(current: TranscriptTurn, history: readonly 
   }
   return { current, history, candidates: candidates.map((candidate, index) => ({ ...candidate, id: index + 1 })) }
 }
+
+// Stage 2 only. Require adjacent, delimited prefix and suffix phrases after
+// the compact self-call. The prefix's B and district digit must both agree
+// before borrowing its middle letter for an unrecognized Han syllable.
+export function recoverSelfSpelling(current: TranscriptTurn, compact: string, selfEnd: number, id: number): CallsignEvidence | undefined {
+  const parts = /^[ \t]*[，,]([^，,。！？；.!?;\r\n]+)[，,]([^，,。！？；.!?;\r\n]+)/u.exec(current.text.slice(selfEnd))
+  if (!parts)
+    return undefined
+  const prefixPhrase = parts[1]!.trim()
+  const suffixPhrase = parts[2]!.trim()
+  const prefix = explanationTokens(prefixPhrase)
+  const suffix = explanationTokens(suffixPhrase)
+  if (prefix.length !== 3 || suffix.length < 2 || suffix.length > 3
+    || prefix.map(token => token.source).join('').replaceAll(/\s/gu, '') !== prefixPhrase.replaceAll(/\s/gu, '')
+    || suffix.map(token => token.source).join('').replaceAll(/\s/gu, '') !== suffixPhrase.replaceAll(/\s/gu, '')) {
+    return undefined
+  }
+  const [first, middle, digit] = prefix as [ExplanationToken, ExplanationToken, ExplanationToken]
+  if (first.symbol !== compact[0] || digit.symbol !== compact[2]
+    || (middle.symbol ? middle.symbol !== compact[1] : !/^\p{Script=Han}$/u.test(middle.source))
+    || suffix.some(token => !token.symbol)) {
+    return undefined
+  }
+  const callsign = compact.slice(0, 3) + suffix.map(token => token.symbol).join('')
+  if (!CALLSIGN.test(callsign))
+    return undefined
+  const start = selfEnd + parts[0].trimEnd().length - suffixPhrase.length
+  return {
+    id,
+    segmentId: current.id,
+    kind: 'suffix',
+    callsign,
+    prefixQuote: current.text.slice(selfEnd - compact.length, selfEnd),
+    quote: suffixPhrase,
+    start,
+    end: start + suffixPhrase.length,
+  }
+}

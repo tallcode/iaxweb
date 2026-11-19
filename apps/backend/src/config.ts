@@ -33,6 +33,7 @@ export interface AiApiConfig {
 }
 
 export interface AiLlmConfig extends AiApiConfig {
+  analysisEnabled: boolean
   enableThinking?: boolean
   enabled: boolean
   promptFile: string
@@ -48,7 +49,6 @@ export interface AiConfig {
   activityWindowMs: number
   asr: AiApiConfig
   backgroundFile: string
-  callsignsFile: string
   speakerModelFile: string
   coldMinSegmentMs: number
   contextWindowMs: number
@@ -189,6 +189,10 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   if (llmEnabledText !== 'true' && llmEnabledText !== 'false')
     throw new Error('AI_LLM_ENABLED must be "true" or "false"')
 
+  const llmAnalysisEnabledText = optional(env, 'AI_LLM_ANALYSIS_ENABLED') ?? 'false'
+  if (llmAnalysisEnabledText !== 'true' && llmAnalysisEnabledText !== 'false')
+    throw new Error('AI_LLM_ANALYSIS_ENABLED must be "true" or "false"')
+
   const llmStage2EnabledText = optional(env, 'AI_LLM_STAGE2_ENABLED') ?? 'false'
   if (llmStage2EnabledText !== 'true' && llmStage2EnabledText !== 'false')
     throw new Error('AI_LLM_STAGE2_ENABLED must be "true" or "false"')
@@ -230,7 +234,6 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
       model: asrModel,
     },
     backgroundFile: resolveProjectPath(optional(env, 'AI_BACKGROUND_FILE') ?? 'config/background.txt'),
-    callsignsFile: resolveProjectPath(optional(env, 'AI_CALLSIGNS_FILE') ?? 'config/callsigns.txt'),
     speakerModelFile: resolveProjectPath(optional(env, 'AI_SPEAKER_MODEL_FILE') ?? `config/models/${SPEAKER_MODEL_NAME}`),
     coldMinSegmentMs,
     contextWindowMs,
@@ -239,6 +242,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     hotwordsFile: resolveProjectPath(optional(env, 'AI_HOTWORDS_FILE') ?? 'config/hotwords.json'),
     llm: {
       ...(llmApiKey ? { apiKey: llmApiKey } : {}),
+      analysisEnabled: llmAnalysisEnabledText === 'true',
       baseUrl: llmBaseUrl,
       ...(llmEnableThinking !== undefined ? { enableThinking: llmEnableThinking } : {}),
       enabled: llmEnabledText === 'true',
