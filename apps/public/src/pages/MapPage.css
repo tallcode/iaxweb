@@ -34,7 +34,14 @@
   position: absolute;
   inset: 0.75rem auto auto 0.75rem;
   display: grid;
+  max-width: calc(100% - 1.5rem);
   justify-items: start;
+  gap: 0.35rem;
+}
+
+.map-coverage-buttons {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
 }
 
