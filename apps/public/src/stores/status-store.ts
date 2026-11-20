@@ -1,5 +1,5 @@
 import type { PublicStatusSnapshot, SpotEvent } from '@iaxweb/contracts'
-import type { RepeaterSummary, StatusConnectionState } from '../services/status-presentation'
+import type { StatusConnectionState } from '../services/status-presentation'
 import { NO_CALLSIGN, spotHistorySchema } from '@iaxweb/contracts'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -22,14 +22,6 @@ export const useStatusStore = defineStore('status', () => {
   let pendingSpotEvents: SpotEvent[] | undefined
 
   const aiSpotEnabled = computed(() => Object.values(statusSnapshot.value).some(node => node.AI === true))
-  const repeaterSummary = computed<RepeaterSummary>(() => {
-    const repeaters = Object.values(statusSnapshot.value).filter(node => node.TYPE === 'REPEATER')
-    return {
-      online: repeaters.filter(node => node.ONLINE === true).length,
-      total: repeaters.length,
-      transmitting: repeaters.filter(node => node.TX_SOURCE).length,
-    }
-  })
   const recentSpots = computed(() => {
     void currentTime.value
     const newestByCallsign = new Map<string, SpotEvent>()
@@ -143,7 +135,6 @@ export const useStatusStore = defineStore('status', () => {
     connectionState,
     hasInitialSnapshot,
     recentSpots,
-    repeaterSummary,
     spotHistoryReady,
     startStatusStream,
     statusSnapshot,

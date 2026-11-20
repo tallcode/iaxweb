@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { CountyState } from '../services/map-county-status'
 import type { Geometry } from '../services/map-geometry'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, shallowReactive, watch } from 'vue'
@@ -9,6 +8,7 @@ import { useMapInteraction } from '../composables/use-map-interaction'
 import { mapRepeaterMarkers } from '../services/map-county-status'
 import { geometryPath, MAP_HEIGHT, MAP_WIDTH, SIX_DIGIT_CELL_HEIGHT, SIX_DIGIT_LABEL_MIN_HEIGHT_PX, SIX_DIGIT_LATITUDE_STEP, SIX_DIGIT_LONGITUDE_STEP } from '../services/map-geometry'
 import { createGridLabels, createGridPaths, createVisibleSixDigitGridLabels } from '../services/map-grid'
+import { repeaterStateLabels } from '../services/status-presentation'
 import { useStatusStore } from '../stores/status-store'
 
 const emit = defineEmits<{ pageReady: [] }>()
@@ -23,13 +23,6 @@ const gridPaths = computed(() => createGridPaths(gridContext.value))
 const gridLabels = computed(() => createGridLabels(gridContext.value))
 const repeaterMarkers = computed(() => mapRepeaterMarkers(statusSnapshot.value, countyShapes.value))
 const markerRadius = computed(() => 6.5 * canvasSize.value.width / (renderedSize.value.width * viewport.value.zoom))
-const markerLabels: Record<CountyState, string> = {
-  local: '本地发射',
-  offline: '离线',
-  online: '在线',
-  remote: '远程发射',
-  system: '系统发射',
-}
 const coverageCallsigns = ['BR5AI', 'BR5BB', 'BR5AF', 'BR5AO'] as const
 const COVERAGE_LOADING_DELAY_MS = 300
 const COVERAGE_LOADING_MINIMUM_MS = 1_000
@@ -171,7 +164,7 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
           :cy="marker.center[1]"
           :r="markerRadius"
         >
-          <title>{{ marker.name }} · {{ markerLabels[marker.state] }}</title>
+          <title>{{ marker.name }} · {{ repeaterStateLabels[marker.state] }}</title>
         </circle>
       </g>
     </svg>

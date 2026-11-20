@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import type { PublicNodeStatus, TransmitSource } from '@iaxweb/contracts'
-import type { AudioStreamPlayer } from '../services/audio-player'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { SpectrumMeter } from '../services/audio-player'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { audioPlayerKey, SpectrumMeter } from '../services/audio-player'
 
 const props = defineProps<{
   isMobile: boolean
   node: PublicNodeStatus
   nodeId: string
-  audioPlayer: AudioStreamPlayer
 }>()
 
 const emit = defineEmits<{
@@ -18,8 +16,8 @@ const emit = defineEmits<{
 
 const cardElement = ref<HTMLElement | null>(null)
 const audioControlsElement = ref<HTMLElement | null>(null)
-const audioButton = ref<HTMLButtonElement | null>(null)
-let spectrumMeter: SpectrumMeter | undefined
+const audioPlayer = inject(audioPlayerKey)!
+const isPlaying = computed(() => audioPlayer.playingNodeId === props.nodeId)
 let collapseTimer: ReturnType<typeof setTimeout> | undefined
 let pointerDownAt = 0
 let activePointerId: number | undefined
@@ -62,10 +60,21 @@ onMounted(() => emit('register', props.nodeId, cardElement.value))
 onBeforeUnmount(() => {
   clearCollapseTimer()
   emit('register', props.nodeId, null)
-  spectrumMeter?.detach()
-  if (props.audioPlayer.playingNodeId === props.nodeId)
-    void props.audioPlayer.stop()
 })
+
+watch(audioControlsElement, (element, _, onCleanup) => {
+  if (!element)
+    return
+  const meter = new SpectrumMeter(element)
+  const stopWatching = watchEffect((onCleanup) => {
+    if (props.isMobile || audioPlayer.playingNodeId !== props.nodeId)
+      return
+    const detach = audioPlayer.attachSpectrum(meter)
+    if (detach)
+      onCleanup(detach)
+  })
+  onCleanup(stopWatching)
+}, { flush: 'post' })
 
 function expandForTouch(event: PointerEvent): void {
   if (!props.isMobile || event.pointerType === 'mouse' || (event.target as HTMLElement).closest('button'))
@@ -126,11 +135,8 @@ function cancelTouch(event: PointerEvent): void {
 }
 
 async function toggleAudio(): Promise<void> {
-  if (!audioControlsElement.value || !audioButton.value)
-    return
-  spectrumMeter ??= new SpectrumMeter(audioControlsElement.value, { enabled: () => !props.isMobile })
   try {
-    await props.audioPlayer.toggle(props.nodeId, audioButton.value, spectrumMeter, { play: '▶', stop: '■' })
+    await audioPlayer.toggle(props.nodeId)
   }
   catch {
     // The player cleans up failed starts; an older failure must not stop a newer session.
@@ -181,7 +187,7 @@ function transmitLabel(value: TransmitSource): string {
           </time>
         </div>
       </div>
-      <div v-if="hasAudio" ref="audioControlsElement" class="node-audio">
+      <div v-if="hasAudio" ref="audioControlsElement" class="node-audio" :class="{ 'is-playing': isPlaying }">
         <span class="listener-count" :title="`${listenerCount}人正在监听`" :aria-label="`${listenerCount}人正在监听`">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M16 11a4 4 0 1 0-3.45-6A4 4 0 0 0 16 11ZM8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 1c-1.2 0-2.33.28-3.34.77A7.45 7.45 0 0 1 15.5 19v1H22v-1c0-3.31-2.69-6-6-6ZM8 14c-3.87 0-7 2.69-7 6h14c0-3.31-3.13-6-7-6Z" />
@@ -189,8 +195,14 @@ function transmitLabel(value: TransmitSource): string {
           <span>{{ listenerCount }}</span>
         </span>
         <div class="spectrum" aria-hidden="true" />
-        <button ref="audioButton" class="audio-toggle" type="button" aria-label="播放音频" aria-pressed="false" @click="toggleAudio">
-          ▶
+        <button
+          class="audio-toggle"
+          type="button"
+          :aria-label="isPlaying ? '停止播放' : '播放音频'"
+          :aria-pressed="isPlaying"
+          @click="toggleAudio"
+        >
+          {{ isPlaying ? '■' : '▶' }}
         </button>
       </div>
     </div>

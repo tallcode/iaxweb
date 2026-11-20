@@ -1,14 +1,12 @@
 import type { PublicStatusSnapshot } from '@iaxweb/contracts'
-import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { isFaviconTransmission } from '../src/composables/use-transmission-favicon'
 import { mapStates } from '../src/services/map-county-status'
 import { MAP_MAX_ZOOM, mapViewBox, panMapViewport, zoomMapViewport, zoomMapViewportTowardCenter } from '../src/services/map-viewport'
 import { ReconnectingWebSocket } from '../src/services/reconnecting-websocket'
-import { formatRepeaterSummary } from '../src/services/status-presentation'
+import { repeaterSummaryDots } from '../src/services/status-presentation'
 import { markSnapshotOffline } from '../src/services/status-stream'
 import { buildTopologyEdges, createTopologySignature } from '../src/services/topology-graph'
-import { useStatusStore } from '../src/stores/status-store'
 
 class FakeSocket extends EventTarget {
   binaryType: BinaryType = 'blob'
@@ -53,19 +51,22 @@ describe('reconnecting WebSocket', () => {
 })
 
 describe('status models', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+  it('shows the configured repeaters in summary order with their current status', () => {
+    const dots = repeaterSummaryDots({
+      1801: { NAME: 'BR5AF', ONLINE: true, TX_SOURCE: 'remote', TYPE: 'REPEATER' },
+      1802: { NAME: 'BR5AO', ONLINE: true, TX_SOURCE: 'system', TYPE: 'REPEATER' },
+      1803: { NAME: 'BR5AR', ONLINE: false, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+      1901: { NAME: 'BR5AI', ONLINE: true, TYPE: 'REPEATER' },
+      1902: { NAME: 'BR5BB', ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    })
 
-  it('counts only repeaters in the status summary', () => {
-    const store = useStatusStore()
-    store.statusSnapshot = {
-      1800: { ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
-      1801: { ONLINE: false, TX_SOURCE: null, TYPE: 'REPEATER' },
-      1900: { ONLINE: true, TX_SOURCE: null, TYPE: 'HUB' },
-    }
-
-    expect(store.repeaterSummary).toEqual({ online: 1, total: 2, transmitting: 1 })
-    expect(formatRepeaterSummary(store.repeaterSummary, false)).toBe('2 个节点 · 1 个在线 · 1 个正在发射')
-    expect(formatRepeaterSummary(store.repeaterSummary, true)).toBe('2/1/1')
+    expect(dots.map(({ callsign, state }) => [callsign, state])).toEqual([
+      ['BR5AI', 'online'],
+      ['BR5BB', 'local'],
+      ['BR5AF', 'remote'],
+      ['BR5AO', 'system'],
+      ['BR5AR', 'offline'],
+    ])
   })
 
   it('keeps static metadata and clears live fields after expiry', () => {

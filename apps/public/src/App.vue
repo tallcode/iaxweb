@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import SpotPanel from './components/SpotPanel.vue'
 import { useMobileLayout } from './composables/use-mobile-layout'
 import { useTransmissionFavicon } from './composables/use-transmission-favicon'
-import { formatRepeaterSummary } from './services/status-presentation'
+import { audioPlayerKey, AudioStreamPlayer } from './services/audio-player'
+import { repeaterStateLabels, repeaterSummaryDots } from './services/status-presentation'
 import { useStatusStore } from './stores/status-store'
 
 const statusStore = useStatusStore()
-const { aiSpotEnabled, hasInitialSnapshot, recentSpots, repeaterSummary, spotHistoryReady, statusSnapshot } = storeToRefs(statusStore)
+const { aiSpotEnabled, hasInitialSnapshot, recentSpots, spotHistoryReady, statusSnapshot } = storeToRefs(statusStore)
 const route = useRoute()
 const isMobile = useMobileLayout()
 const isStatsPage = computed(() => route.name === 'stats')
@@ -18,8 +19,10 @@ const readyRoutePath = ref<string>()
 const isPageReady = computed(() => readyRoutePath.value === route.fullPath)
 const isInitialAppReady = computed(() => (hasInitialSnapshot.value || isStatsPage.value) && isPageReady.value)
 const hasEnteredApp = ref(false)
-const headerMessage = computed(() => formatRepeaterSummary(repeaterSummary.value, isMobile.value))
+const headerRepeaters = computed(() => repeaterSummaryDots(statusSnapshot.value))
+const audioPlayer = new AudioStreamPlayer()
 
+provide(audioPlayerKey, audioPlayer)
 useTransmissionFavicon(statusSnapshot)
 
 watch(isInitialAppReady, (ready) => {
@@ -35,6 +38,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  void audioPlayer.stop()
   statusStore.stopStatusStream()
   window.removeEventListener('resize', syncViewportHeight)
   window.visualViewport?.removeEventListener('resize', syncViewportHeight)
@@ -55,9 +59,11 @@ function markPageReady(routePath: string): void {
 <template>
   <div class="map-shell" :class="{ 'is-mobile': isMobile, 'ai-spot-disabled': !showSpotPanel, 'app-pending': !hasEnteredApp }">
     <header class="map-header">
-      <p aria-live="polite" :aria-label="headerMessage">
-        {{ headerMessage }}
-      </p>
+      <div class="header-summary" role="group" aria-label="节点状态" aria-live="polite">
+        <span v-for="{ callsign, state, label } in headerRepeaters" :key="callsign" class="dot" :class="state" :title="label">
+          <span class="sr-only">{{ label }}</span>
+        </span>
+      </div>
       <nav class="page-nav" aria-label="页面导航">
         <RouterLink to="/topology">
           拓扑图
@@ -69,12 +75,16 @@ function markPageReady(routePath: string): void {
           统计
         </RouterLink>
       </nav>
-      <div class="legend">
-        <span><i class="dot online" />在线</span>
-        <span><i class="dot offline" />离线</span>
-        <span><i class="dot local" />本地发射</span>
-        <span><i class="dot remote" />远程发射</span>
-        <span><i class="dot system" />系统发射</span>
+      <div class="header-legend">
+        <div class="legend">
+          <span
+            v-for="(label, state) in repeaterStateLabels"
+            :key="state"
+            :class="{ 'legend-transmitting': state !== 'online' && state !== 'offline' }"
+          >
+            <i class="dot" :class="state" aria-hidden="true" />{{ label }}
+          </span>
+        </div>
       </div>
     </header>
     <RouterView v-slot="{ Component, route: pageRoute }">

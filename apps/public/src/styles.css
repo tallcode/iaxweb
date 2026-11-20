@@ -2,6 +2,7 @@
 
 :root {
   --app-height: 100vh;
+  --status-dot-size: 0.55rem;
   --status-online: #4bc88b;
   --status-offline: #6c7787;
   --status-local: #ffb44a;
@@ -116,10 +117,10 @@ body {
   backdrop-filter: blur(16px);
 }
 
-.map-header p {
-  margin: 0;
-  color: #96a4b7;
-  font-size: 0.82rem;
+.header-summary {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--status-dot-size) / 2);
 }
 
 .page-nav {
@@ -154,11 +155,14 @@ body {
   background: #17383c;
 }
 
+.header-legend {
+  container: header-legend / inline-size;
+}
+
 .legend {
   display: flex;
-  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.6rem 1rem;
+  gap: 1rem;
   color: #aab5c4;
   font-size: 0.76rem;
 }
@@ -172,8 +176,9 @@ body {
 
 .dot {
   display: inline-block;
-  width: 0.55rem;
-  height: 0.55rem;
+  flex: none;
+  width: var(--status-dot-size);
+  height: var(--status-dot-size);
   border-radius: 50%;
   background: #5f6c7c;
 }
@@ -198,37 +203,24 @@ body {
   background: var(--status-system);
 }
 
-.map-shell.is-mobile {
-  .map-header {
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.5rem 0.65rem;
-    padding: 0.65rem 0.7rem;
-  }
-
-  .map-header p {
-    font-size: 0.68rem;
-    white-space: nowrap;
-  }
-
-  .page-nav {
+@container header-legend (width < 21rem) {
+  .map-shell:not(.is-mobile) .legend-transmitting {
     display: none;
   }
 
-  .legend {
-    flex-wrap: nowrap;
-    justify-content: flex-end;
+  .map-shell.is-mobile .legend {
     gap: 0.35rem;
-    min-width: 0;
     font-size: 0.62rem;
   }
 
-  .legend span {
+  .map-shell.is-mobile .legend span {
     gap: 0.22rem;
   }
+}
 
-  .legend .dot {
-    width: 0.42rem;
-    height: 0.42rem;
+@container header-legend (width < 15rem) {
+  .legend .legend-transmitting {
+    display: none;
   }
 }
 
@@ -241,6 +233,18 @@ body {
       'topology'
       'spot'
       'footer';
+  }
+
+  .map-header {
+    --status-dot-size: 0.42rem;
+
+    grid-template-columns: minmax(0, 1fr) minmax(min(80%, 15rem), 1fr);
+    gap: 0.5rem 0.65rem;
+    padding: 0.65rem 0.7rem;
+  }
+
+  .page-nav {
+    display: none;
   }
 
   &.ai-spot-disabled {

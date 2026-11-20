@@ -1,17 +1,17 @@
-import type { PublicNodeStatus, PublicStatusSnapshot } from '@iaxweb/contracts'
+import type { PublicStatusSnapshot } from '@iaxweb/contracts'
 import type { CountyShape, Position } from './map-geometry'
+import type { RepeaterState } from './status-presentation'
 import { projectPoint } from './map-geometry'
-
-export type CountyState = 'offline' | 'online' | 'local' | 'remote' | 'system'
+import { repeaterState } from './status-presentation'
 
 interface RepeaterMarker {
   center: Position
   key: string
   name: string
-  state: CountyState
+  state: RepeaterState
 }
 
-const statePriority: Record<CountyState, number> = {
+const statePriority: Record<RepeaterState, number> = {
   offline: 0,
   online: 1,
   system: 2,
@@ -19,8 +19,8 @@ const statePriority: Record<CountyState, number> = {
   local: 4,
 }
 
-export function mapStates(snapshot: PublicStatusSnapshot): ReadonlyMap<string, CountyState> {
-  const states = new Map<string, CountyState>()
+export function mapStates(snapshot: PublicStatusSnapshot): ReadonlyMap<string, RepeaterState> {
+  const states = new Map<string, RepeaterState>()
   for (const node of Object.values(snapshot)) {
     if (node.TYPE !== 'REPEATER' || !node.GB || node.LOCATION)
       continue
@@ -51,8 +51,4 @@ export function mapRepeaterMarkers(snapshot: PublicStatusSnapshot, counties: rea
     })
   }
   return markers
-}
-
-function repeaterState(node: PublicNodeStatus): CountyState {
-  return node.ONLINE === true ? node.TX_SOURCE ?? 'online' : 'offline'
 }

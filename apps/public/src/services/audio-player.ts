@@ -1,61 +1,44 @@
+import type { InjectionKey } from 'vue'
+import { shallowRef } from 'vue'
 import { ReconnectingWebSocket } from './reconnecting-websocket'
 
 const SAMPLE_RATE = 8_000
 const JITTER_SECONDS = 0.1
 const SPECTRUM_BARS = 28
 
-interface AudioLabels {
-  play: string
-  stop: string
-}
-
-interface PlaybackBinding {
-  button: HTMLButtonElement
-  nodeId: string
-  labels: AudioLabels
-  spectrumMeter: SpectrumMeter
-}
+export const audioPlayerKey: InjectionKey<AudioStreamPlayer> = Symbol('audioPlayer')
 
 export class AudioStreamPlayer {
   private analyser: AnalyserNode | null = null
   private baseAudioTime = 0
   private baseTimestamp: number | null = null
-  private binding: PlaybackBinding | null = null
   private connection: ReconnectingWebSocket | null = null
-  private context: AudioContext | null = null
   private lastTimestamp: number | null = null
+  private readonly playback = shallowRef<{ nodeId: string, context: AudioContext } | null>(null)
   private playbackVersion = 0
 
   get playingNodeId(): string | null {
-    return this.binding?.nodeId ?? null
+    return this.playback.value?.nodeId ?? null
   }
 
-  async toggle(
-    nodeId: string,
-    button: HTMLButtonElement,
-    spectrumMeter: SpectrumMeter,
-    labels: AudioLabels = { play: '播放', stop: '停止' },
-  ): Promise<void> {
+  async toggle(nodeId: string): Promise<void> {
     if (this.playingNodeId === nodeId) {
       await this.stop()
       return
     }
-    await this.start(nodeId, button, spectrumMeter, labels)
+    await this.start(nodeId)
   }
 
-  async start(nodeId: string, button: HTMLButtonElement, spectrumMeter: SpectrumMeter, labels: AudioLabels): Promise<void> {
+  async start(nodeId: string): Promise<void> {
     const context = new AudioContext({ sampleRate: SAMPLE_RATE })
     const version = ++this.playbackVersion
     const closing = this.releasePlayback()
-    this.context = context
-    this.binding = { button, labels, nodeId, spectrumMeter }
+    this.playback.value = { nodeId, context }
     try {
       await Promise.all([closing, context.resume()])
       if (version !== this.playbackVersion)
         return
-      this.setVisualizationEnabled()
       this.resetTimeline()
-      this.setPlaying(true)
       this.connection = new ReconnectingWebSocket(`/audio/${encodeURIComponent(nodeId)}`, {
         binaryType: 'arraybuffer',
         delays: [1_000, 2_000, 8_000, 32_000],
@@ -94,40 +77,29 @@ export class AudioStreamPlayer {
     if (closeSocket)
       connection?.stop(1000, 'Playback stopped')
 
-    const binding = this.binding
-    this.binding = null
-    binding?.spectrumMeter.detach()
+    const context = this.playback.value?.context
+    this.playback.value = null
     this.analyser = null
-
-    const context = this.context
-    this.context = null
     this.resetTimeline()
-    this.setBindingPlaying(binding, false)
     if (context && context.state !== 'closed')
       await context.close()
   }
 
-  setVisualizationEnabled(enabled = this.binding?.spectrumMeter.enabled ?? false): void {
-    const binding = this.binding
-    const context = this.context
-    if (!binding || !context)
-      return
-
-    if (!enabled || !binding.spectrumMeter.enabled) {
-      binding.spectrumMeter.detach()
-      this.analyser?.disconnect()
-      this.analyser = null
-      return
-    }
-    if (this.analyser)
+  attachSpectrum(meter: SpectrumMeter): (() => void) | undefined {
+    const context = this.playback.value?.context
+    if (!context)
       return
 
     const analyser = context.createAnalyser()
     analyser.fftSize = 256
     analyser.smoothingTimeConstant = 0.7
-    analyser.connect(context.destination)
     this.analyser = analyser
-    binding.spectrumMeter.attach(analyser)
+    meter.attach(analyser)
+    return () => {
+      meter.detach()
+      if (this.analyser === analyser)
+        this.analyser = null
+    }
   }
 
   private handleMessage(event: MessageEvent<ArrayBuffer | string>): void {
@@ -151,7 +123,7 @@ export class AudioStreamPlayer {
   }
 
   private scheduleFrame(data: ArrayBuffer): boolean {
-    const context = this.context
+    const context = this.playback.value?.context
     if (!context || data.byteLength < 11)
       return false
     const view = new DataView(data)
@@ -179,7 +151,10 @@ export class AudioStreamPlayer {
     encoded.forEach((value, index) => samples[index] = decodeMuLaw(value))
     const source = context.createBufferSource()
     source.buffer = buffer
-    source.connect(this.analyser ?? context.destination)
+    // Keep scheduled sound connected when the topology meter unmounts.
+    source.connect(context.destination)
+    if (this.analyser)
+      source.connect(this.analyser)
     source.start(Math.max(startTime, context.currentTime))
     this.lastTimestamp = timestamp
     return true
@@ -189,19 +164,6 @@ export class AudioStreamPlayer {
     this.baseTimestamp = null
     this.baseAudioTime = 0
     this.lastTimestamp = null
-  }
-
-  private setPlaying(playing: boolean): void {
-    this.setBindingPlaying(this.binding, playing)
-  }
-
-  private setBindingPlaying(binding: PlaybackBinding | null, playing: boolean): void {
-    if (!binding)
-      return
-    binding.spectrumMeter.setPlaying(playing)
-    binding.button.textContent = playing ? binding.labels.stop : binding.labels.play
-    binding.button.setAttribute('aria-label', playing ? '停止播放' : '播放音频')
-    binding.button.setAttribute('aria-pressed', String(playing))
   }
 }
 
@@ -213,14 +175,10 @@ export class SpectrumMeter {
   private readonly levelFill: HTMLElement | null
   private readonly levelPeak: HTMLElement | null
   private peak = 0
-  private readonly rootElement: HTMLElement
-  private readonly shouldEnable: () => boolean
   private readonly spectrum: HTMLElement
   private timeData: Uint8Array<ArrayBuffer> | null = null
 
-  constructor(rootElement: HTMLElement, options: { enabled?: () => boolean } = {}) {
-    this.rootElement = rootElement
-    this.shouldEnable = options.enabled ?? (() => true)
+  constructor(rootElement: HTMLElement) {
     const spectrum = rootElement.querySelector<HTMLElement>('.spectrum')
     if (!spectrum)
       throw new Error('Spectrum meter requires a .spectrum element')
@@ -231,23 +189,13 @@ export class SpectrumMeter {
     this.reset()
   }
 
-  get enabled(): boolean {
-    return this.shouldEnable()
-  }
-
   attach(analyser: AnalyserNode): void {
-    if (!this.enabled)
-      return
     this.ensureBars()
     this.analyser = analyser
     this.timeData = new Uint8Array(analyser.fftSize)
     this.freqData = new Uint8Array(analyser.frequencyBinCount)
     if (!this.frame)
       this.frame = requestAnimationFrame(this.render)
-  }
-
-  setPlaying(playing: boolean): void {
-    this.rootElement.classList.toggle('is-playing', playing)
   }
 
   detach(): void {
