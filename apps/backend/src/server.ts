@@ -24,6 +24,7 @@ import { registerAdminRoutes } from './http/admin-routes.js'
 import { registerStaticRoutes } from './http/static-routes.js'
 import { registerWebSocketRoutes } from './http/websocket-routes.js'
 import { RecordRepository } from './records/record-repository.js'
+import { StatsCache } from './records/stats-cache.js'
 import { SpotStore } from './spots/spot-store.js'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
@@ -104,6 +105,11 @@ const app = Fastify({
   bodyLimit: 16_384,
   logger: true,
 })
+const stats = recordRepository && new StatsCache(
+  resolve(repositoryRoot, 'data/stats/speech-activity.json'),
+  recordRepository,
+  error => app.log.error({ err: error }, 'Unable to refresh statistics'),
+)
 
 app.register(fastifyCookie)
 app.register(fastifyCompress)
@@ -125,6 +131,18 @@ app.get('/healthz', async () => ({
 
 app.get('/api/spots', async (_request, reply) =>
   reply.header('cache-control', 'no-store').send(recordRepository?.recentSpots() ?? []))
+
+app.get('/api/stats', async (_request, reply) => {
+  reply.header('cache-control', 'no-store')
+  if (!stats)
+    return reply.code(404).send({ message: '语音记录未启用' })
+  try {
+    return reply.send(await stats.get())
+  }
+  catch {
+    return reply.code(503).send({ message: '统计暂不可用' })
+  }
+})
 
 app.register(registerAdminRoutes, {
   adminAuth,

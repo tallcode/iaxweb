@@ -101,9 +101,9 @@ body {
 .map-header {
   grid-area: header;
   z-index: 2;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 1.5rem;
   padding: 1rem 1.25rem;
   border-bottom: 1px solid #273241;
@@ -119,7 +119,7 @@ body {
 
 .page-nav {
   display: inline-flex;
-  flex: none;
+  justify-self: center;
   gap: 0.25rem;
   padding: 0.2rem;
   border: 1px solid rgb(89 101 117 / 34%);
@@ -195,9 +195,8 @@ body {
 
 .map-shell.is-mobile {
   .map-header {
-    align-items: center;
-    flex-direction: row;
-    gap: 0.5rem;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.5rem 0.65rem;
     padding: 0.65rem 0.7rem;
   }
 
@@ -207,7 +206,8 @@ body {
   }
 
   .page-nav {
-    display: none;
+    grid-row: 2;
+    grid-column: 1 / -1;
   }
 
   .legend {

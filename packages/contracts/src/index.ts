@@ -14,6 +14,7 @@ import type {
   persistedRecordSchema,
   publicConnectionStatusSchema,
   publicNodeStatusSchema,
+  publicStatsSchema,
   publicStatusSnapshotSchema,
   recordPageSchema,
   reviewSchema,
@@ -21,6 +22,7 @@ import type {
   speakerRecognitionMeasurementsSchema,
   speakerRecognitionSchema,
   spotEventSchema,
+  statsDaySchema,
   transmitSourceSchema,
   updateUserSchema,
 } from './schemas.js'
@@ -34,6 +36,8 @@ export type PublicConnectionStatus = z.output<typeof publicConnectionStatusSchem
 export type PublicNodeStatus = z.output<typeof publicNodeStatusSchema>
 export type PublicStatusSnapshot = z.output<typeof publicStatusSnapshotSchema>
 export type SpotEvent = z.output<typeof spotEventSchema>
+export type PublicStats = z.output<typeof publicStatsSchema>
+export type StatsDay = z.output<typeof statsDaySchema>
 export type AudioState = z.output<typeof audioStateSchema>
 export type PersistedRecord = z.output<typeof persistedRecordSchema>
 export type RecordPage = z.output<typeof recordPageSchema>

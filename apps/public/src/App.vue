@@ -12,9 +12,11 @@ const statusStore = useStatusStore()
 const { aiSpotEnabled, hasInitialSnapshot, recentSpots, repeaterSummary, spotHistoryReady, statusSnapshot } = storeToRefs(statusStore)
 const route = useRoute()
 const isMobile = useMobileLayout()
+const isStatsPage = computed(() => route.name === 'stats')
+const showSpotPanel = computed(() => aiSpotEnabled.value && !isStatsPage.value)
 const readyRoutePath = ref<string>()
 const isPageReady = computed(() => readyRoutePath.value === route.fullPath)
-const isInitialAppReady = computed(() => hasInitialSnapshot.value && isPageReady.value)
+const isInitialAppReady = computed(() => (hasInitialSnapshot.value || isStatsPage.value) && isPageReady.value)
 const hasEnteredApp = ref(false)
 const headerMessage = computed(() => formatRepeaterSummary(repeaterSummary.value, isMobile.value))
 
@@ -51,7 +53,7 @@ function markPageReady(routePath: string): void {
 </script>
 
 <template>
-  <div class="map-shell" :class="{ 'is-mobile': isMobile, 'ai-spot-disabled': !aiSpotEnabled, 'app-pending': !hasEnteredApp }">
+  <div class="map-shell" :class="{ 'is-mobile': isMobile, 'ai-spot-disabled': !showSpotPanel, 'app-pending': !hasEnteredApp }">
     <header class="map-header">
       <p aria-live="polite" :aria-label="headerMessage">
         {{ headerMessage }}
@@ -62,6 +64,9 @@ function markPageReady(routePath: string): void {
         </RouterLink>
         <RouterLink to="/map">
           地图
+        </RouterLink>
+        <RouterLink to="/stats">
+          统计
         </RouterLink>
       </nav>
       <div class="legend">
@@ -75,7 +80,7 @@ function markPageReady(routePath: string): void {
     <RouterView v-slot="{ Component, route: pageRoute }">
       <component :is="Component" :key="pageRoute.fullPath" @page-ready="markPageReady(pageRoute.fullPath)" />
     </RouterView>
-    <SpotPanel v-if="aiSpotEnabled" :history-ready="spotHistoryReady" :spots="recentSpots" />
+    <SpotPanel v-if="showSpotPanel" :history-ready="spotHistoryReady" :spots="recentSpots" />
     <footer class="site-footer">
       <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">浙ICP备20025327号-6</a>
     </footer>

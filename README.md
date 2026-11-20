@@ -141,6 +141,7 @@ npm run hash-admin-password -- 'replace-with-your-password'
 | `data/rec/` | WAV 录音，按 UTC 日期分目录 |
 | `data/users.json` | 普通用户账号 |
 | `data/sessions.json` | 登录会话 |
+| `data/stats/speech-activity.json` | 前台语音活动统计缓存，访问时按北京时间刷新 |
 | `data/embedding-backfill/` | 声纹补算进度及备份 |
 
 ### 声纹模型

@@ -5,5 +5,6 @@ export const router = createRouter({
   routes: [
     { alias: '/', component: () => import('./pages/TopologyPage.vue'), path: '/topology' },
     { component: () => import('./pages/MapPage.vue'), path: '/map' },
+    { component: () => import('./pages/StatsPage.vue'), name: 'stats', path: '/stats' },
   ],
 })

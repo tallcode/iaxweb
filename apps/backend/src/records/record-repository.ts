@@ -22,6 +22,13 @@ export interface StoredSpot {
   node: string
 }
 
+export interface SpeechHour {
+  count: number
+  date: string
+  hour: number
+  voicedMs: number
+}
+
 export interface ManualReviewPatch {
   calleeCallsign?: string | null
   callsign?: string | null
@@ -442,6 +449,24 @@ export class RecordRepository {
       LIMIT ? OFFSET ?
     `).all(...parameters, pageSize, (page - 1) * pageSize)
     return { items: rows.map(mapRow), page, pageSize, total }
+  }
+
+  speechHours(startAt: string, endAt: string): SpeechHour[] {
+    return this.database.prepare(`
+      SELECT
+        strftime('%Y-%m-%d', captured_at, '+8 hours') AS date,
+        CAST(strftime('%H', captured_at, '+8 hours') AS INTEGER) AS hour,
+        COUNT(*) AS count,
+        SUM(voiced_ms) AS voiced_ms
+      FROM ai_segments
+      WHERE captured_at >= ? AND captured_at < ?
+      GROUP BY date, hour
+    `).all(startAt, endAt).map(row => ({
+      count: requiredNumber(row.count),
+      date: requiredString(row.date),
+      hour: requiredNumber(row.hour),
+      voicedMs: requiredNumber(row.voiced_ms),
+    }))
   }
 
   recentSpots(limit: number = 30): StoredSpot[] {

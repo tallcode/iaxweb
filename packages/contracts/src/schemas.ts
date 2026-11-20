@@ -39,6 +39,16 @@ export const spotEventSchema = z.object({
   type: z.literal('spot').optional(),
 })
 export const spotHistorySchema = z.array(spotEventSchema)
+export const statsDaySchema = z.object({
+  date: z.iso.date(),
+  hourlyCounts: z.array(z.number().int().nonnegative()).length(24),
+  voicedMs: z.number().nonnegative(),
+})
+export const publicStatsSchema = z.object({
+  history: z.object({ days: z.array(statsDaySchema).length(30), updatedAt: timestamp }),
+  today: z.object({ day: statsDaySchema, updatedAt: timestamp }),
+  stale: z.boolean(),
+})
 export const audioStateSchema = z.object({
   type: z.literal('state'),
   online: z.boolean(),
