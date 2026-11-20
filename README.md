@@ -82,7 +82,7 @@ Vite 开发服务器已配置后端代理。环境变量和节点配置修改后
 
 ### 地图覆盖预测
 
-地图页可分别开启 BR5AI 和 BR5BB 的预测覆盖图层，按需从 `data/coverage/` 加载对应文件。两次仿真的最大范围均设为 300 km。BR5AI 使用 145.4 MHz、25 W、天线离地 400 m，BR5BB 使用 145.48 MHz、10 W、天线离地 526 m。更新或增加中继图层时，先从 [Meshtastic Site Planner](https://site.meshtastic.org/) 的站点弹窗导出 GeoJSON，再运行以下命令。将 `BR5AI` 替换成对应中继名即可生成同名文件。
+地图页可分别开启 BR5AI、BR5BB 和 BR5AO 的预测覆盖图层，按需从 `data/coverage/` 加载对应文件。仿真半径均设为 300 km。BR5AI 使用 145.4 MHz、25 W、天线离地 400 m，BR5BB 使用 145.48 MHz、10 W、天线离地 526 m，BR5AO 使用 145.22 MHz、25 W、天线离地 70 m。更新或增加中继图层时，先从 [Meshtastic Site Planner](https://site.meshtastic.org/) 的站点弹窗导出 GeoJSON，再运行以下命令。将 `BR5AI` 替换成对应中继名即可生成同名文件。
 
 ```bash
 node scripts/pack-coverage.mjs BR5AI /path/to/coverage.geojson

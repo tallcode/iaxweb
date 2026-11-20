@@ -34,7 +34,7 @@ const markerLabels: Record<CountyState, string> = {
   remote: '远程发射',
   system: '系统发射',
 }
-const coverageCallsigns = ['BR5AI', 'BR5BB'] as const
+const coverageCallsigns = ['BR5AI', 'BR5BB', 'BR5AO'] as const
 type CoverageCallsign = (typeof coverageCallsigns)[number]
 interface CoverageBand { dbm: number, fillOpacity: number, opacity: number, path: string }
 type CoverageLayer = { state: 'loading' | 'failed' } | { state: 'ready', bands: CoverageBand[] }
@@ -150,14 +150,16 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
     </svg>
     <div class="map-coverage-panel">
       <div class="map-coverage-buttons" role="group" aria-label="中继覆盖预测">
+        <span class="map-coverage-label" aria-hidden="true">覆盖预测</span>
         <button
           v-for="callsign in coverageCallsigns"
           :key="callsign"
           type="button"
+          :aria-label="`${callsign} 覆盖预测`"
           :aria-pressed="activeCoverage.has(callsign)"
           @click="toggleCoverage(callsign)"
         >
-          {{ callsign }} 覆盖预测
+          {{ callsign }}
         </button>
       </div>
       <div v-if="coverageScale" class="map-coverage-scale" aria-label="预测信号强度">
