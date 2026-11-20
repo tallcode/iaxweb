@@ -60,11 +60,15 @@ ALLMON3_BASE_URL=http://allmon.example/allmon3/
   "1001": {
     "NAME": "示例中继节点",
     "TYPE": "REPEATER",
+    "GB": "156330106",
+    "LOCATION": { "lat": 30.25, "lon": 120.1 },
     "LINK": ["1000"],
     "AUDIO": true
   }
 }
 ```
+
+中继的 `LOCATION` 可选，填写 WGS84 经纬度（`lat` 为纬度，`lon` 为经度）。地图优先使用经纬度定位，未配置 `LOCATION` 时按 `GB` 使用县区内部中心。
 
 启动开发服务：
 
@@ -82,7 +86,16 @@ Vite 开发服务器已配置后端代理。环境变量和节点配置修改后
 
 ### 地图覆盖预测
 
-地图页可分别开启 BR5AI、BR5BB 和 BR5AO 的预测覆盖图层，按需从 `data/coverage/` 加载对应文件。仿真半径均设为 300 km。BR5AI 使用 145.4 MHz、25 W、天线离地 400 m，BR5BB 使用 145.48 MHz、10 W、天线离地 526 m，BR5AO 使用 145.22 MHz、25 W、天线离地 70 m。更新或增加中继图层时，先从 [Meshtastic Site Planner](https://site.meshtastic.org/) 的站点弹窗导出 GeoJSON，再运行以下命令。将 `BR5AI` 替换成对应中继名即可生成同名文件。
+地图页可分别开启 BR5AI、BR5BB、BR5AF 和 BR5AO 的预测覆盖图层，按需从 `data/coverage/` 加载对应文件。仿真半径均设为 300 km。
+
+| 中继 | 频率 | 功率 | 天线离地高度 |
+| --- | --- | --- | --- |
+| BR5AI | 145.4 MHz | 25 W | 400 m |
+| BR5BB | 145.48 MHz | 10 W | 526 m |
+| BR5AF | 145.52 MHz | 25 W | 100 m |
+| BR5AO | 145.22 MHz | 25 W | 70 m |
+
+更新或增加中继图层时，先从 [Meshtastic Site Planner](https://site.meshtastic.org/) 的站点弹窗导出 GeoJSON，再运行以下命令。将 `BR5AI` 替换成对应中继名即可生成同名文件。
 
 ```bash
 node scripts/pack-coverage.mjs BR5AI /path/to/coverage.geojson

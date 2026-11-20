@@ -1,4 +1,5 @@
 import type { NodeDefinitions } from './types.js'
+import { nodeLocationSchema } from '@iaxweb/contracts'
 
 export function parseNodeDefinitions(value: unknown): NodeDefinitions {
   if (!isRecord(value))
@@ -20,6 +21,9 @@ export function parseNodeDefinitions(value: unknown): NodeDefinitions {
     const gb = rawDefinition.GB
     if (gb !== undefined && (typeof gb !== 'string' || !/^156\d{6}$/.test(gb)))
       throw new Error(`config/nodes.json node ${node} has an invalid GB`)
+    const location = nodeLocationSchema.optional().safeParse(rawDefinition.LOCATION)
+    if (!location.success)
+      throw new Error(`config/nodes.json node ${node} must use a valid LOCATION with numeric lat and lon`)
     const name = rawDefinition.NAME
     if (name !== undefined && typeof name !== 'string')
       throw new Error(`config/nodes.json node ${node} has an invalid NAME`)
@@ -39,6 +43,7 @@ export function parseNodeDefinitions(value: unknown): NodeDefinitions {
       ...(link ? { LINK: [...link] } : {}),
       ...(freq ? { FREQ: freq } : {}),
       ...(gb ? { GB: gb } : {}),
+      ...(location.data ? { LOCATION: location.data } : {}),
       ...(name ? { NAME: name } : {}),
     }
   }

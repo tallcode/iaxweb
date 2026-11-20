@@ -6,7 +6,7 @@ import { computed, onMounted, shallowReactive } from 'vue'
 import zhejiangUrl from '../../assets/zhejiang.geojson?url'
 import { useCountyMap } from '../composables/use-county-map'
 import { useMapInteraction } from '../composables/use-map-interaction'
-import { mapStates } from '../services/map-county-status'
+import { mapRepeaterMarkers } from '../services/map-county-status'
 import { geometryPath, MAP_HEIGHT, MAP_WIDTH, SIX_DIGIT_CELL_HEIGHT, SIX_DIGIT_LABEL_MIN_HEIGHT_PX, SIX_DIGIT_LATITUDE_STEP, SIX_DIGIT_LONGITUDE_STEP } from '../services/map-geometry'
 import { createGridLabels, createGridPaths, createVisibleSixDigitGridLabels } from '../services/map-grid'
 import { useStatusStore } from '../stores/status-store'
@@ -15,17 +15,13 @@ const emit = defineEmits<{ pageReady: [] }>()
 const { countyShapes, mapLoadState, load } = useCountyMap(zhejiangUrl)
 const { canvasSize, renderedSize, isDragging, mapElement, viewport, canvasOffset, viewportViewBox, handleMapWheel, handlePointerDown, handlePointerMove, handlePointerEnd } = useMapInteraction()
 const { statusSnapshot } = storeToRefs(useStatusStore())
-const states = computed(() => mapStates(statusSnapshot.value))
 const gridContext = computed(() => ({ size: canvasSize.value, offset: canvasOffset.value, viewport: viewport.value }))
 const showSixDigitGridLabels = computed(() => SIX_DIGIT_CELL_HEIGHT * renderedSize.value.height / (canvasSize.value.height / viewport.value.zoom) > SIX_DIGIT_LABEL_MIN_HEIGHT_PX)
 const visibleSixDigitGridLabels = computed(() => showSixDigitGridLabels.value ? createVisibleSixDigitGridLabels(gridContext.value) : [])
 const sixDigitGridPaths = computed(() => createGridPaths(gridContext.value, SIX_DIGIT_LONGITUDE_STEP, SIX_DIGIT_LATITUDE_STEP))
 const gridPaths = computed(() => createGridPaths(gridContext.value))
 const gridLabels = computed(() => createGridLabels(gridContext.value))
-const repeaterMarkers = computed(() => countyShapes.value.flatMap(({ center, gb, name }) => {
-  const state = states.value.get(gb)
-  return center && state ? [{ center, gb, name, state }] : []
-}))
+const repeaterMarkers = computed(() => mapRepeaterMarkers(statusSnapshot.value, countyShapes.value))
 const markerRadius = computed(() => 6.5 * canvasSize.value.width / (renderedSize.value.width * viewport.value.zoom))
 const markerLabels: Record<CountyState, string> = {
   local: '本地发射',
@@ -34,7 +30,7 @@ const markerLabels: Record<CountyState, string> = {
   remote: '远程发射',
   system: '系统发射',
 }
-const coverageCallsigns = ['BR5AI', 'BR5BB', 'BR5AO'] as const
+const coverageCallsigns = ['BR5AI', 'BR5BB', 'BR5AF', 'BR5AO'] as const
 type CoverageCallsign = (typeof coverageCallsigns)[number]
 interface CoverageBand { dbm: number, fillOpacity: number, opacity: number, path: string }
 type CoverageLayer = { state: 'loading' | 'failed' } | { state: 'ready', bands: CoverageBand[] }
@@ -137,7 +133,7 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
       <g aria-label="中继状态">
         <circle
           v-for="marker in repeaterMarkers"
-          :key="marker.gb"
+          :key="marker.key"
           class="repeater-marker"
           :class="marker.state"
           :cx="marker.center[0]"

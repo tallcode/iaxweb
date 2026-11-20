@@ -11,6 +11,7 @@ export interface NodeDefinition {
   FREQ?: string
   GB?: string
   LINK?: string[]
+  LOCATION?: PublicNodeStatus['LOCATION']
   NAME?: string
   TYPE: NodeType
 }
@@ -28,6 +29,7 @@ export interface NodeStatusFields {
   GB: string
   LAST_TX_AT: string | null
   LINK: string[]
+  LOCATION: PublicNodeStatus['LOCATION']
   ME: number
   NAME: string
   ONLINE: boolean

@@ -12,11 +12,14 @@ export function buildSnapshot(
   const snapshot: StatusSnapshot = {}
   const nodes = [...expectedNodes].sort((left, right) => Number(left) - Number(right))
   for (const node of nodes) {
+    const definition = definitions[node]
     const detail = details.get(node)
     snapshot[node] = {
-      ...defaultNodeStatus(node, definitions[node]),
+      ...defaultNodeStatus(node, definition),
       ...(detail ?? {}),
-      ...definitionFields(definitions[node]),
+      ...definitionFields(definition),
+      // Node coordinates come from the local configuration.
+      LOCATION: definition?.LOCATION,
       ...(overrides[node] ? { DESC: overrides[node] } : {}),
     }
   }
@@ -72,6 +75,8 @@ function publicNodeStatus(status: NodeStatus, listeners?: number): PublicNodeSta
     publicStatus.LINK = status.LINK
   if (status.AUDIO === true)
     publicStatus.LISTENERS = listeners ?? 0
+  if (status.LOCATION !== undefined)
+    publicStatus.LOCATION = status.LOCATION
   if (status.NAME !== undefined)
     publicStatus.NAME = status.NAME
   if (status.ONLINE !== undefined)

@@ -56,6 +56,10 @@ export const audioStateSchema = z.object({
   listeners: z.number().int().nonnegative().optional(),
 })
 export const publicConnectionStatusSchema = z.object({ CSTATE: z.literal('ESTABLISHED') })
+export const nodeLocationSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+})
 export const publicNodeStatusSchema = z.object({
   AI: z.boolean().optional(),
   AUDIO: z.boolean().optional(),
@@ -66,6 +70,7 @@ export const publicNodeStatusSchema = z.object({
   LAST_TX_AT: timestamp.nullable().optional(),
   LINK: z.array(z.string()).optional(),
   LISTENERS: z.number().int().nonnegative().optional(),
+  LOCATION: nodeLocationSchema.optional(),
   NAME: z.string().optional(),
   ONLINE: z.boolean().optional(),
   TX_SOURCE: transmitSourceSchema.optional(),
