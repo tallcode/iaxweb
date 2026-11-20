@@ -40,13 +40,13 @@ const view = computed(() => {
     })),
     duration: formatDuration(recentDays.reduce((total, day) => total + day.voicedMs, 0)),
     heatmap: heatmap.map((row, weekday) => row.map(count => count / weekdayCounts[weekday]!)),
-    historyRange: `${shortDate(history.days[0]!.date)}–${shortDate(history.days.at(-1)!.date)}`,
+    historyRange: `${shortDate(history.days[0]!.date)} – ${shortDate(history.days.at(-1)!.date)}`,
     hourly: hourlyCounts.map((count, hour) => ({
       label: `${hourLabel(hour)}–${hourLabel(hour + 1)}`,
       tick: hour % 6 === 0 || hour === 23 ? hourLabel(hour) : '',
       value: count / history.days.length,
     })),
-    recentRange: `${shortDate(recentDays[0]!.date)}–${shortDate(today.day.date)}`,
+    recentRange: `${shortDate(recentDays[0]!.date)} – ${shortDate(today.day.date)}`,
     todayCutoff: timeFormat.format(new Date(today.updatedAt)),
   }
 })
