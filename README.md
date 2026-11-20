@@ -80,6 +80,18 @@ npm run dev
 
 Vite 开发服务器已配置后端代理。环境变量和节点配置修改后需重启服务。
 
+### 地图覆盖预测
+
+地图页按需加载 `data/coverage/BR5AI.geojson.gz`。BR5AI 当前图层来自 145.4 MHz、25 W、天线离地 400 m、最大仿真范围 300 km 的仿真。更新或增加中继图层时，先从 [Meshtastic Site Planner](https://site.meshtastic.org/) 的站点弹窗导出 GeoJSON，再运行以下命令。将 `BR5AI` 替换成对应中继名即可生成同名文件。
+
+```bash
+node scripts/pack-coverage.mjs BR5AI /path/to/coverage.geojson
+```
+
+脚本保留每档的 dBm 阈值、原始颜色、多边形和孔洞。经纬度舍入到小数点后四位，并清理重复的连续点和线段上的共线中间点。舍入后会塌缩或反转的环保留原精度。最后将紧凑 JSON 用 gzip 最高压缩级别打包，并原子替换 `data/coverage/<中继名>.geojson.gz`。保留原始导出，以便重做。
+
+覆盖文件随部署主机的 `data/` 目录管理，由 Docker Compose 挂载到容器。`/api/coverage/BR5AI.geojson` 直接发送磁盘上的 gzip 字节，客户端须在 `Accept-Encoding` 声明接受 gzip，否则返回 `406`。响应缓存有效期为 30 天。同名文件替换后，已缓存的客户端可能继续使用旧版本直至过期。
+
 ## 可选功能配置
 
 ### AI 识别

@@ -25,6 +25,65 @@
   cursor: grabbing;
 }
 
+.map-coverage-layer {
+  fill: var(--status-local);
+  pointer-events: none;
+}
+
+.map-coverage-panel {
+  position: absolute;
+  inset: 0.75rem auto auto 0.75rem;
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
+}
+
+.map-coverage-panel button,
+.map-coverage-panel p,
+.map-coverage-scale {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #3a4a5b;
+  border-radius: 0.4rem;
+  color: #dfe9f3;
+  background: rgb(16 24 35 / 94%);
+}
+
+.map-coverage-panel button {
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.map-coverage-panel button[aria-pressed='true'] {
+  border-color: #b886a2;
+  background: #372539;
+}
+
+.map-coverage-panel p,
+.map-coverage-scale {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.map-coverage-scale {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-coverage-swatches {
+  display: flex;
+  width: 4.5rem;
+  height: 0.4rem;
+  overflow: hidden;
+  border-radius: 0.2rem;
+}
+
+.map-coverage-swatches i {
+  flex: 1;
+  background: var(--status-local);
+}
+
 .map-center-debug {
   position: absolute;
   z-index: 10;
@@ -72,55 +131,54 @@
 .county-shape {
   fill: #35404d;
   fill-opacity: 0.86;
+}
+
+.county-boundary {
+  fill: none;
   stroke: #687789;
   stroke-width: 1.35;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.has-coverage .county-boundary {
+  stroke: #e4edf6;
+  stroke-width: 1.1;
+  stroke-opacity: 0.85;
+}
+
+.has-coverage .county-boundaries {
+  filter: drop-shadow(0 0 1px #0b1017);
+}
+
+.repeater-marker {
+  --marker-color: var(--status-offline);
+
+  fill: var(--marker-color);
+  stroke: var(--marker-color);
+  stroke-opacity: 0.4;
+  stroke-width: 4;
+  filter: drop-shadow(0 1px 1px rgb(66 39 8 / 75%));
   vector-effect: non-scaling-stroke;
   transition:
     fill 160ms ease,
     stroke 160ms ease;
 }
 
-.county-shape.online {
-  fill: #215442;
-  stroke: #4bc88b;
+.repeater-marker.online {
+  --marker-color: var(--status-online);
 }
 
-.county-shape.tx-local {
-  fill: #614316;
-  stroke: #ffb44a;
+.repeater-marker.local {
+  --marker-color: var(--status-local);
 }
 
-.county-shape.tx-remote {
-  fill: #163c64;
-  stroke: #62a8ff;
+.repeater-marker.remote {
+  --marker-color: var(--status-remote);
 }
 
-.county-shape.tx-system {
-  fill: #44285f;
-  stroke: #ad78df;
-}
-
-.county-outline {
-  fill: none;
-  stroke-width: 2.2;
-  vector-effect: non-scaling-stroke;
-  pointer-events: none;
-}
-
-.county-outline.online {
-  stroke: #4bc88b;
-}
-
-.county-outline.tx-local {
-  stroke: #ffb44a;
-}
-
-.county-outline.tx-remote {
-  stroke: #62a8ff;
-}
-
-.county-outline.tx-system {
-  stroke: #ad78df;
+.repeater-marker.system {
+  --marker-color: var(--status-system);
 }
 
 .county-shape:hover {

@@ -2,6 +2,11 @@
 
 :root {
   --app-height: 100vh;
+  --status-online: #4bc88b;
+  --status-offline: #6c7787;
+  --status-local: #ffb44a;
+  --status-remote: #62a8ff;
+  --status-system: #ad78df;
 
   color-scheme: dark;
   font-family:
@@ -174,23 +179,23 @@ body {
 }
 
 .dot.online {
-  background: #4bc88b;
+  background: var(--status-online);
 }
 
 .dot.offline {
-  background: #6c7787;
+  background: var(--status-offline);
 }
 
 .dot.local {
-  background: #ffb44a;
+  background: var(--status-local);
 }
 
 .dot.remote {
-  background: #62a8ff;
+  background: var(--status-remote);
 }
 
 .dot.system {
-  background: #ad78df;
+  background: var(--status-system);
 }
 
 .map-shell.is-mobile {

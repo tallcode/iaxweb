@@ -2,7 +2,7 @@ import type { PublicStatusSnapshot } from '@iaxweb/contracts'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { isFaviconTransmission } from '../src/composables/use-transmission-favicon'
-import { countyState, mapStates } from '../src/services/map-county-status'
+import { mapStates } from '../src/services/map-county-status'
 import { MAP_MAX_ZOOM, mapViewBox, panMapViewport, zoomMapViewport, zoomMapViewportTowardCenter } from '../src/services/map-viewport'
 import { ReconnectingWebSocket } from '../src/services/reconnecting-websocket'
 import { formatRepeaterSummary } from '../src/services/status-presentation'
@@ -189,7 +189,7 @@ describe('transmission favicon', () => {
 })
 
 describe('map county states', () => {
-  it('uses city online state while keeping transmission state on its county', () => {
+  it('marks only repeater counties and gives transmitting repeaters priority', () => {
     const states = mapStates({
       1801: { GB: '156330481', ONLINE: true, TX_SOURCE: 'remote', TYPE: 'REPEATER' },
       1802: { GB: '156330424', ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
@@ -197,13 +197,14 @@ describe('map county states', () => {
       1901: { GB: '156330106', ONLINE: true, TX_SOURCE: null, TYPE: 'REPEATER' },
       1902: { GB: '156330203', ONLINE: false, TX_SOURCE: 'system', TYPE: 'REPEATER' },
       1903: { GB: '156330481', ONLINE: true, TX_SOURCE: 'local', TYPE: 'HUB' },
+      1904: { GB: '156330424', ONLINE: true, TX_SOURCE: null, TYPE: 'REPEATER' },
     })
 
-    expect(countyState('156330481', states)).toBe('tx-remote')
-    expect(countyState('156330424', states)).toBe('tx-local')
-    expect(countyState('156330482', states)).toBe('tx-system')
-    expect(countyState('156330499', states)).toBe('online')
-    expect(countyState('156330106', states)).toBe('online')
-    expect(countyState('156330203', states)).toBe('offline')
+    expect(states.get('156330481')).toBe('remote')
+    expect(states.get('156330424')).toBe('local')
+    expect(states.get('156330482')).toBe('system')
+    expect(states.has('156330499')).toBe(false)
+    expect(states.get('156330106')).toBe('online')
+    expect(states.get('156330203')).toBe('offline')
   })
 })

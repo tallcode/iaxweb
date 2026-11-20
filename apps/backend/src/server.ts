@@ -21,6 +21,7 @@ import { loadAiConfig, loadConfig } from './config.js'
 import { createConnectionOptions, NatsAudioService } from './gateway/nats-audio.js'
 import { startWebSocketHeartbeat } from './gateway/websocket-heartbeat.js'
 import { registerAdminRoutes } from './http/admin-routes.js'
+import { registerCoverageRoutes } from './http/coverage-routes.js'
 import { registerStaticRoutes } from './http/static-routes.js'
 import { registerWebSocketRoutes } from './http/websocket-routes.js'
 import { RecordRepository } from './records/record-repository.js'
@@ -143,6 +144,8 @@ app.get('/api/stats', async (_request, reply) => {
     return reply.code(503).send({ message: '统计暂不可用' })
   }
 })
+
+app.register(registerCoverageRoutes, { directory: resolve(repositoryRoot, 'data/coverage') })
 
 app.register(registerAdminRoutes, {
   adminAuth,
