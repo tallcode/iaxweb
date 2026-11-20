@@ -2,7 +2,7 @@
 import type { CountyState } from '../services/map-county-status'
 import type { Geometry } from '../services/map-geometry'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, shallowReactive } from 'vue'
+import { computed, onMounted, ref, shallowReactive, watch } from 'vue'
 import zhejiangUrl from '../../assets/zhejiang.geojson?url'
 import { useCountyMap } from '../composables/use-county-map'
 import { useMapInteraction } from '../composables/use-map-interaction'
@@ -31,6 +31,8 @@ const markerLabels: Record<CountyState, string> = {
   system: '系统发射',
 }
 const coverageCallsigns = ['BR5AI', 'BR5BB', 'BR5AF', 'BR5AO'] as const
+const COVERAGE_LOADING_DELAY_MS = 300
+const COVERAGE_LOADING_MINIMUM_MS = 1_000
 type CoverageCallsign = (typeof coverageCallsigns)[number]
 interface CoverageBand { dbm: number, fillOpacity: number, opacity: number, path: string }
 type CoverageLayer = { state: 'loading' | 'failed' } | { state: 'ready', bands: CoverageBand[] }
@@ -41,14 +43,43 @@ const visibleCoverage = computed(() => coverageCallsigns.flatMap((callsign) => {
   const layer = coverageLayers[callsign]
   return activeCoverage.has(callsign) && layer?.state === 'ready' ? [{ callsign, bands: layer.bands }] : []
 }))
-const pendingCoverage = computed(() => coverageCallsigns.filter(callsign =>
-  activeCoverage.has(callsign) && coverageLayers[callsign]?.state !== 'ready'))
+const coverageLoadingNotices = coverageCallsigns.map(callsign => ({
+  callsign,
+  visible: useCoverageLoadingNotice(() => activeCoverage.has(callsign) && coverageLayers[callsign]?.state === 'loading'),
+}))
+const coverageNotices = computed(() => coverageLoadingNotices.flatMap(({ callsign, visible }) => {
+  if (visible.value)
+    return [{ callsign, message: '正在加载覆盖图层…' }]
+  if (activeCoverage.has(callsign) && coverageLayers[callsign]?.state === 'failed')
+    return [{ callsign, message: '覆盖图层加载失败' }]
+  return []
+}))
 const coverageScale = computed(() => visibleCoverage.value[0]?.bands)
 
 onMounted(async () => {
   await load()
   emit('pageReady')
 })
+
+function useCoverageLoadingNotice(isLoading: () => boolean) {
+  const visible = ref(false)
+  let shownAt = 0
+
+  watch(isLoading, (loading, _, onCleanup) => {
+    if (loading === visible.value)
+      return
+    const delay = loading
+      ? COVERAGE_LOADING_DELAY_MS
+      : Math.max(0, Math.ceil(shownAt + COVERAGE_LOADING_MINIMUM_MS - performance.now()))
+    const timer = setTimeout(() => {
+      if (loading)
+        shownAt = performance.now()
+      visible.value = loading
+    }, delay)
+    onCleanup(() => clearTimeout(timer))
+  })
+  return visible
+}
 
 async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
   if (activeCoverage.delete(callsign))
@@ -165,8 +196,8 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
         </div>
         <span>{{ coverageScale.at(-1)?.dbm }} dBm</span>
       </div>
-      <p v-for="callsign in pendingCoverage" :key="callsign" role="status">
-        {{ activeCoverage.size > 1 ? `${callsign} · ` : '' }}{{ coverageLayers[callsign]?.state === 'failed' ? '覆盖图层加载失败' : '正在加载覆盖图层…' }}
+      <p v-for="{ callsign, message } in coverageNotices" :key="callsign" role="status">
+        {{ activeCoverage.size > 1 || !activeCoverage.has(callsign) ? `${callsign} · ` : '' }}{{ message }}
       </p>
     </div>
   </main>
