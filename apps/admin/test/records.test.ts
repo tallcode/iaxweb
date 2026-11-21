@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import type { AdminRecord, RecordPage } from '@iaxweb/contracts'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { adminSession } from '../src/admin-session'
+import RecordPagination from '../src/components/records/RecordPagination.vue'
+
+enableAutoUnmount(afterEach)
 
 const replace = vi.fn()
 
@@ -408,7 +411,7 @@ describe('record callsign editing', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('共 1 条记录')
-    expect(wrapper.get('nav').classes()).toEqual(expect.arrayContaining(['sticky', 'bottom-0']))
+    expect(wrapper.getComponent(RecordPagination).classes()).toEqual(expect.arrayContaining(['sticky', 'bottom-0']))
     const callsign = wrapper.findAll('button').find(button => button.text() === 'BG5AAA')
     expect(callsign?.classes()).toContain('text-slate-100')
 

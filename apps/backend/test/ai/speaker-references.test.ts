@@ -15,14 +15,14 @@ import { RecordingStore } from '../../src/records/recording-store.js'
 
 function speechLikeAudio(): Int16Array {
   let state = 123
-  const noise = Float32Array.from({ length: 16031 }, () => {
+  let previous = 0
+  // Smooth broadband audio without the spectral notches of a boxcar filter;
+  // this fixture must pass quality checks so the test reaches model loading.
+  return Int16Array.from({ length: 16000 }, () => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0
-    return state / 0x100000000 - 0.5
-  })
-  return Int16Array.from({ length: 16000 }, (_, i) => {
-    let sum = 0
-    for (let j = 0; j < 32; j++) sum += noise[i + j]!
-    return Math.round(sum / 32 * 16384)
+    const sample = state / 0x100000000 - 0.5
+    previous += 0.1 * (sample - previous)
+    return Math.round(previous * 16384)
   })
 }
 

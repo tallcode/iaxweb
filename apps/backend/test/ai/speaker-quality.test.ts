@@ -20,13 +20,17 @@ function noise(length: number): Float32Array {
 }
 
 function audioWithEdgeTones(length: number): Float32Array {
-  const source = noise(length + 31)
+  // A one-pole low-pass has no comb-filter notches that can look like a
+  // narrowband interferer in the local peak/background measurement.
+  let previous = 0
+  const interior = noise(length).map((sample) => {
+    previous += 0.1 * (sample - previous)
+    return previous
+  })
   return Float32Array.from({ length }, (_, i) => {
     if (i < 4000 || i >= length - 4000)
       return 0.3 * Math.sin(2 * Math.PI * 610 * i / 8000)
-    let sum = 0
-    for (let j = 0; j < 32; j++) sum += source[i + j]!
-    return sum / 32
+    return interior[i]!
   })
 }
 
