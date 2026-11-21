@@ -303,6 +303,7 @@ test('persists ASR and later LLM results in one row', () => {
     calleeCallsign: null,
     callsign: null,
     callsignAlgorithm: null,
+    signaling: null,
     capturedAt: segment.timestamp,
     corrected: segment.corrected,
     createdAt: repository.find(segment.id)?.createdAt,

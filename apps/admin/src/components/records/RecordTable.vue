@@ -39,7 +39,7 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
           </td><td class="whitespace-nowrap px-4 py-4">
             {{ (record.durationMs / 1_000).toFixed(1) }}s
           </td><td class="px-4 py-4">
-            <RecognitionEditor :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="hasActiveEditor || isSaving(record.id) || isMutating" :save="value => saveRecognition(record, value)" :request-edit="() => acquireEditor(record, 'recognition', 'table')" @editing="editing => !editing && finishEditing(record, 'recognition', 'table')" />
+            <RecognitionEditor :signals="record.signaling" :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="hasActiveEditor || isSaving(record.id) || isMutating" :save="value => saveRecognition(record, value)" :request-edit="() => acquireEditor(record, 'recognition', 'table')" @editing="editing => !editing && finishEditing(record, 'recognition', 'table')" />
           </td><td class="hidden px-4 py-3 min-[1200px]:table-cell">
             <RecordCallsign :record="record" role="callee" :editing="isEditingCallsign(record, 'callee', 'table')" :disabled="hasActiveEditor || !canEditRecord(record) || isMutating" :saving="isSaving(record.id)" :save="value => saveCallsign(record, 'callee', value)" @begin="acquireEditor(record, 'callee', 'table')" @close="finishEditing(record, 'callee', 'table')" />
           </td><td class="px-4 py-3">

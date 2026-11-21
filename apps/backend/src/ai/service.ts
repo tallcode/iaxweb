@@ -8,6 +8,7 @@ import type { ClosedSegment, DiscardReason } from './segmenter.js'
 import type { SpeakerReferenceService } from './speaker-references.js'
 import { randomUUID } from 'node:crypto'
 import { RecordingStore } from '../records/recording-store.js'
+import { SignalingService } from '../signaling/service.js'
 import { AsrClient } from './asr-client.js'
 import { AsrContextFiles, logTimestamp } from './asr-context-files.js'
 import { correctExplanationText } from './corrected-transcript.js'
@@ -45,6 +46,7 @@ export class AiService {
   private readonly onSpot: ((spot: SpotEvent) => void) | undefined
   private readonly repository: RecognitionRepository | undefined
   private readonly recordings: RecordingStore | undefined
+  private readonly signaling: SignalingService | undefined
   private readonly speakerReferences: AiServiceOptions['speakerReferences']
   private readonly abort = new AbortController()
   private readonly nodes = new Map<string, NodeAiRuntime>()
@@ -57,6 +59,7 @@ export class AiService {
     if (config.persistenceEnabled && !options.repository)
       throw new Error('AI persistence requires an injected recognition repository')
     this.repository = options.repository
+    this.signaling = options.repository?.updateSignaling ? new SignalingService() : undefined
     this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
     this.speakerReferences = config.llm.stage2Enabled && config.llm.enabled && this.recordings ? options.speakerReferences : undefined
     this.onSpot = options.onSpot
@@ -182,6 +185,7 @@ export class AiService {
       return
     this.stopped = true
     this.abort.abort()
+    this.signaling?.stop()
     for (const runtime of this.nodes.values())
       runtime.queue.clear()
   }
@@ -206,6 +210,7 @@ export class AiService {
     const shortId = record.id.slice(0, 8)
     const pcm = decodeMuLaw(concatenate(segment.payloads))
     const wav = encodeWav(pcm)
+    const signaling = this.signaling?.decode(pcm)
     const speakerReferences = this.speakerReferences
     const liveAbort = speakerReferences && new AbortController()
     let live: ReturnType<SpeakerReferenceService['startLiveRecognition']> | undefined
@@ -236,6 +241,16 @@ export class AiService {
         if (this.repository && this.recordings) {
           try {
             this.repository.insert(nodeId, record)
+            void signaling?.then((signals) => {
+              if (signals === null || this.stopped)
+                return
+              try {
+                this.repository?.updateSignaling?.(record.id, signals)
+              }
+              catch (error) {
+                console.warn(`${logTimestamp()} [${nodeId}]: 信令保存失败 ${shortId}: ${errorMessage(error)}`)
+              }
+            })
             void live?.voiceprint.then((voiceprint) => {
               if (voiceprint && !this.stopped)
                 speakerReferences?.cacheQueryVoiceprint(record.id, voiceprint)

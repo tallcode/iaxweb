@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import type { RadioSignal } from '@iaxweb/contracts'
 import { MAX_RECOGNITION_LENGTH } from '@iaxweb/contracts'
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import SignalingIndicator from './SignalingIndicator.vue'
 import TextDiff from './TextDiff.vue'
 
 const props = defineProps<{
+  signals?: readonly RadioSignal[] | null | undefined
   original: string
   manual: string | null
   disabled: boolean
@@ -93,9 +96,9 @@ onBeforeUnmount(() => {
     </div>
   </form>
   <div v-else-if="readOnly" class="whitespace-pre-wrap break-words text-sm leading-6" :class="manual !== null ? 'text-emerald-400' : 'text-slate-100'">
-    <TextDiff :original="original" :manual="manual" />
+    <TextDiff :original="original" :manual="manual" /><SignalingIndicator :signals="signals" />
   </div>
   <button v-else type="button" :disabled="disabled" aria-label="编辑识别文本" class="block w-full cursor-text whitespace-pre-wrap break-words text-left text-sm leading-6 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:cursor-wait" :class="manual !== null ? 'text-emerald-400' : 'text-slate-100'" @click="begin">
-    <TextDiff :original="original" :manual="manual" />
+    <TextDiff :original="original" :manual="manual" /><SignalingIndicator :signals="signals" />
   </button>
 </template>

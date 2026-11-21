@@ -80,6 +80,11 @@ export const publicStatusSnapshotSchema = z.record(z.string().regex(/^\d+$/), pu
 const callsign = z.string().regex(CALLSIGN_PATTERN).nullable()
 const manualCallsign = z.string().regex(MANUAL_CALLSIGN_PATTERN).nullable()
 const riskLevel = z.number().int().min(1).max(5).nullable()
+export const radioSignalSchema = z.object({
+  type: z.enum(['BSS', 'APRS', 'FleetSync', 'MDC1200', 'DTMF']),
+  content: z.string().min(1).max(256),
+})
+export const radioSignalsSchema = z.array(radioSignalSchema).max(16).readonly()
 export const persistedRecordSchema = z.object({
   id: nonempty,
   nodeId: nonempty,
@@ -92,6 +97,7 @@ export const persistedRecordSchema = z.object({
   revise: z.string().nullable(),
   callsign,
   callsignAlgorithm: nonempty.nullable().default(null),
+  signaling: radioSignalsSchema.nullable().optional(),
   manualCallsign,
   calleeCallsign: manualCallsign,
   effectiveCallsign: manualCallsign,

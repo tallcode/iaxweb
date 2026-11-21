@@ -28,7 +28,7 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
         </div>
       </div>
       <div class="mt-3">
-        <RecognitionEditor :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="hasActiveEditor || isSaving(record.id) || isMutating" :save="value => saveRecognition(record, value)" :request-edit="() => acquireEditor(record, 'recognition', 'card')" @editing="editing => !editing && finishEditing(record, 'recognition', 'card')" />
+        <RecognitionEditor :signals="record.signaling" :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="hasActiveEditor || isSaving(record.id) || isMutating" :save="value => saveRecognition(record, value)" :request-edit="() => acquireEditor(record, 'recognition', 'card')" @editing="editing => !editing && finishEditing(record, 'recognition', 'card')" />
       </div>
       <div class="mt-4 flex gap-4 text-sm">
         <div class="flex min-w-0 flex-1 items-center gap-2 text-left">

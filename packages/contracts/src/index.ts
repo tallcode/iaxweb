@@ -16,6 +16,7 @@ import type {
   publicNodeStatusSchema,
   publicStatsSchema,
   publicStatusSnapshotSchema,
+  radioSignalSchema,
   recordPageSchema,
   reviewSchema,
   speakerMatchSchema,
@@ -39,6 +40,7 @@ export type SpotEvent = z.output<typeof spotEventSchema>
 export type PublicStats = z.output<typeof publicStatsSchema>
 export type StatsDay = z.output<typeof statsDaySchema>
 export type AudioState = z.output<typeof audioStateSchema>
+export type RadioSignal = z.output<typeof radioSignalSchema>
 export type PersistedRecord = z.output<typeof persistedRecordSchema>
 export type RecordPage = z.output<typeof recordPageSchema>
 export type AdminRecord = z.output<typeof adminRecordSchema>

@@ -1,9 +1,9 @@
-import type { PersistedRecord, RecordPage, SpeakerMatch } from '@iaxweb/contracts'
+import type { PersistedRecord, RadioSignal, RecordPage, SpeakerMatch } from '@iaxweb/contracts'
 import type { ReadyVoiceprint, RecognitionRecord, SpeakerReferenceGroup, SpeakerReferenceScore, Voiceprint } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { CALLSIGN_PREFIX_SOURCE, hasCallerCallsign } from '@iaxweb/contracts'
+import { CALLSIGN_PREFIX_SOURCE, hasCallerCallsign, radioSignalsSchema } from '@iaxweb/contracts'
 import * as sqliteVec from 'sqlite-vec'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../ai/speaker-model.mjs'
 import { SPEAKER_REFERENCE_LIMIT } from '../ai/speaker-reference-score.mjs'
@@ -54,6 +54,7 @@ const SCHEMA = `
     revise            TEXT,
     callsign          TEXT COLLATE NOCASE,
     callsign_algorithm TEXT,
+    signaling         TEXT,
 
     risk_level        INTEGER CHECK (risk_level BETWEEN 1 AND 5),
     risk_reason       TEXT,
@@ -107,6 +108,7 @@ const SELECT_EFFECTIVE = `
     revise,
     callsign,
     callsign_algorithm,
+    signaling,
     risk_level,
     risk_reason,
     manual_callsign,
@@ -149,6 +151,8 @@ export class RecordRepository {
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0, 1))')
       if (!columns.has('callsign_algorithm'))
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN callsign_algorithm TEXT')
+      if (!columns.has('signaling'))
+        this.database.exec('ALTER TABLE ai_segments ADD COLUMN signaling TEXT')
       migrateEmbeddingSchema(this.database)
       // Build after adding legacy columns used by the partial indexes.
       this.database.exec(INDEXES)
@@ -316,6 +320,12 @@ export class RecordRepository {
     finally { this.database.enableLoadExtension(false) }
   }
 
+  updateSignaling(id: string, signals: readonly RadioSignal[]): boolean {
+    const validated = radioSignalsSchema.parse(signals)
+    return Number(this.database.prepare('UPDATE ai_segments SET signaling = ? WHERE id = ?')
+      .run(JSON.stringify(validated), id).changes) === 1
+  }
+
   updateAnalysis(record: RecognitionRecord): boolean {
     const result = this.database.prepare(`
       UPDATE ai_segments
@@ -440,7 +450,7 @@ export class RecordRepository {
     const rows = this.database.prepare(`
       SELECT
         id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected,
-        revise, callsign, callsign_algorithm, risk_level, risk_reason, manual_callsign, callee_callsign,
+        revise, callsign, callsign_algorithm, signaling, risk_level, risk_reason, manual_callsign, callee_callsign,
         manual_recognition, reviewed, manual_risk_level, manual_note, created_at, effective_callsign,
         effective_risk_level
       FROM ai_segments_effective
@@ -507,6 +517,7 @@ function mapRow(row: Record<string, unknown>): PersistedRecord {
     calleeCallsign: nullableString(row.callee_callsign),
     callsign: nullableString(row.callsign),
     callsignAlgorithm: nullableString(row.callsign_algorithm),
+    signaling: parseSignaling(row.signaling),
     capturedAt: requiredString(row.captured_at),
     corrected: nullableString(row.corrected),
     createdAt: requiredString(row.created_at),
@@ -550,4 +561,14 @@ function nullableNumber(value: unknown): number | null {
   if (value === null)
     return null
   return requiredNumber(value)
+}
+
+function parseSignaling(value: unknown): readonly RadioSignal[] | null {
+  if (typeof value !== 'string')
+    return null
+  try {
+    const parsed = radioSignalsSchema.safeParse(JSON.parse(value))
+    return parsed.success ? parsed.data : null
+  }
+  catch { return null }
 }
