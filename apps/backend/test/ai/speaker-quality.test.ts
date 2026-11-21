@@ -20,12 +20,14 @@ function noise(length: number): Float32Array {
 }
 
 function audioWithEdgeTones(length: number): Float32Array {
-  // A one-pole low-pass has no comb-filter notches that can look like a
+  // A two-pole low-pass has no comb-filter notches that can look like a
   // narrowband interferer in the local peak/background measurement.
   let previous = 0
+  let filtered = 0
   const interior = noise(length).map((sample) => {
     previous += 0.1 * (sample - previous)
-    return previous
+    filtered += 0.1 * (previous - filtered)
+    return filtered
   })
   return Float32Array.from({ length }, (_, i) => {
     if (i < 4000 || i >= length - 4000)
@@ -37,7 +39,8 @@ function audioWithEdgeTones(length: number): Float32Array {
 test('two-second audio ignores half-second radio tones at both edges without changing the waveform', () => {
   const samples = audioWithEdgeTones(16000)
   const original = samples.slice()
-  assert.equal(checkSpeakerQuality(samples).accepted, true)
+  const quality = checkSpeakerQuality(samples)
+  assert.equal(quality.accepted, true, JSON.stringify(quality))
   assert.deepEqual(samples, original)
 })
 

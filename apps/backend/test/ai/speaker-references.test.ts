@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { speakerRecognitionSchema } from '@iaxweb/contracts'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
+import { checkSpeakerQuality } from '../../src/ai/speaker-quality.mjs'
 import { SpeakerReferenceService } from '../../src/ai/speaker-references.js'
 import { speakerWavFile } from '../../src/ai/speaker-wav.js'
 import { SpeakerExtractor } from '../../src/ai/speaker.js'
@@ -16,13 +17,15 @@ import { RecordingStore } from '../../src/records/recording-store.js'
 function speechLikeAudio(): Int16Array {
   let state = 123
   let previous = 0
+  let filtered = 0
   // Smooth broadband audio without the spectral notches of a boxcar filter;
   // this fixture must pass quality checks so the test reaches model loading.
   return Int16Array.from({ length: 16000 }, () => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0
     const sample = state / 0x100000000 - 0.5
     previous += 0.1 * (sample - previous)
-    return Math.round(previous * 16384)
+    filtered += 0.1 * (previous - filtered)
+    return Math.round(filtered * 16384)
   })
 }
 
@@ -38,7 +41,10 @@ test('missing model leaves reviewed jobs pending for recovery', async (t) => {
   const record = { id: 'aabb', timestamp: '2026-11-17T09:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '测试录音' }
   repository.insert('1900', record)
   repository.updateManualReview(record.id, { reviewed: true, callsign: 'BG5XXX' })
-  new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(speechLikeAudio()))
+  const audio = speechLikeAudio()
+  const quality = checkSpeakerQuality(Float32Array.from(audio, sample => sample / 32768))
+  assert.equal(quality.accepted, true, JSON.stringify(quality))
+  new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(audio))
   await service.processPending()
   assert.deepEqual(repository.pendingReviewedVoiceprints(), [{ id: record.id, timestamp: record.timestamp, voicedMs: record.voicedMs }])
   await service.processPending()
