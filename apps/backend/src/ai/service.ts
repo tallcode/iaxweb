@@ -297,11 +297,11 @@ export class AiService {
       if (record.callsign) {
         record.callsignAlgorithm = 'stage1_text'
       }
-      else if (featureMatches) {
+      else if (parsed.extraction && featureMatches) {
         try {
           const matches = await featureMatches
           if (!this.stopped && matches.length > 0) {
-            record.callsign = await this.llm.parseStage2(text, history, corrected, metadata, matches)
+            record.callsign = this.llm.parseStage2(parsed, matches)
             if (record.callsign)
               record.callsignAlgorithm = 'stage2_feature'
           }

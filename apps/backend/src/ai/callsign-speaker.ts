@@ -1,5 +1,4 @@
 import type { CallsignContext, CallsignEvidence } from './callsign-evidence.js'
-import type { CallsignModelOutput } from './callsign-model-output.js'
 import { CALLSIGN_PREFIX_SOURCE, CALLSIGN_SOURCE, isValidCallsign } from '@iaxweb/contracts'
 import { levenshteinDistance } from './callsign-hints.js'
 
@@ -148,23 +147,10 @@ export function checkCallsignDecision(result: Record<string, unknown>, context: 
   return error ? { error } : { callsign, evidence }
 }
 
-export function checkTextCallsignOutput(output: CallsignModelOutput, context: CallsignContext): string | undefined {
-  if (output.speaker === 'self' && output.speakerEvidence.source === 'text' && output.callsignEvidence.source === 'spelling') {
-    return checkCallsignDecision({
-      speaker: output.speaker,
-      callsign: output.callsign,
-      quote: output.speakerEvidence.quote,
-      evidence: output.callsignEvidence.candidateId,
-    }, context).callsign
-  }
-}
-
 export interface SupportedCallsignEvidence extends CallsignEvidence {
   suggestedQuote: string
 }
 
-// This is independent of a model's proposed callsign. Never ask again just
-// because extraction failed: both spelling and current identity must exist.
 export function supportedSelfEvidence(context: CallsignContext): SupportedCallsignEvidence[] {
   const { current } = context
   const result: SupportedCallsignEvidence[] = []

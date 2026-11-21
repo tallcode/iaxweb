@@ -1,126 +1,60 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "oneOf": [
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "speaker",
-        "callsign",
-        "speakerEvidence",
-        "callsignEvidence"
-      ],
-      "properties": {
-        "speaker": {
-          "const": "self"
-        },
-        "callsign": {
-          "type": "string",
-          "pattern": "^B[ABDEGHIY][0-9][A-Z]{2,3}$"
-        },
-        "speakerEvidence": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/textEvidence"
-            },
-            {
-              "$ref": "#/$defs/featureMatchEvidence"
-            }
-          ]
-        },
-        "callsignEvidence": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/spellingEvidence"
-            },
-            {
-              "$ref": "#/$defs/featureMatchEvidence"
-            }
-          ]
-        },
-        "message": {
-          "description": "规范化后的信息文本",
-          "type": "string"
-        },
-        "risk": {
-          "$ref": "#/$defs/risk"
-        }
-      }
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "speaker"
-      ],
-      "properties": {
-        "speaker": {
-          "enum": [
-            "other",
-            "unknown"
-          ]
-        },
-        "message": {
-          "description": "规范化后的信息文本",
-          "type": "string"
-        },
-        "risk": {
-          "$ref": "#/$defs/risk"
-        }
-      }
-    }
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "selfCallsignEvidence",
+    "spelledCallsignEvidence",
+    "selfCallsign",
+    "spelledCallsigns"
   ],
-  "$defs": {
-    "textEvidence": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "source",
-        "quote"
+  "properties": {
+    "selfCallsignEvidence": {
+      "type": [
+        "string",
+        "null"
       ],
-      "properties": {
-        "source": {
-          "const": "text"
-        },
-        "quote": {
-          "type": "string",
-          "minLength": 1
+      "minLength": 1
+    },
+    "spelledCallsignEvidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "quote",
+          "callsign"
+        ],
+        "properties": {
+          "quote": {
+            "type": "string",
+            "minLength": 1
+          },
+          "callsign": {
+            "type": "string",
+            "pattern": "^B[ABDEGHIY][0-9][A-Z]{2,3}$"
+          }
         }
       }
     },
-    "spellingEvidence": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "source",
-        "candidateId"
+    "selfCallsign": {
+      "type": [
+        "string",
+        "null"
       ],
-      "properties": {
-        "source": {
-          "const": "spelling"
-        },
-        "candidateId": {
-          "type": "integer",
-          "minimum": 1
-        }
+      "pattern": "^[A-Z0-9]{2,8}$"
+    },
+    "spelledCallsigns": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^B[ABDEGHIY][0-9][A-Z]{2,3}$"
       }
     },
-    "featureMatchEvidence": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "source",
-        "matchId"
-      ],
-      "properties": {
-        "source": {
-          "const": "featureMatch"
-        },
-        "matchId": {
-          "type": "integer",
-          "minimum": 1
-        }
-      }
+    "message": {
+      "type": "string",
+      "description": "完整模式的规范化文本"
     },
     "risk": {
       "additionalProperties": false,

@@ -22,7 +22,7 @@ scripts/             模型下载、数据库备份等工具
 config/              部署配置，不提交到 Git
   nodes.json         节点配置
   admin.json         系统管理员账号
-  prompt.txt         两阶段 AI 提示词（启用 LLM 时必需）
+  prompt.txt         AI 提取提示词（启用 LLM 时必需）
   schema.json        AI 识别共用的输出 Schema
   models/            声纹模型（可选）
 data/                数据库、录音、用户和会话等运行数据，不提交到 Git
@@ -127,9 +127,9 @@ cp examples/ai/schema.json config/schema.json
 
 `examples/ai/full/prompt.txt` 提供包含文本整理和风险评级的完整提示词，使用时设置 `AI_LLM_ANALYSIS_ENABLED=true`。
 
-`config/prompt.txt` 按顺序存放一阶段、二阶段普通补证、二阶段冲突复核三段提示词。以 `#########` 开头的行分隔各段，后面可以写任意注释。已有部署升级时，将原有提示词合并成三段，或选用相同模式的新示例。每次模型调用前重新读取文件，编辑后无需重启。文件缺失、不可读或格式无效时，跳过识别。
+`config/prompt.txt` 只包含一份提取提示词，无需分段。每次调用前重新读取，编辑后无需重启。提示词或 Schema 缺失、不可读、无效时跳过识别。
 
-三段共用 `config/schema.json`。已有部署需同时更新任务提示词和 Schema。一阶段提示词用 `speakerEvidence` 和 `callsignEvidence` 指定原文引用和拼读候选 ID。
+已有部署升级时须同时替换 `config/prompt.txt` 和 `config/schema.json`。模型只输出自报与解释法的四个提取字段；最终呼号由程序匹配，二阶段不再调用模型。完整模式继续输出 `message` 和 `risk`。
 
 ASR 可选配置包括 `config/hotwords.json`（热词）和 `config/background.txt`（背景文本）。可将 [ASR 背景示例](examples/ai/background.txt) 复制为 `config/background.txt`，保存后下一次转写即生效。
 

@@ -13,6 +13,18 @@ export interface CallsignRegressionCase {
 
 export const CALLSIGN_REGRESSION_CASES: CallsignRegressionCase[] = [
   {
+    id: 'self-and-other-spelling-with-history',
+    category: '结合历史区分本句自报和另一呼号的拼读',
+    transcript: '正确正确，完全正确。这里是 BA4SUA，我听清楚吗？Bravo, Golf, Five, Hotel, Echo, Zulu.',
+    expected: 'BA4SUA',
+    evidenceTurns: [
+      { id: 'prior-self', text: 'Bravo Alpha Four Sierra Uniform Alpha。' },
+      { id: 'other', text: '查你呼号是 BA4SUA，是否正确？' },
+    ],
+    featureMatches: [],
+    expectedSources: ['text', 'spelling'],
+  },
+  {
     id: 'medium-reply-to-confirmation',
     category: '普通抄收确认结合历史拼读补讲话人',
     transcript: '您抄收的完全正确。我使用的是手台，五瓦发射功率。',

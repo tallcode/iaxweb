@@ -39,7 +39,12 @@ try {
     console.error('LLM 解析未生效：提示词或 schema 不可用')
     process.exit(1)
   }
-  console.log(JSON.stringify(parsed, null, 2))
+  console.log(JSON.stringify({
+    ...(parsed.extraction ?? { selfCallsignEvidence: null, spelledCallsignEvidence: [], selfCallsign: null, spelledCallsigns: [] }),
+    matchedCallsign: parsed.callsign ?? null,
+    ...(parsed.message === undefined ? {} : { message: parsed.message }),
+    ...(parsed.risk === undefined ? {} : { risk: parsed.risk }),
+  }, null, 2))
 }
 catch (error) {
   console.error(`LLM 解析失败: ${error instanceof Error ? error.message : String(error)}`)
