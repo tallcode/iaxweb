@@ -2,9 +2,9 @@
 import { hasCallerCallsign } from '@iaxweb/contracts'
 import { useRecordInteractions, useRecordsQueryContext } from '../../composables/records/use-records-context'
 import { formatRecordTime as formatTime } from '../../utils/records-format'
-import AudioQualityIndicator from './AudioQualityIndicator.vue'
 import RecognitionEditor from './RecognitionEditor.vue'
 import RecordCallsign from './RecordCallsign.vue'
+import RecordDuration from './RecordDuration.vue'
 import ReviewStar from './ReviewStar.vue'
 import SpeakerRecognitionButton from './SpeakerRecognitionButton.vue'
 
@@ -18,7 +18,7 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
       <div class="flex items-center justify-between gap-3">
         <div class="min-w-0">
           <p class="text-sm font-medium text-slate-200">
-            {{ formatTime(record.capturedAt) }}<span class="ml-3 inline-flex items-center gap-1 whitespace-nowrap align-middle text-xs font-normal text-slate-500"><span>{{ (record.durationMs / 1_000).toFixed(1) }}s</span><AudioQualityIndicator :quality="record.audioQuality" /></span>
+            {{ formatTime(record.capturedAt) }}<RecordDuration :duration-ms="record.durationMs" :quality="record.audioQuality" class="ml-3 text-xs font-normal" />
           </p>
         </div><div class="flex shrink-0 items-center gap-1">
           <button v-if="record.hasAudio" class="shrink-0 rounded-md border border-slate-700 px-3 py-1.5 text-xs transition hover:bg-slate-700" @click="togglePlayback(record.id)">

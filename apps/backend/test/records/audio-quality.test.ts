@@ -7,7 +7,7 @@ import test from 'node:test'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
 import { RecordRepository } from '../../src/records/record-repository.js'
 
-test('historical quality migrates to skip once without changing stored vectors or analysis', (t) => {
+test('historical quality preserves prior passes and skips other rows without changing stored vectors or analysis', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-audio-quality-migration-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const file = join(directory, 'history.sqlite')
@@ -28,7 +28,7 @@ test('historical quality migrates to skip once without changing stored vectors o
   const repository = new RecordRepository(file)
   for (const id of ['ready', 'rejected', 'resource', 'plain']) {
     const row = repository.find(id)!
-    assert.equal(row.audioQuality?.status, 'skip')
+    assert.equal(row.audioQuality?.status, id === 'ready' ? 'passed' : 'skip')
     assert.equal(row.audioQuality?.metrics, null)
     assert.equal(row.recognition, 'original')
     assert.equal(row.manualRecognition, 'manual')
@@ -43,8 +43,41 @@ test('historical quality migrates to skip once without changing stored vectors o
   repository.close()
   const reopened = new RecordRepository(file)
   assert.equal(reopened.find('plain')?.audioQuality?.status, 'unknown')
-  assert.equal(reopened.find('ready')?.audioQuality?.status, 'skip')
+  assert.equal(reopened.find('ready')?.audioQuality?.status, 'passed')
   assert.deepEqual(reopened.pendingReviewedVoiceprints(), [])
+  reopened.close()
+  raw.close()
+})
+
+test('already deployed skip migration is repaired without overwriting later quality checks or cached embeddings', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-audio-quality-repair-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const file = join(directory, 'history.sqlite')
+  const before = new RecordRepository(file)
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
+  embedding[0] = 1
+  const metrics = { highBandFraction: 0.001, toneProminenceDb: 2, highBandRolloffDb: -10, highBandDynamicDb: 5 }
+  for (const status of ['skip', 'passed', 'rejected', 'unknown'] as const) {
+    before.insert('1900', { id: status, timestamp: '2026-11-22T01:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: 'original' })
+    before.updateManualReview(status, { reviewed: true, callsign: 'BG5XXX' })
+    before.saveQueryVoiceprint(status, { status: 'ready', version: SPEAKER_VERSION, embedding })
+    before.updateAudioQuality(status, { status, reason: status === 'unknown' ? 'check_timeout' : null, metrics: status === 'passed' ? metrics : null })
+  }
+  before.insert('1900', { id: 'no-vector', timestamp: '2026-11-22T01:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: 'original', audioQuality: { status: 'skip', reason: null, metrics: null } })
+  before.close()
+  const raw = new DatabaseSync(file)
+  const originalEmbeddings = raw.prepare('SELECT * FROM ai_segment_embeddings ORDER BY record_id').all()
+  const originalQuality = raw.prepare('SELECT id, audio_quality FROM ai_segments WHERE id != ? ORDER BY id').all('skip')
+  const repaired = new RecordRepository(file)
+  assert.deepEqual(repaired.find('skip')?.audioQuality, { status: 'passed', reason: null, metrics: null })
+  assert.deepEqual(repaired.findReadyVoiceprint('skip'), { status: 'ready', version: SPEAKER_VERSION, embedding })
+  assert.deepEqual(raw.prepare('SELECT * FROM ai_segment_embeddings ORDER BY record_id').all(), originalEmbeddings)
+  assert.deepEqual(raw.prepare('SELECT id, audio_quality FROM ai_segments WHERE id != ? ORDER BY id').all('skip'), originalQuality)
+  assert.deepEqual(repaired.pendingReviewedVoiceprints(), [])
+  repaired.close()
+  const reopened = new RecordRepository(file)
+  assert.equal(reopened.find('skip')?.audioQuality?.status, 'passed')
+  assert.deepEqual(raw.prepare('SELECT * FROM ai_segment_embeddings ORDER BY record_id').all(), originalEmbeddings)
   reopened.close()
   raw.close()
 })

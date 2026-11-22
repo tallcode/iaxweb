@@ -37,15 +37,17 @@ export function voiceprintQuality(voiceprint: Voiceprint): AudioQuality | undefi
   return undefined
 }
 
-// Caller owns the transaction. Only adding the column marks existing records
-// as historical skip. Reopening must never reset a newly checked quality.
+// Caller owns the transaction. Historical records without a usable embedding
+// start as skip; a stored embedding proves the former gate already passed.
+// Reopening also repairs the first quality migration, which marked all rows
+// skip. Never replace an actual passed/rejected/unknown check or its metrics.
 export function migrateAudioQuality(database: DatabaseSync): void {
   const columns = database.prepare('PRAGMA table_info(ai_segments)').all()
+  const embeddings = database.prepare('PRAGMA table_info(ai_segment_embeddings)').all()
   if (!columns.some(row => row.name === 'audio_quality')) {
     database.exec('ALTER TABLE ai_segments ADD COLUMN audio_quality TEXT')
     database.prepare('UPDATE ai_segments SET audio_quality = ?')
       .run(JSON.stringify({ status: 'skip', reason: null, metrics: null }))
-    const embeddings = database.prepare('PRAGMA table_info(ai_segment_embeddings)').all()
     if (embeddings.some(row => row.name === 'reason')) {
       // Retain the old diagnostic without claiming a new quality assessment.
       database.exec(`
@@ -57,5 +59,16 @@ export function migrateAudioQuality(database: DatabaseSync): void {
           WHERE reason IN ('interference_high_band', 'interference_tone', 'invalid_audio');
       `)
     }
+  }
+  if (['record_id', 'status', 'embedding', 'dimensions'].every(name => embeddings.some(row => row.name === name))) {
+    database.exec(`
+      UPDATE ai_segments SET audio_quality = json_object('status', 'passed', 'reason', NULL, 'metrics', NULL)
+      WHERE CASE WHEN json_valid(audio_quality) THEN json_extract(audio_quality, '$.status') END = 'skip'
+        AND id IN (
+          SELECT record_id FROM ai_segment_embeddings
+          WHERE status = 'ready' AND typeof(embedding) = 'blob'
+            AND dimensions > 0 AND length(embedding) = dimensions * 4
+        );
+    `)
   }
 }

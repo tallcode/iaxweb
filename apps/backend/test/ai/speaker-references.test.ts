@@ -253,9 +253,6 @@ test('historical skip and failed unknown quality can be retried manually, withou
   const record = { id: 'aabbcc02', timestamp: '2026-11-22T01:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '历史', audioQuality: { status: 'skip', reason: null, metrics: null } as const }
   repository.insert('1900', record)
   repository.updateManualReview(record.id, { reviewed: true, callsign: 'BG5XXX' })
-  const old = new Float32Array(SPEAKER_DIMENSIONS)
-  old[0] = 1
-  repository.saveQueryVoiceprint(record.id, { status: 'ready', version: SPEAKER_VERSION, embedding: old })
   new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(speechLikeAudio()))
   let checks = 0
   t.mock.method(AudioQualityService.prototype, 'check', async () => ++checks === 1
@@ -269,7 +266,7 @@ test('historical skip and failed unknown quality can be retried manually, withou
   assert.equal(checks, 0)
   assert.equal((await service.recognizeRecord(record.id)).status, 'unavailable')
   assert.equal(extract.mock.callCount(), 0)
-  assert.deepEqual(repository.findReadyVoiceprint(record.id)?.embedding, old)
+  assert.equal(repository.findReadyVoiceprint(record.id), undefined)
   assert.equal(repository.find(record.id)?.audioQuality?.status, 'unknown')
   await service.processPending()
   assert.equal(checks, 1)
