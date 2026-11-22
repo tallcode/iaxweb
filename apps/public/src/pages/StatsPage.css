@@ -11,9 +11,9 @@
   --heat-4: #3d9687;
   --heat-5: #5da984;
   --heat-6: #8bb46a;
-  --heat-7: #b9c56e;
-  --heat-8: #e6d074;
-  --heat-9: #ffebad;
+  --heat-7: color-mix(in srgb, var(--heat-6), var(--status-local) 35%);
+  --heat-8: color-mix(in srgb, var(--heat-6), var(--status-local) 70%);
+  --heat-9: var(--status-local);
 
   grid-area: topology;
   min-height: 0;
@@ -231,7 +231,11 @@
 }
 
 .stats-chart-plot button.is-highlighted span {
-  background: var(--stats-amber);
+  background: var(--status-local);
+}
+
+.stats-chart-plot button.is-active.is-highlighted {
+  background: color-mix(in srgb, var(--status-local) 12%, transparent);
 }
 
 .stats-chart-dates {
