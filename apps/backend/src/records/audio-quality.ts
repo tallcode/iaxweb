@@ -37,8 +37,8 @@ export function voiceprintQuality(voiceprint: Voiceprint): AudioQuality | undefi
   return undefined
 }
 
-// Caller owns the transaction. Historical records without a usable embedding
-// start as skip; a stored embedding proves the former gate already passed.
+// Caller owns the transaction. Preserve explicit historical quality rejections;
+// a stored embedding proves the former gate passed. Other history starts as skip.
 // Reopening also repairs the first quality migration, which marked all rows
 // skip. Never replace an actual passed/rejected/unknown check or its metrics.
 export function migrateAudioQuality(database: DatabaseSync): void {
@@ -49,9 +49,9 @@ export function migrateAudioQuality(database: DatabaseSync): void {
     database.prepare('UPDATE ai_segments SET audio_quality = ?')
       .run(JSON.stringify({ status: 'skip', reason: null, metrics: null }))
     if (embeddings.some(row => row.name === 'reason')) {
-      // Retain the old diagnostic without claiming a new quality assessment.
+      // Move the existing rejection, without reading or reassessing any audio.
       database.exec(`
-        UPDATE ai_segments SET audio_quality = json_object('status', 'skip', 'reason',
+        UPDATE ai_segments SET audio_quality = json_object('status', 'rejected', 'reason',
           (SELECT reason FROM ai_segment_embeddings WHERE record_id = ai_segments.id), 'metrics', NULL)
         WHERE id IN (SELECT record_id FROM ai_segment_embeddings
           WHERE reason IN ('interference_high_band', 'interference_tone', 'invalid_audio'));
@@ -60,6 +60,16 @@ export function migrateAudioQuality(database: DatabaseSync): void {
       `)
     }
   }
+  // The first deployed migration already moved these reasons out of embeddings
+  // but labeled them skip. Repair only that status; preserve the full diagnostic
+  // and never overwrite a later passed/rejected/unknown assessment.
+  database.prepare(`
+    UPDATE ai_segments SET audio_quality = json_set(audio_quality, '$.status', 'rejected')
+    WHERE CASE WHEN json_valid(audio_quality) THEN
+      json_extract(audio_quality, '$.status') = 'skip'
+      AND json_extract(audio_quality, '$.reason') IN (?, ?, ?)
+    END
+  `).run(...QUALITY_REASONS)
   if (['record_id', 'status', 'embedding', 'dimensions'].every(name => embeddings.some(row => row.name === name))) {
     database.exec(`
       UPDATE ai_segments SET audio_quality = json_object('status', 'passed', 'reason', NULL, 'metrics', NULL)
