@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { speakerRecognitionSchema } from '@iaxweb/contracts'
+import { AudioQualityService } from '../../src/ai/audio-quality.js'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
 import { checkSpeakerQuality } from '../../src/ai/speaker-quality.mjs'
 import { SpeakerReferenceService } from '../../src/ai/speaker-references.js'
@@ -211,7 +212,7 @@ test('prior quality rejections are retried only manually and a successful retry 
     repository.close()
     rmSync(directory, { recursive: true, force: true })
   })
-  const record = { id: 'quality-retry', timestamp: '2026-11-22T06:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '收到' }
+  const record = { id: 'aabbcc01', timestamp: '2026-11-22T06:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '收到' }
   repository.insert('1900', record)
   repository.updateManualReview(record.id, { reviewed: true, callsign: 'BG5XXX' })
   repository.updateVoiceprint(record.id, { status: 'unavailable', version: SPEAKER_VERSION, reason: 'interference_high_band' })
@@ -238,4 +239,43 @@ test('prior quality rejections are retried only manually and a successful retry 
   assert.deepEqual(repository.pendingReviewedVoiceprints(), [])
   assert.equal(repository.find(record.id)?.reviewed, true)
   assert.equal(repository.find(record.id)?.manualCallsign, 'BG5XXX')
+})
+
+test('historical skip and failed unknown quality can be retried manually, without background work', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-speaker-skip-'))
+  const repository = new RecordRepository(':memory:')
+  const service = new SpeakerReferenceService({ repository, recordingsDirectory: directory, modelFile: 'unused' })
+  t.after(() => {
+    service.stop()
+    repository.close()
+    rmSync(directory, { recursive: true, force: true })
+  })
+  const record = { id: 'aabbcc02', timestamp: '2026-11-22T01:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '历史', audioQuality: { status: 'skip', reason: null, metrics: null } as const }
+  repository.insert('1900', record)
+  repository.updateManualReview(record.id, { reviewed: true, callsign: 'BG5XXX' })
+  const old = new Float32Array(SPEAKER_DIMENSIONS)
+  old[0] = 1
+  repository.saveQueryVoiceprint(record.id, { status: 'ready', version: SPEAKER_VERSION, embedding: old })
+  new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(speechLikeAudio()))
+  let checks = 0
+  t.mock.method(AudioQualityService.prototype, 'check', async () => ++checks === 1
+    ? { status: 'unknown', reason: 'check_timeout', metrics: null } as const
+    : { status: 'passed', reason: null, metrics: null } as const)
+  const fresh = new Float32Array(SPEAKER_DIMENSIONS)
+  fresh[1] = 1
+  const extract = t.mock.method(SpeakerExtractor.prototype, 'extract', async () => ({ status: 'ready', version: SPEAKER_VERSION, embedding: fresh } as const))
+  t.mock.method(repository, 'searchSpeakerMatches', () => ({ referenceCount: 0, matches: [] }))
+  await service.processPending()
+  assert.equal(checks, 0)
+  assert.equal((await service.recognizeRecord(record.id)).status, 'unavailable')
+  assert.equal(extract.mock.callCount(), 0)
+  assert.deepEqual(repository.findReadyVoiceprint(record.id)?.embedding, old)
+  assert.equal(repository.find(record.id)?.audioQuality?.status, 'unknown')
+  await service.processPending()
+  assert.equal(checks, 1)
+  assert.equal((await service.recognizeRecord(record.id)).status, 'no_match')
+  assert.equal(extract.mock.callCount(), 1)
+  assert.deepEqual(repository.findReadyVoiceprint(record.id)?.embedding, fresh)
+  assert.equal((await service.recognizeRecord(record.id)).status, 'no_match')
+  assert.equal(extract.mock.callCount(), 1)
 })

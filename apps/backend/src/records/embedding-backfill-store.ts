@@ -1,7 +1,9 @@
+import type { AudioQuality } from '@iaxweb/contracts'
 import type { StatementSync } from 'node:sqlite'
 import type { Voiceprint } from './types.js'
 import { DatabaseSync } from 'node:sqlite'
 import { SPEAKER_DIMENSIONS } from '../ai/speaker-model.mjs'
+import { isQualityReason, migrateAudioQuality, storeAudioQuality, voiceprintQuality } from './audio-quality.js'
 import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { encodeVoiceprint } from './voiceprint.js'
 
@@ -24,6 +26,7 @@ export interface BackfillResult {
   reason: string
   voiceprint?: Voiceprint | undefined
   previousVersion?: string | null | undefined
+  audioQuality?: AudioQuality | undefined
 }
 
 // Dedicated connection: never run application startup recovery or reset pending
@@ -47,6 +50,7 @@ export class EmbeddingBackfillStore {
         this.database.exec('PRAGMA foreign_keys = ON')
         this.database.exec('BEGIN IMMEDIATE')
         try {
+          migrateAudioQuality(this.database)
           migrateEmbeddingSchema(this.database)
           this.database.exec('COMMIT')
         }
@@ -64,6 +68,12 @@ export class EmbeddingBackfillStore {
 
   close(): void {
     this.database.close()
+  }
+
+  updateAudioQuality(id: string, quality: AudioQuality): void {
+    if (this.readOnly)
+      throw new Error('Cannot update quality in a dry-run')
+    storeAudioQuality(this.database, id, quality)
   }
 
   page(cutoff: string, after?: { timestamp: string, id: string }): BackfillRecord[] {
@@ -156,7 +166,12 @@ export class EmbeddingBackfillStore {
         if (!result.voiceprint)
           return result
         const voiceprint = result.voiceprint
-        const changes = statement.run(result.id, voiceprint.version, SPEAKER_DIMENSIONS, voiceprint.status, encodeVoiceprint(voiceprint), voiceprint.reason ?? null, result.id, mode === 'missing' ? result.previousVersion ?? null : mode).changes
+        const changes = statement.run(result.id, voiceprint.version, SPEAKER_DIMENSIONS, voiceprint.status, encodeVoiceprint(voiceprint), isQualityReason(voiceprint.reason) ? null : voiceprint.reason ?? null, result.id, mode === 'missing' ? result.previousVersion ?? null : mode).changes
+        if (Number(changes) === 1) {
+          const quality = result.audioQuality ?? voiceprintQuality(voiceprint)
+          if (quality)
+            storeAudioQuality(this.database, result.id, quality, !result.audioQuality && voiceprint.status === 'ready')
+        }
         return Number(changes) === 1 ? result : { ...result, outcome: 'skipped' as const, reason: 'record_or_embedding_changed', voiceprint: undefined }
       })
       this.database.exec('COMMIT')

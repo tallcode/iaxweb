@@ -17,7 +17,7 @@ const EXTRACTION_TIMEOUT_MS = 60_000
 const RETRY_DELAY_MS = 60_000
 const MAX_QUEUED_EXTRACTIONS = 4
 
-type SpeakerRequest = { operation: 'extract', samples: Float32Array }
+type SpeakerRequest = { operation: 'extract', samples: Float32Array, qualityApproved?: boolean }
   | { operation: 'references', embedding: Float32Array, groups: SpeakerReferenceGroup[] }
 type SpeakerResult = Voiceprint | SpeakerReferenceScore[]
 
@@ -97,7 +97,7 @@ export class SpeakerExtractor {
     return this.draining || this.queue.length > 0
   }
 
-  extract(samples: Float32Array, voicedMs: number, signal?: AbortSignal, measurements?: SpeakerRecognitionMeasurements): Promise<Voiceprint> {
+  extract(samples: Float32Array, voicedMs: number, signal?: AbortSignal, measurements?: SpeakerRecognitionMeasurements, qualityApproved = false): Promise<Voiceprint> {
     if (this.stopped)
       return Promise.reject(new Error('Speaker extractor stopped'))
     if (signal?.aborted)
@@ -106,7 +106,7 @@ export class SpeakerExtractor {
       return Promise.resolve({ status: 'unavailable', version: SPEAKER_VERSION, reason: 'insufficient_audio' })
     if (samples.length > SPEAKER_MAX_SAMPLES)
       return Promise.resolve({ status: 'unavailable', version: SPEAKER_VERSION, reason: SPEAKER_TOO_LONG_REASON })
-    return this.enqueue({ operation: 'extract', samples }, signal, measurements).then((result) => {
+    return this.enqueue({ operation: 'extract', samples, qualityApproved }, signal, measurements).then((result) => {
       if (Array.isArray(result))
         throw new Error('Invalid speaker extraction response')
       return result

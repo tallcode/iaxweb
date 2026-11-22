@@ -54,6 +54,7 @@ export function useRecordsPage(options: { onNavigate: () => void }) {
   const speakerRecognition = useSpeakerRecognition({
     canBegin: () => isAdministrator.value && canChange() && !query.state.isLoading.value,
     onBegin: query.abort,
+    onRecognized: query.reload,
     onUnauthorized,
   })
   const interactions: RecordInteractionsContext = {

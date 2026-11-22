@@ -109,7 +109,8 @@ test('quality reasons persist; cancelled or deleted jobs cannot save a vector', 
   const inspect = new DatabaseSync(filename)
   const row = inspect.prepare('SELECT status, reason, embedding FROM ai_segment_embeddings').get()
   assert.equal(row?.status, 'unavailable')
-  assert.equal(row?.reason, 'interference_high_band')
+  assert.equal(row?.reason, null)
+  assert.equal(reopened.find('segment-1')?.audioQuality?.reason, 'interference_high_band')
   assert.equal(row?.embedding, null)
   reopened.updateManualReview('segment-1', { reviewed: true })
   reopened.updateManualReview('segment-1', { reviewed: false })
@@ -304,6 +305,7 @@ test('persists ASR and later LLM results in one row', () => {
     callsign: null,
     callsignAlgorithm: null,
     signaling: null,
+    audioQuality: null,
     capturedAt: segment.timestamp,
     corrected: segment.corrected,
     createdAt: repository.find(segment.id)?.createdAt,

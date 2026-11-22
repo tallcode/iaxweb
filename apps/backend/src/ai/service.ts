@@ -11,6 +11,7 @@ import { RecordingStore } from '../records/recording-store.js'
 import { SignalingService } from '../signaling/service.js'
 import { AsrClient } from './asr-client.js'
 import { AsrContextFiles, logTimestamp } from './asr-context-files.js'
+import { AudioQualityService } from './audio-quality.js'
 import { correctExplanationText } from './corrected-transcript.js'
 import { LlmParser } from './llm-parser.js'
 import { decodeMuLaw } from './mulaw.js'
@@ -34,6 +35,7 @@ export interface AiServiceOptions {
   onSpot?: (spot: SpotEvent) => void
   repository?: RecognitionRepository
   speakerReferences?: Pick<SpeakerReferenceService, 'startLiveRecognition' | 'cacheQueryVoiceprint'>
+  audioQuality?: AudioQualityService
 }
 
 // AI 值机员：监听节点音频，按发射分段送百炼识别，输出到控制台。
@@ -48,6 +50,8 @@ export class AiService {
   private readonly recordings: RecordingStore | undefined
   private readonly signaling: SignalingService | undefined
   private readonly speakerReferences: AiServiceOptions['speakerReferences']
+  private readonly audioQuality: AudioQualityService
+  private readonly ownsAudioQuality: boolean
   private readonly abort = new AbortController()
   private readonly nodes = new Map<string, NodeAiRuntime>()
   private stopped = false
@@ -59,6 +63,8 @@ export class AiService {
     if (config.persistenceEnabled && !options.repository)
       throw new Error('AI persistence requires an injected recognition repository')
     this.repository = options.repository
+    this.audioQuality = options.audioQuality ?? new AudioQualityService()
+    this.ownsAudioQuality = !options.audioQuality
     this.signaling = options.repository?.updateSignaling ? new SignalingService() : undefined
     this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
     this.speakerReferences = config.llm.stage2Enabled && config.llm.enabled && this.recordings ? options.speakerReferences : undefined
@@ -186,6 +192,8 @@ export class AiService {
     this.stopped = true
     this.abort.abort()
     this.signaling?.stop()
+    if (this.ownsAudioQuality)
+      this.audioQuality.stop()
     for (const runtime of this.nodes.values())
       runtime.queue.clear()
   }
@@ -214,15 +222,6 @@ export class AiService {
     const speakerReferences = this.speakerReferences
     const liveAbort = speakerReferences && new AbortController()
     let live: ReturnType<SpeakerReferenceService['startLiveRecognition']> | undefined
-    if (speakerReferences && liveAbort) {
-      try {
-        const signal = AbortSignal.any([this.abort.signal, liveAbort.signal, AbortSignal.timeout(LIVE_SPEAKER_TIMEOUT_MS)])
-        live = speakerReferences.startLiveRecognition(record.id, pcm, record.voicedMs, signal)
-      }
-      catch (error) {
-        console.warn(`${logTimestamp()} [${nodeId}]: 自动特征提取启动失败 ${shortId}: ${errorMessage(error)}`)
-      }
-    }
     try {
       const text = (await this.asr.transcribe(wav, {
         background: this.asrContextFiles.readBackground(),
@@ -235,6 +234,18 @@ export class AiService {
       if (text) {
         record.recognition = text
         record.corrected = correctExplanationText(text).text
+        record.audioQuality = await this.audioQuality.check(Float32Array.from(pcm, sample => sample / 32768), this.abort.signal)
+        if (this.stopped)
+          return
+        if (record.audioQuality.status === 'passed' && speakerReferences && liveAbort) {
+          try {
+            const signal = AbortSignal.any([this.abort.signal, liveAbort.signal, AbortSignal.timeout(LIVE_SPEAKER_TIMEOUT_MS)])
+            live = speakerReferences.startLiveRecognition(record.id, pcm, record.voicedMs, signal, true)
+          }
+          catch (error) {
+            console.warn(`${logTimestamp()} [${nodeId}]: 自动特征提取启动失败 ${shortId}: ${errorMessage(error)}`)
+          }
+        }
       }
       runtime.store.add(record)
       if (text) {
@@ -266,7 +277,10 @@ export class AiService {
             console.warn(`${logTimestamp()} [${nodeId}]: 录音保存失败 ${shortId}: ${errorMessage(error)}`)
           }
         }
-        await this.parseTranscript(nodeId, runtime, record, text, live?.matches)
+        if (record.audioQuality?.status === 'passed')
+          await this.parseTranscript(nodeId, runtime, record, text, live?.matches)
+        else
+          console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${(record.durationMs / 1000).toFixed(1)}s | ${text}`)
       }
     }
     catch (error) {

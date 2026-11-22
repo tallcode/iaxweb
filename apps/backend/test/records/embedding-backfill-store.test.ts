@@ -102,7 +102,8 @@ test('backfill persists interference rejection reason without a vector', (t) => 
   const voiceprint = { status: 'unavailable', version: 'quality-v1', reason: 'interference_high_band' } as const
   const result = store.commit([{ id: 'interference', index: 0, outcome: 'unavailable', reason: voiceprint.reason, voiceprint }], 'missing')
   assert.equal(result[0]?.outcome, 'unavailable')
-  assert.equal(store.database.prepare('SELECT reason FROM ai_segment_embeddings').get()?.reason, voiceprint.reason)
+  assert.equal(store.database.prepare('SELECT reason FROM ai_segment_embeddings').get()?.reason, null)
+  assert.equal(repository.find('interference')?.audioQuality?.reason, voiceprint.reason)
   assert.equal(store.database.prepare('SELECT embedding FROM ai_segment_embeddings').get()?.embedding, null)
   store.close()
   repository.close()

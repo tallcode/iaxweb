@@ -1,4 +1,5 @@
 import type { BackfillMode, BackfillRecord, BackfillResult } from '../records/embedding-backfill-store.js'
+import type { Voiceprint } from '../records/types.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { appendFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -10,6 +11,7 @@ import { backup, DatabaseSync } from 'node:sqlite'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
 import { eligibleForBackfill, EmbeddingBackfillStore } from '../records/embedding-backfill-store.js'
+import { AudioQualityService } from './audio-quality.js'
 import { SPEAKER_MODEL_SHA256, SPEAKER_VERSION } from './speaker-model.mjs'
 import { SPEAKER_RESOURCE_LIMIT_REASON } from './speaker-resources.js'
 import { readSpeakerWav, speakerWavFile } from './speaker-wav.js'
@@ -308,7 +310,11 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
   const release = await acquireLock(lockFile)
   let store: EmbeddingBackfillStore | undefined
   let extractor: SpeakerExtractor | undefined
-  const stop = () => extractor?.stop()
+  const audioQuality = new AudioQualityService()
+  const stop = () => {
+    extractor?.stop()
+    audioQuality.stop()
+  }
   options.signal?.addEventListener('abort', stop, { once: true })
   let batch: BackfillResult[] = []
   const started = performance.now()
@@ -376,31 +382,32 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
       else {
         try {
           const filename = speakerWavFile(manifest.recordingsDirectory, record)
-          if (record.voicedMs < 1000) {
-            result = { index, id: record.id, outcome: 'unavailable', reason: 'insufficient_voiced_audio', voiceprint: { status: 'unavailable', version: SPEAKER_VERSION, reason: 'insufficient_voiced_audio' } }
+          const samples = await readSpeakerWav(filename, options.signal)
+          try {
+            const quality = await audioQuality.check(samples, options.signal)
+            if (options.signal?.aborted)
+              break
+            store.updateAudioQuality(record.id, quality)
+            const voiceprint: Voiceprint = quality.status === 'passed'
+              ? await extractor.extract(samples, record.voicedMs, options.signal, undefined, true)
+              : { status: 'unavailable', version: SPEAKER_VERSION } as const
+            if (voiceprint.status === 'pending' || voiceprint.status === 'failed')
+              throw new Error('Unexpected extraction status')
+            result = { index, id: record.id, outcome: voiceprint.status, reason: voiceprint.status === 'ready' ? 'extracted' : quality.reason ?? voiceprint.reason ?? 'insufficient_audio', voiceprint, audioQuality: quality }
+            consecutiveExtractionErrors = 0
           }
-          else {
-            const samples = await readSpeakerWav(filename, options.signal)
-            try {
-              const voiceprint = await extractor.extract(samples, record.voicedMs)
-              if (voiceprint.status === 'pending' || voiceprint.status === 'failed')
-                throw new Error('Unexpected extraction status')
-              result = { index, id: record.id, outcome: voiceprint.status, reason: voiceprint.status === 'ready' ? 'extracted' : voiceprint.reason ?? 'insufficient_audio', voiceprint }
-              consecutiveExtractionErrors = 0
-            }
-            catch (error) {
-              if (options.signal?.aborted)
-                break
-              const reason = `extraction_error: ${error instanceof Error ? error.message : String(error)}`
-              if (reason.includes('resource limit'))
-                result = { index, id: record.id, outcome: 'unavailable', reason: SPEAKER_RESOURCE_LIMIT_REASON, voiceprint: { status: 'unavailable', version: SPEAKER_VERSION, reason: SPEAKER_RESOURCE_LIMIT_REASON } }
-              else if (reason.includes('insufficient memory'))
-                result = { index, id: record.id, outcome: 'skipped', reason: 'insufficient_memory' }
-              else
-                result = { index, id: record.id, outcome: 'failed', reason, voiceprint: { status: 'failed', version: SPEAKER_VERSION, reason } }
-              if (extractor.backingOff || ++consecutiveExtractionErrors >= 3)
-                fatal = error
-            }
+          catch (error) {
+            if (options.signal?.aborted)
+              break
+            const reason = `extraction_error: ${error instanceof Error ? error.message : String(error)}`
+            if (reason.includes('resource limit'))
+              result = { index, id: record.id, outcome: 'unavailable', reason: SPEAKER_RESOURCE_LIMIT_REASON, voiceprint: { status: 'unavailable', version: SPEAKER_VERSION, reason: SPEAKER_RESOURCE_LIMIT_REASON } }
+            else if (reason.includes('insufficient memory'))
+              result = { index, id: record.id, outcome: 'skipped', reason: 'insufficient_memory' }
+            else
+              result = { index, id: record.id, outcome: 'failed', reason, voiceprint: { status: 'failed', version: SPEAKER_VERSION, reason } }
+            if (extractor.backingOff || ++consecutiveExtractionErrors >= 3)
+              fatal = error
           }
         }
         catch (error) {
@@ -460,6 +467,7 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
   finally {
     options.signal?.removeEventListener('abort', stop)
     extractor?.stop()
+    audioQuality.stop()
     try {
       store?.close()
     }

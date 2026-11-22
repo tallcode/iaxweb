@@ -4,6 +4,7 @@ import type { ReadyVoiceprint, SpeakerReferenceGroup, Voiceprint } from '../reco
 import { performance } from 'node:perf_hooks'
 import { SPEAKER_REFERENCE_THRESHOLD } from '../records/record-repository.js'
 import { logTimestamp } from './asr-context-files.js'
+import { AudioQualityService, unknownAudioQuality } from './audio-quality.js'
 import { createSpeakerMeasurements } from './speaker-measurements.js'
 import { SPEAKER_VERSION } from './speaker-model.mjs'
 import { SPEAKER_MAX_SAMPLES, SPEAKER_RESOURCE_LIMIT_REASON, SPEAKER_TOO_LONG_REASON } from './speaker-resources.js'
@@ -14,6 +15,7 @@ interface SpeakerReferenceOptions {
   repository: SpeakerReferenceRepository
   recordingsDirectory: string
   modelFile: string
+  audioQuality?: AudioQualityService
 }
 
 type ScoredSpeakerMatch = Omit<SpeakerMatch, 'confidence'>
@@ -47,6 +49,8 @@ function matchConfidence(match: ScoredSpeakerMatch): SpeakerMatch['confidence'] 
 // Live queries, manual queries and reviewed backfill share one native worker.
 export class SpeakerReferenceService {
   private readonly extractor: SpeakerExtractor
+  private readonly audioQuality: AudioQualityService
+  private readonly ownsAudioQuality: boolean
   private timer: ReturnType<typeof setTimeout> | undefined
   private readonly abort = new AbortController()
   private stopped = false
@@ -54,6 +58,8 @@ export class SpeakerReferenceService {
 
   constructor(private readonly options: SpeakerReferenceOptions) {
     this.extractor = new SpeakerExtractor(options.modelFile)
+    this.audioQuality = options.audioQuality ?? new AudioQualityService()
+    this.ownsAudioQuality = !options.audioQuality
   }
 
   start(): void {
@@ -67,13 +73,15 @@ export class SpeakerReferenceService {
     clearTimeout(this.timer)
     this.abort.abort()
     this.extractor.stop()
+    if (this.ownsAudioQuality)
+      this.audioQuality.stop()
   }
 
-  startLiveRecognition(recordId: string, pcm: Int16Array, voicedMs: number, signal: AbortSignal) {
+  startLiveRecognition(recordId: string, pcm: Int16Array, voicedMs: number, signal: AbortSignal, qualityApproved = false) {
     const abortSignal = AbortSignal.any([this.abort.signal, signal])
     if (abortSignal.aborted || pcm.length > SPEAKER_MAX_SAMPLES)
       return { voiceprint: Promise.resolve(undefined), matches: Promise.resolve([]) }
-    const voiceprint = this.extractor.extract(Float32Array.from(pcm, sample => sample / 32_768), voicedMs, abortSignal)
+    const voiceprint = this.extractor.extract(Float32Array.from(pcm, sample => sample / 32_768), voicedMs, abortSignal, undefined, qualityApproved)
       .then(result => result.status === 'ready' ? result : undefined)
       .catch(() => undefined)
     const search = voiceprint.then(async (result) => {
@@ -138,7 +146,7 @@ export class SpeakerReferenceService {
       return unavailable('record_missing', '记录已不存在，请刷新列表。')
     if (this.stopped)
       return unavailable('extraction_failed', '特征识别服务正在停止，请稍后重试。')
-    if (cached)
+    if (cached && record.audioQuality?.status === 'passed')
       return this.searchVoiceprint(recordId, cached, abortSignal, measurements)
     let samples: Float32Array
     const readStarted = performance.now()
@@ -147,14 +155,29 @@ export class SpeakerReferenceService {
     }
     catch (error) {
       const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT'
+      if (!this.stopped && !abortSignal.aborted)
+        this.options.repository.updateAudioQuality(record.id, unknownAudioQuality(missing ? 'recording_missing' : 'recording_invalid'))
       return missing
         ? unavailable('recording_missing', '录音文件不存在或已过期，无法进行特征识别。')
         : unavailable('recording_invalid', '录音文件无法读取或格式无效，无法进行特征识别。')
     }
     finally { measurements.audioReadMs = performance.now() - readStarted }
+    const qualityStarted = performance.now()
+    const quality = await this.audioQuality.check(samples, abortSignal)
+    measurements.qualityCheckMs = performance.now() - qualityStarted
+    if (!this.stopped && !abortSignal.aborted)
+      this.options.repository.updateAudioQuality(record.id, quality)
+    if (quality.status !== 'passed') {
+      const reason = quality.reason
+      if (reason === 'interference_tone' || reason === 'interference_high_band')
+        return unavailable(reason, '无法启动呼号识别。')
+      if (quality.status === 'unknown')
+        return unavailable('extraction_failed', '暂时无法识别，请稍后手动重试。')
+      return unavailable(reason === 'invalid_audio' ? 'invalid_audio' : 'insufficient_audio', '无法启动呼号识别。')
+    }
     let voiceprint: Voiceprint
     try {
-      voiceprint = await this.extractor.extract(samples, record.voicedMs, abortSignal, measurements)
+      voiceprint = await this.extractor.extract(samples, record.voicedMs, abortSignal, measurements, true)
     }
     catch (error) {
       const detail = String(error)
@@ -292,11 +315,22 @@ export class SpeakerReferenceService {
           const samples = await readSpeakerWav(speakerWavFile(recordingsDirectory, record), this.abort.signal)
           if (this.stopped)
             break
-          if (!repository.find(record.id)?.reviewed)
+          const current = repository.find(record.id)
+          if (!current?.reviewed)
+            continue
+          if (current.audioQuality && current.audioQuality.status !== 'passed')
             continue
           if (this.extractor.busy)
             break
-          const voiceprint = await this.extractor.extract(samples, record.voicedMs)
+          const quality = current.audioQuality?.status === 'passed' ? current.audioQuality : await this.audioQuality.check(samples, this.abort.signal)
+          if (this.stopped)
+            break
+          repository.updateAudioQuality(record.id, quality)
+          if (quality.status !== 'passed') {
+            repository.updateVoiceprint(record.id, { version: SPEAKER_VERSION, status: 'unavailable' })
+            continue
+          }
+          const voiceprint = await this.extractor.extract(samples, record.voicedMs, this.abort.signal, undefined, true)
           if (this.stopped)
             break
           repository.updateVoiceprint(record.id, voiceprint)

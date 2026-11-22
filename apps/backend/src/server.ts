@@ -14,6 +14,7 @@ import { config as loadEnv } from 'dotenv'
 import Fastify from 'fastify'
 import { AdminAuth } from './admin/auth.js'
 import { LoginRateLimiter } from './admin/login-rate-limiter.js'
+import { AudioQualityService } from './ai/audio-quality.js'
 import { AiService } from './ai/service.js'
 import { SpeakerReferenceService } from './ai/speaker-references.js'
 import { Allmon3StatusService, parseNodeDefinitions, publicStatusSnapshot } from './allmon3/index.js'
@@ -46,8 +47,9 @@ if (aiNodeIds.length > 0 && aiConfig.llm.enabled && !aiConfig.llm.apiKey)
   throw new Error(`AI_LLM_API_KEY is required when AI_LLM_ENABLED=true for nodes: ${aiNodeIds.join(', ')}`)
 
 const recordRepository = aiConfig.persistenceEnabled ? new RecordRepository(aiConfig.databaseFile) : undefined
+const audioQuality = new AudioQualityService()
 const speakerReferences = recordRepository
-  ? new SpeakerReferenceService({ repository: recordRepository, recordingsDirectory: aiConfig.recordingsDirectory, modelFile: aiConfig.speakerModelFile })
+  ? new SpeakerReferenceService({ repository: recordRepository, recordingsDirectory: aiConfig.recordingsDirectory, modelFile: aiConfig.speakerModelFile, audioQuality })
   : undefined
 const adminAuth = recordRepository ? new AdminAuth(aiConfig.adminFile, aiConfig.sessionsFile) : undefined
 const audioClients = new Set<WebSocket>()
@@ -72,6 +74,7 @@ const allmon3 = new Allmon3StatusService({
 const aiService = aiNodeIds.length > 0
   ? new AiService({
       config: aiConfig,
+      audioQuality,
       nodeIds: aiNodeIds,
       onSpot: spot => spotStore.publish(spot),
       ...(recordRepository ? { repository: recordRepository } : {}),
@@ -256,6 +259,7 @@ async function shutdown(signal: string): Promise<void> {
     allmon3.stop()
     aiService?.stop()
     speakerReferences?.stop()
+    audioQuality.stop()
     stopWebSocketHeartbeat?.()
     for (const client of app.websocketServer.clients)
       client.close(1001, 'Server shutting down')

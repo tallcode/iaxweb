@@ -89,10 +89,12 @@ process.on('message', async (message) => {
       send({ scores, version: SPEAKER_VERSION })
       return
     }
-    const quality = measure('qualityCheckMs', () => checkSpeakerQuality(samples))
-    if (!quality.accepted) {
-      send({ status: 'unavailable', reason: quality.reason, version: SPEAKER_VERSION })
-      return
+    if (!message.qualityApproved) {
+      const quality = measure('qualityCheckMs', () => checkSpeakerQuality(samples))
+      if (!quality.accepted) {
+        send({ status: 'unavailable', reason: quality.reason, version: SPEAKER_VERSION })
+        return
+      }
     }
     if (!extractor) {
       measure('modelValidationMs', () => verifyModel(process.argv[2]))

@@ -85,6 +85,16 @@ export const radioSignalSchema = z.object({
   content: z.string().min(1).max(256),
 })
 export const radioSignalsSchema = z.array(radioSignalSchema).max(16).readonly()
+export const audioQualitySchema = z.object({
+  status: z.enum(['passed', 'rejected', 'unknown', 'skip']),
+  reason: z.string().min(1).max(100).nullable(),
+  metrics: z.object({
+    highBandFraction: z.number().min(0).max(1),
+    toneProminenceDb: z.number().nonnegative(),
+    highBandRolloffDb: z.number(),
+    highBandDynamicDb: z.number().nonnegative(),
+  }).nullable(),
+})
 export const persistedRecordSchema = z.object({
   id: nonempty,
   nodeId: nonempty,
@@ -98,6 +108,7 @@ export const persistedRecordSchema = z.object({
   callsign,
   callsignAlgorithm: nonempty.nullable().default(null),
   signaling: radioSignalsSchema.nullable().optional(),
+  audioQuality: audioQualitySchema.nullable().optional(),
   manualCallsign,
   calleeCallsign: manualCallsign,
   effectiveCallsign: manualCallsign,

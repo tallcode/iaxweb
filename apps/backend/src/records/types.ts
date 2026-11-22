@@ -1,4 +1,4 @@
-import type { SpeakerMatch } from '@iaxweb/contracts'
+import type { AudioQuality, SpeakerMatch } from '@iaxweb/contracts'
 
 export interface SpeakerReferenceGroup {
   callsign: string
@@ -21,6 +21,7 @@ export interface RecognitionRecord {
   voicedMs: number
   recognition?: string | undefined
   corrected?: string | undefined
+  audioQuality?: AudioQuality | undefined
   revise?: string | undefined
   callsign?: string | undefined
   callsignAlgorithm?: string | undefined

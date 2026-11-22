@@ -1,4 +1,4 @@
-import type { PersistedRecord, RadioSignal, RecordPage, SpeakerMatch } from '@iaxweb/contracts'
+import type { AudioQuality, PersistedRecord, RadioSignal, RecordPage, SpeakerMatch } from '@iaxweb/contracts'
 import type { ReadyVoiceprint, RecognitionRecord, SpeakerReferenceGroup, SpeakerReferenceScore, Voiceprint } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -7,6 +7,7 @@ import { CALLSIGN_PREFIX_SOURCE, hasCallerCallsign, radioSignalsSchema } from '@
 import * as sqliteVec from 'sqlite-vec'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../ai/speaker-model.mjs'
 import { SPEAKER_REFERENCE_LIMIT } from '../ai/speaker-reference-score.mjs'
+import { isQualityReason, migrateAudioQuality, parseAudioQuality, storeAudioQuality, voiceprintQuality } from './audio-quality.js'
 import { migrateEmbeddingSchema } from './embedding-schema.js'
 import { decodeVoiceprint, encodeVoiceprint } from './voiceprint.js'
 
@@ -55,6 +56,7 @@ const SCHEMA = `
     callsign          TEXT COLLATE NOCASE,
     callsign_algorithm TEXT,
     signaling         TEXT,
+    audio_quality     TEXT,
 
     risk_level        INTEGER CHECK (risk_level BETWEEN 1 AND 5),
     risk_reason       TEXT,
@@ -109,6 +111,7 @@ const SELECT_EFFECTIVE = `
     callsign,
     callsign_algorithm,
     signaling,
+    audio_quality,
     risk_level,
     risk_reason,
     manual_callsign,
@@ -153,6 +156,7 @@ export class RecordRepository {
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN callsign_algorithm TEXT')
       if (!columns.has('signaling'))
         this.database.exec('ALTER TABLE ai_segments ADD COLUMN signaling TEXT')
+      migrateAudioQuality(this.database)
       migrateEmbeddingSchema(this.database)
       // Build after adding legacy columns used by the partial indexes.
       this.database.exec(INDEXES)
@@ -176,8 +180,8 @@ export class RecordRepository {
 
     this.database.prepare(`
       INSERT INTO ai_segments (
-        id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected, audio_quality
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       nodeId,
@@ -186,15 +190,24 @@ export class RecordRepository {
       record.voicedMs,
       record.recognition,
       record.corrected ?? null,
+      record.audioQuality ? JSON.stringify(record.audioQuality) : null,
     )
   }
 
   updateVoiceprint(id: string, voiceprint: Voiceprint): boolean {
-    return Number(this.database.prepare(`
+    const changed = Number(this.database.prepare(`
       UPDATE ai_segment_embeddings SET status = ?, embedding = ?, reason = ?
       WHERE record_id = ? AND version = ? AND status = 'pending'
         AND EXISTS (SELECT 1 FROM ai_segments WHERE id = ? AND reviewed = 1)
-    `).run(voiceprint.status, encodeVoiceprint(voiceprint), voiceprint.reason ?? null, id, voiceprint.version, id).changes) === 1
+    `).run(voiceprint.status, encodeVoiceprint(voiceprint), isQualityReason(voiceprint.reason) ? null : voiceprint.reason ?? null, id, voiceprint.version, id).changes) === 1
+    const quality = voiceprintQuality(voiceprint)
+    if (changed && quality)
+      storeAudioQuality(this.database, id, quality, voiceprint.status === 'ready')
+    return changed
+  }
+
+  updateAudioQuality(id: string, quality: AudioQuality): boolean {
+    return storeAudioQuality(this.database, id, quality)
   }
 
   findReadyVoiceprint(id: string): ReadyVoiceprint | undefined {
@@ -220,6 +233,7 @@ export class RecordRepository {
       ON CONFLICT(record_id) DO UPDATE SET version = excluded.version, dimensions = excluded.dimensions,
         status = 'ready', embedding = excluded.embedding, reason = NULL
     `).run(voiceprint.version, SPEAKER_DIMENSIONS, encodeVoiceprint(voiceprint), id)
+    storeAudioQuality(this.database, id, { status: 'passed', reason: null, metrics: null }, true)
   }
 
   pendingReviewedVoiceprints(limit: number = 10): Array<{ id: string, timestamp: string, voicedMs: number }> {
@@ -227,6 +241,7 @@ export class RecordRepository {
       SELECT s.id, s.captured_at, s.voiced_ms FROM ai_segments s
       LEFT JOIN ai_segment_embeddings e ON e.record_id = s.id
       WHERE s.reviewed = 1 AND (e.record_id IS NULL OR e.version != ? OR e.dimensions != ? OR e.status = 'pending')
+        AND (s.audio_quality IS NULL OR CASE WHEN json_valid(s.audio_quality) THEN json_extract(s.audio_quality, '$.status') END = 'passed')
       ORDER BY s.captured_at, s.id LIMIT ?
     `).all(SPEAKER_VERSION, SPEAKER_DIMENSIONS, limit)
     return rows.map(row => ({ id: requiredString(row.id), timestamp: requiredString(row.captured_at), voicedMs: requiredNumber(row.voiced_ms) }))
@@ -255,6 +270,7 @@ export class RecordRepository {
         SELECT UPPER(COALESCE(s.manual_callsign, s.callsign)) AS callsign, e.embedding
         FROM ai_segments s JOIN ai_segment_embeddings e ON e.record_id = s.id
         WHERE s.reviewed = 1 AND e.status = 'ready' AND e.version = ? AND e.dimensions = ? AND s.id != ?
+          AND (s.audio_quality IS NULL OR CASE WHEN json_valid(s.audio_quality) THEN json_extract(s.audio_quality, '$.status') END IN ('passed', 'skip'))
           AND COALESCE(s.manual_callsign, s.callsign) IS NOT NULL
       ), eligible AS MATERIALIZED (
         SELECT * FROM reviewed
@@ -300,6 +316,7 @@ export class RecordRepository {
       WHERE COALESCE(s.manual_callsign, s.callsign) COLLATE NOCASE = ?
         AND s.reviewed = 1 AND e.status = 'ready' AND e.version = ?
         AND e.dimensions = ? AND s.id != ?
+        AND (s.audio_quality IS NULL OR CASE WHEN json_valid(s.audio_quality) THEN json_extract(s.audio_quality, '$.status') END IN ('passed', 'skip'))
       ORDER BY s.captured_at DESC, s.id DESC LIMIT ?
     `)
     return callsigns.map(callsign => ({
@@ -450,7 +467,7 @@ export class RecordRepository {
     const rows = this.database.prepare(`
       SELECT
         id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected,
-        revise, callsign, callsign_algorithm, signaling, risk_level, risk_reason, manual_callsign, callee_callsign,
+        revise, callsign, callsign_algorithm, signaling, audio_quality, risk_level, risk_reason, manual_callsign, callee_callsign,
         manual_recognition, reviewed, manual_risk_level, manual_note, created_at, effective_callsign,
         effective_risk_level
       FROM ai_segments_effective
@@ -518,6 +535,7 @@ function mapRow(row: Record<string, unknown>): PersistedRecord {
     callsign: nullableString(row.callsign),
     callsignAlgorithm: nullableString(row.callsign_algorithm),
     signaling: parseSignaling(row.signaling),
+    audioQuality: parseAudioQuality(row.audio_quality),
     capturedAt: requiredString(row.captured_at),
     corrected: nullableString(row.corrected),
     createdAt: requiredString(row.created_at),

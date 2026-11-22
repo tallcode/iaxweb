@@ -5,6 +5,7 @@ import type {
   adminRoleSchema,
   adminSessionSchema,
   adminUsersPageSchema,
+  audioQualitySchema,
   audioStateSchema,
   createUserSchema,
   loginSchema,
@@ -40,6 +41,7 @@ export type SpotEvent = z.output<typeof spotEventSchema>
 export type PublicStats = z.output<typeof publicStatsSchema>
 export type StatsDay = z.output<typeof statsDaySchema>
 export type AudioState = z.output<typeof audioStateSchema>
+export type AudioQuality = z.output<typeof audioQualitySchema>
 export type RadioSignal = z.output<typeof radioSignalSchema>
 export type PersistedRecord = z.output<typeof persistedRecordSchema>
 export type RecordPage = z.output<typeof recordPageSchema>

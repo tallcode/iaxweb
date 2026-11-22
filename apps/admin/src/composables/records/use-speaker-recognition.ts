@@ -4,7 +4,7 @@ import { onScopeDispose, readonly, ref } from 'vue'
 import { ApiError } from '../../api/client'
 import { recordsApi } from '../../api/records'
 
-export function useSpeakerRecognition(options: { canBegin: () => boolean, onBegin: () => void, onUnauthorized: () => Promise<void> }): SpeakerRecognitionContext {
+export function useSpeakerRecognition(options: { canBegin: () => boolean, onBegin: () => void, onUnauthorized: () => Promise<void>, onRecognized?: () => Promise<void> }): SpeakerRecognitionContext {
   const record = ref<PersistedRecord | null>(null)
   const loading = ref(false)
   const result = ref<SpeakerRecognition | null>(null)
@@ -23,8 +23,10 @@ export function useSpeakerRecognition(options: { canBegin: () => boolean, onBegi
     result.value = null
     try {
       const response = await recordsApi.recognizeSpeaker(id, controller.signal)
-      if (current === sequence)
+      if (current === sequence) {
         result.value = response
+        await options.onRecognized?.()
+      }
     }
     catch (cause) {
       if (current !== sequence || (cause instanceof ApiError && cause.kind === 'aborted'))

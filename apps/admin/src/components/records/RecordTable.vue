@@ -2,6 +2,7 @@
 import { hasCallerCallsign } from '@iaxweb/contracts'
 import { useRecordInteractions, useRecordsQueryContext } from '../../composables/records/use-records-context'
 import { formatRecordTime as formatTime } from '../../utils/records-format'
+import AudioQualityIndicator from './AudioQualityIndicator.vue'
 import RecognitionEditor from './RecognitionEditor.vue'
 import RecordCallsign from './RecordCallsign.vue'
 import ReviewStar from './ReviewStar.vue'
@@ -14,7 +15,7 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
 <template>
   <div class="overflow-clip rounded-xl border border-slate-800 bg-slate-900/70 shadow-xl shadow-black/20" :class="activeEditor?.view === 'table' ? 'block' : activeEditor?.view === 'card' ? 'hidden' : 'hidden lg:block'">
     <table class="w-full table-fixed divide-y divide-slate-800 text-left text-sm leading-6" :class="isAdministrator ? 'min-w-[55rem]' : 'min-w-[49rem]'">
-      <colgroup><col class="w-44"><col class="w-16"><col><col class="hidden w-32 min-[1200px]:table-column"><col class="w-32"><col class="w-24"><col v-if="isAdministrator" class="w-32"></colgroup><thead class="sticky top-[calc(4rem+var(--records-toolbar-height,4rem))] z-10 bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
+      <colgroup><col class="w-44"><col class="w-24"><col><col class="hidden w-32 min-[1200px]:table-column"><col class="w-32"><col class="w-24"><col v-if="isAdministrator" class="w-32"></colgroup><thead class="sticky top-[calc(4rem+var(--records-toolbar-height,4rem))] z-10 bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
         <tr>
           <th class="whitespace-nowrap px-4 py-3">
             时间
@@ -37,7 +38,10 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
           <td class="whitespace-nowrap px-4 py-4 text-slate-400">
             {{ formatTime(record.capturedAt) }}
           </td><td class="whitespace-nowrap px-4 py-4">
-            {{ (record.durationMs / 1_000).toFixed(1) }}s
+            <span class="inline-flex items-center gap-1 whitespace-nowrap">
+              <span>{{ (record.durationMs / 1_000).toFixed(1) }}s</span>
+              <AudioQualityIndicator :quality="record.audioQuality" />
+            </span>
           </td><td class="px-4 py-4">
             <RecognitionEditor :signals="record.signaling" :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="hasActiveEditor || isSaving(record.id) || isMutating" :save="value => saveRecognition(record, value)" :request-edit="() => acquireEditor(record, 'recognition', 'table')" @editing="editing => !editing && finishEditing(record, 'recognition', 'table')" />
           </td><td class="hidden px-4 py-3 min-[1200px]:table-cell">
