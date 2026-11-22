@@ -46,6 +46,10 @@
   cursor: help;
 }
 
+.spot-help-short {
+  display: none;
+}
+
 .spot-list {
   --spot-item-height: 36px;
 
@@ -130,14 +134,32 @@
   }
 
   .spot-panel-title {
-    font-size: 0.58rem;
+    flex: none;
+    font-size: 0.55rem;
     line-height: 1;
+    white-space: nowrap;
+  }
+
+  .spot-panel-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
   }
 
   .spot-help {
-    width: 0.75rem;
-    height: 0.75rem;
-    font-size: 0.5rem;
+    display: none;
+  }
+
+  .spot-help-short {
+    display: block;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: #aab5c4;
+    font-size: 0.58rem;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .spot-list {
@@ -161,15 +183,16 @@
   }
 
   .spot-callsign {
-    font-size: clamp(0.62rem, 3.6vw, 0.8rem);
+    font-size: clamp(0.6rem, 3.3vw, 0.75rem);
   }
 
   .spot-time {
-    font-size: clamp(0.5rem, 3vw, 0.62rem);
+    font-size: clamp(0.48rem, 2.7vw, 0.58rem);
   }
 
   .spot-empty {
     margin: 0;
+    font-size: 0.65rem;
     text-align: left;
   }
 }

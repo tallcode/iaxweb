@@ -3,6 +3,10 @@ import { computed, ref } from 'vue'
 
 const props = defineProps<{ rows: number[][] }>()
 const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const highActivityStart = 100
+const activityThresholds = [1.5, 5.5, 15, 40, 60, highActivityStart]
+const highActivityLevels = 3
+const legendLevels = [0, 1, 2, 3, 5, 7, 9]
 const formatNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format
 const table = ref<HTMLTableElement>()
 const active = ref<{ day: number, hour: number }>()
@@ -30,7 +34,15 @@ function hourLabel(hour: number): string {
 }
 
 function level(value: number): number {
-  return value === 0 ? 0 : Math.ceil(4 * value / peak.value.value)
+  if (value === 0)
+    return 0
+
+  const band = activityThresholds.findIndex(limit => value <= limit)
+  if (band !== -1)
+    return band + 1
+
+  const highRangePosition = (value - highActivityStart) / (peak.value.value - highActivityStart)
+  return activityThresholds.length + Math.ceil(highActivityLevels * highRangePosition)
 }
 </script>
 
@@ -41,9 +53,9 @@ function level(value: number): number {
         {{ weekdays[current.day] }} {{ hourLabel(current.hour) }}–{{ hourLabel(current.hour + 1) }}
         <strong>平均 {{ formatNumber(rows[current.day]![current.hour]!) }} 条</strong>
       </p>
-      <div class="stats-heatmap-scale" aria-label="颜色越亮，日均条数越多">
+      <div class="stats-heatmap-scale" role="img" aria-label="颜色越亮，日均条数越多">
         <span>低</span>
-        <i v-for="index in 5" :key="index" :data-level="index - 1" />
+        <i v-for="legendLevel in legendLevels" :key="legendLevel" :data-level="legendLevel" />
         <span>高</span>
       </div>
     </div>

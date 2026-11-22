@@ -69,16 +69,21 @@ function relativeTime(iso: string): string {
 </script>
 
 <template>
-  <aside class="spot-panel" aria-label="AI Spot 最近呼号">
-    <h2 class="spot-panel-title">
-      AI Spot
-      <span
-        class="spot-help"
-        role="img"
-        aria-label="说明：在浙江省业余无线电协会链路联网中继上，用清晰标准的字母解释法说出自己的呼号，AI值机员就有可能把你的呼号记录下来。如果语速太快，声音太轻，信号有干扰可能无法记录或者识别失败"
-        title="在浙江省业余无线电协会链路联网中继上，用清晰标准的字母解释法说出自己的呼号，AI值机员就有可能把你的呼号记录下来。&#10;如果语速太快，声音太轻，信号有干扰可能无法记录或者识别失败"
-      >?</span>
-    </h2>
+  <aside class="spot-panel" aria-label="AI Spots 最近呼号">
+    <div class="spot-panel-heading">
+      <h2 class="spot-panel-title">
+        AI Spots
+        <span
+          class="spot-help"
+          role="img"
+          aria-label="说明：在浙江省业余无线电协会链路联网中继上，用清晰标准的字母解释法说出自己的呼号，AI值机员就有可能把你的呼号记录下来。如果语速太快，声音太轻，信号有干扰可能无法记录或者识别失败"
+          title="在浙江省业余无线电协会链路联网中继上，用清晰标准的字母解释法说出自己的呼号，AI值机员就有可能把你的呼号记录下来。&#10;如果语速太快，声音太轻，信号有干扰可能无法记录或者识别失败"
+        >?</span>
+      </h2>
+      <p class="spot-help-short">
+        在联网中继用字母解释法清晰报呼号，AI 有机会记录。
+      </p>
+    </div>
     <ul v-if="spots.length" ref="spotListElement" class="spot-list">
       <li v-for="spot in visibleSpots" :key="spotKey(spot)" class="spot-item" :class="{ 'is-new': highlightedSpotKeys.has(spotKey(spot)) }" @animationend="highlightedSpotKeys.delete(spotKey(spot))">
         <span class="spot-callsign">{{ spot.callsign }}</span>
