@@ -1,6 +1,8 @@
 export interface SpeakerQualityMetrics {
   highBandFraction: number
   toneProminenceDb: number
+  highBandRolloffDb: number
+  highBandDynamicDb: number
 }
 
 export type SpeakerQualityResult

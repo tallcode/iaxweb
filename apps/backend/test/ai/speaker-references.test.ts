@@ -177,3 +177,65 @@ test('ten-reference confidence boundaries and an unconfident predecessor constra
     ['BG5GXT', null],
   ])
 })
+
+test('manual recognition keeps an existing voiceprint without reading or extracting audio again', async (t) => {
+  const repository = new RecordRepository(':memory:')
+  const service = new SpeakerReferenceService({ repository, recordingsDirectory: 'unused', modelFile: 'unused' })
+  t.after(() => {
+    service.stop()
+    repository.close()
+  })
+  repository.insert('1900', { id: 'cached-query', timestamp: '2026-11-22T06:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '收到' })
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
+  embedding[0] = 1
+  const voiceprint = { status: 'ready', version: SPEAKER_VERSION, embedding } as const
+  repository.saveQueryVoiceprint('cached-query', voiceprint)
+  const extract = t.mock.method(SpeakerExtractor.prototype, 'extract', async () => {
+    throw new Error('A stored voiceprint must be reused')
+  })
+  t.mock.method(repository, 'searchSpeakerMatches', () => ({ referenceCount: 0, matches: [] }))
+  const result = await service.recognizeRecord('cached-query')
+  assert.equal(result.status, 'no_match')
+  assert.equal(result.measurements.audioReadMs, null)
+  assert.equal(extract.mock.callCount(), 0)
+  assert.deepEqual(repository.findReadyVoiceprint('cached-query'), voiceprint)
+  assert.equal(repository.find('cached-query')?.reviewed, false)
+})
+
+test('prior quality rejections are retried only manually and a successful retry is cached', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-speaker-manual-retry-'))
+  const repository = new RecordRepository(':memory:')
+  const service = new SpeakerReferenceService({ repository, recordingsDirectory: directory, modelFile: 'unused' })
+  t.after(() => {
+    service.stop()
+    repository.close()
+    rmSync(directory, { recursive: true, force: true })
+  })
+  const record = { id: 'quality-retry', timestamp: '2026-11-22T06:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: '收到' }
+  repository.insert('1900', record)
+  repository.updateManualReview(record.id, { reviewed: true, callsign: 'BG5XXX' })
+  repository.updateVoiceprint(record.id, { status: 'unavailable', version: SPEAKER_VERSION, reason: 'interference_high_band' })
+  new RecordingStore(directory).save(record.id, record.timestamp, encodeWav(speechLikeAudio()))
+  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
+  embedding[0] = 1
+  let attempts = 0
+  t.mock.method(SpeakerExtractor.prototype, 'extract', async () => ++attempts === 1
+    ? { status: 'unavailable', version: SPEAKER_VERSION, reason: 'interference_high_band' } as const
+    : { status: 'ready', version: SPEAKER_VERSION, embedding } as const)
+  t.mock.method(repository, 'searchSpeakerMatches', () => ({ referenceCount: 0, matches: [] }))
+
+  await service.processPending()
+  assert.equal(attempts, 0)
+  assert.equal((await service.recognizeRecord(record.id)).reasonCode, 'interference_high_band')
+  assert.equal(attempts, 1)
+  await service.processPending()
+  assert.equal(attempts, 1)
+  assert.equal((await service.recognizeRecord(record.id)).status, 'no_match')
+  assert.equal(attempts, 2)
+  assert.equal((await service.recognizeRecord(record.id)).status, 'no_match')
+  assert.equal(attempts, 2)
+  assert.deepEqual(repository.findReadyVoiceprint(record.id), { status: 'ready', version: SPEAKER_VERSION, embedding })
+  assert.deepEqual(repository.pendingReviewedVoiceprints(), [])
+  assert.equal(repository.find(record.id)?.reviewed, true)
+  assert.equal(repository.find(record.id)?.manualCallsign, 'BG5XXX')
+})

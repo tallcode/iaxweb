@@ -1,12 +1,14 @@
-// Radio quality gate v1, calibrated on the 2026-11-17 interference examples.
-// This is a conservative spectral heuristic, not a general interference model.
-// Spectral thresholds match the original experiment; long recordings now skip
-// radio key-up/key-down transients at both edges before measuring interference.
+// Joint spectral and temporal radio quality gate, checked against 13 user-labeled
+// recordings. These heuristics are not a general interference classifier.
 const SAMPLE_RATE = 8000
 const MIN_SAMPLES = SAMPLE_RATE
 const EDGE_SAMPLES = SAMPLE_RATE / 2
 const TONE_LIMIT_DB = 18
 const HIGH_BAND_LIMIT = 0.014
+// Equal-width 3.0-3.3 kHz and 3.6-3.9 kHz bands. -6 dB is roughly a 4:1 power drop.
+const HIGH_BAND_ROLLOFF_LIMIT_DB = -6
+const TEMPORAL_ROLLOFF_LIMIT_DB = -8.5
+const HIGH_BAND_DYNAMIC_LIMIT_DB = 15
 
 function spectrumPlan(size, windowSize) {
   const real = new Float64Array(size)
@@ -78,17 +80,40 @@ export function checkSpeakerQuality(samples) {
 
   let total = 0
   let high = 0
+  let lowerHigh = 0
+  let upperHigh = 0
+  const highFrames = []
   // scipy STFT: periodic Hann256, hop64, FFT1024, no boundary padding.
   for (let start = 0; start + 256 <= samples.length; start += 64) {
     const power = shortSpectrum(samples, start, false)
+    let frameHigh = 0
     for (let i = 20; i <= 499; i++) {
       const value = power[i] / (128 * 128) + 1e-16
       total += value
-      if (i >= 384)
+      if (i >= 384) {
         high += value
+        frameHigh += value
+      }
+      if (i >= 384 && i <= 422)
+        lowerHigh += value
+      if (i >= 461 && i <= 499)
+        upperHigh += value
     }
+    highFrames.push(frameHigh)
   }
   const highBandFraction = high / total
+  const highBandRolloffDb = 10 * Math.log10(Math.max(upperHigh, 1e-30) / Math.max(lowerHigh, 1e-30))
+
+  // Measure time variation without letting a single click or extreme frame
+  // determine the range. At the worker's 60s limit this holds fewer than 7500
+  // frame energies; no extra FFT or inference model is needed.
+  highFrames.sort((a, b) => a - b)
+  const quantile = (q) => {
+    const at = (highFrames.length - 1) * q
+    const index = Math.floor(at)
+    return highFrames[index] + (highFrames[Math.min(index + 1, highFrames.length - 1)] - highFrames[index]) * (at - index)
+  }
+  const highBandDynamicDb = 10 * Math.log10(Math.max(quantile(0.9), 1e-30) / Math.max(quantile(0.1), 1e-30))
 
   // Welch PSD: periodic Hann2048, 50% overlap, constant detrending.
   // The common density normalization cancels in the peak/background ratio.
@@ -108,10 +133,14 @@ export function checkSpeakerQuality(samples) {
     // A pure tone can have a zero background. Keep the metric finite.
     toneProminenceDb = Math.max(toneProminenceDb, 10 * Math.log10(average[i] / Math.max(median, 1e-30)))
   }
-  const metrics = { highBandFraction, toneProminenceDb }
+  const metrics = { highBandFraction, toneProminenceDb, highBandRolloffDb, highBandDynamicDb }
   if (toneProminenceDb > TONE_LIMIT_DB)
     return { accepted: false, reason: 'interference_tone', metrics }
-  if (highBandFraction > HIGH_BAND_LIMIT)
+  if (highBandFraction > HIGH_BAND_LIMIT && highBandRolloffDb > HIGH_BAND_ROLLOFF_LIMIT_DB)
+    return { accepted: false, reason: 'interference_high_band', metrics }
+  // Time variation alone also occurs in clean speech. Require both excessive
+  // high-band energy and limited rolloff before using it to reject audio.
+  if (highBandFraction > HIGH_BAND_LIMIT && highBandRolloffDb > TEMPORAL_ROLLOFF_LIMIT_DB && highBandDynamicDb > HIGH_BAND_DYNAMIC_LIMIT_DB)
     return { accepted: false, reason: 'interference_high_band', metrics }
   return { accepted: true, metrics }
 }

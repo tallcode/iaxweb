@@ -79,3 +79,46 @@ test('broadband interference is rejected without a prominent narrow tone', () =>
   assert.ok(result.metrics && result.metrics.toneProminenceDb < 18)
   assert.ok(result.metrics.highBandFraction > 0.014)
 })
+
+function coloredNoise(tapWeight: number, modulated: boolean): Float32Array {
+  let previous = 0
+  // A two-tap filter changes spectral tilt without fixed tones. Alternating
+  // levels create time variation independently of that spectral shape.
+  return noise(64_000).map((sample, i) => {
+    const value = (sample + tapWeight * previous) / (1 + tapWeight)
+    previous = sample
+    const gain = modulated && Math.floor(i / 2000) % 2 === 0 ? 0.08 : 1
+    return value * gain
+  })
+}
+
+test('high-band energy with spectral rolloff does not alone reject steady audio', () => {
+  const result = checkSpeakerQuality(coloredNoise(0.8, false))
+  assert.equal(result.accepted, true, JSON.stringify(result))
+  assert.ok(result.metrics)
+  assert.ok(result.metrics.highBandFraction > 0.014)
+  assert.ok(result.metrics.highBandRolloffDb < -6 && result.metrics.highBandRolloffDb > -8.5)
+  assert.ok(result.metrics.highBandDynamicDb < 15)
+})
+
+test('varying colored interference is rejected even with moderate high-band rolloff', () => {
+  const result = checkSpeakerQuality(coloredNoise(0.8, true))
+  assert.equal(result.accepted, false, JSON.stringify(result))
+  if (result.accepted)
+    throw new Error('Expected rejected varying high-band interference')
+  assert.equal(result.reason, 'interference_high_band')
+  assert.ok(result.metrics)
+  assert.ok(result.metrics.toneProminenceDb < 18)
+  assert.ok(result.metrics.highBandFraction > 0.014)
+  assert.ok(result.metrics.highBandRolloffDb < -6 && result.metrics.highBandRolloffDb > -8.5)
+  assert.ok(result.metrics.highBandDynamicDb > 15)
+})
+
+test('time variation with steep high-band rolloff remains eligible', () => {
+  const result = checkSpeakerQuality(coloredNoise(1, true))
+  assert.equal(result.accepted, true, JSON.stringify(result))
+  assert.ok(result.metrics)
+  assert.ok(result.metrics.highBandFraction > 0.014)
+  assert.ok(result.metrics.highBandRolloffDb < -8.5)
+  assert.ok(result.metrics.highBandDynamicDb > 15)
+})
