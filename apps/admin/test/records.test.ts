@@ -151,6 +151,30 @@ describe('record callsign editing', () => {
     wrapper.unmount()
   })
 
+  it('refreshes on the first 60-second tick when the initial load takes time', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+    const page = { items: [record()], page: 1, pageSize: 50, total: 1 }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        setTimeout(() => resolve(jsonResponse(page)), 500)
+      }))
+      .mockResolvedValueOnce(jsonResponse(page))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage)
+
+    await vi.advanceTimersByTimeAsync(59_999)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
   it('pauses auto refresh while the page is scrolled down and resumes at the top', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('Audio', class extends EventTarget {

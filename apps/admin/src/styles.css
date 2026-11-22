@@ -16,6 +16,10 @@ body {
   margin: 0;
 }
 
+:root:has(.records-main) {
+  overscroll-behavior-y: contain;
+}
+
 .records-main {
   padding-top: calc(4rem + var(--records-toolbar-height, 4rem));
 }

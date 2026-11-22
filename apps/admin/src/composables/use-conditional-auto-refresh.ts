@@ -1,6 +1,8 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { usePageTopPull } from './use-page-top-pull'
 
 const DEFAULT_INTERVAL_MS = 60_000
+const MINIMUM_REFRESH_INTERVAL_MS = 30_000
 
 interface ConditionalAutoRefreshOptions {
   canRefresh: () => boolean
@@ -13,20 +15,19 @@ interface ConditionalAutoRefreshOptions {
 export function useConditionalAutoRefresh(options: ConditionalAutoRefreshOptions): {
   markRefreshed: () => void
 } {
-  const isAtPageTop = ref(true)
   const isOnline = ref(navigator.onLine)
   const isPageVisible = ref(document.visibilityState === 'visible')
   const lastSuccessfulRefreshAt = ref<number | null>(null)
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS
   let refreshTimer: ReturnType<typeof setInterval> | undefined
 
+  usePageTopPull(() => void refreshIfStale())
+
   onMounted(() => {
     updatePageVisibility()
     updateOnlineStatus()
-    updateScrollPosition()
     window.addEventListener('online', handleOnlineStatusChange)
     window.addEventListener('offline', handleOnlineStatusChange)
-    window.addEventListener('scroll', updateScrollPosition, { passive: true })
     document.addEventListener('visibilitychange', handlePageVisibilityChange)
     refreshTimer = setInterval(() => void refreshIfStale(), intervalMs)
   })
@@ -34,7 +35,6 @@ export function useConditionalAutoRefresh(options: ConditionalAutoRefreshOptions
   onBeforeUnmount(() => {
     window.removeEventListener('online', handleOnlineStatusChange)
     window.removeEventListener('offline', handleOnlineStatusChange)
-    window.removeEventListener('scroll', updateScrollPosition)
     document.removeEventListener('visibilitychange', handlePageVisibilityChange)
     if (refreshTimer !== undefined)
       clearInterval(refreshTimer)
@@ -62,17 +62,13 @@ export function useConditionalAutoRefresh(options: ConditionalAutoRefreshOptions
     void refreshIfStale()
   }
 
-  function updateScrollPosition(): void {
-    isAtPageTop.value = window.scrollY === 0
-  }
-
   function isRefreshStale(): boolean {
     return lastSuccessfulRefreshAt.value === null
-      || Date.now() - lastSuccessfulRefreshAt.value >= intervalMs
+      || Date.now() - lastSuccessfulRefreshAt.value >= MINIMUM_REFRESH_INTERVAL_MS
   }
 
   async function refreshIfStale(): Promise<void> {
-    if (options.canRefresh() && isAtPageTop.value && isOnline.value && isPageVisible.value && isRefreshStale())
+    if (options.canRefresh() && window.scrollY <= 0 && isOnline.value && isPageVisible.value && isRefreshStale())
       await options.refresh()
   }
 
