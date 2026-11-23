@@ -1,8 +1,8 @@
 import type { InjectionKey } from 'vue'
+import { decodeMuLawSample, parseAudioFrame, SAMPLE_RATE, signedMediaTimestampDifference } from '@iaxweb/audio-protocol'
 import { shallowRef } from 'vue'
 import { ReconnectingWebSocket } from './reconnecting-websocket'
 
-const SAMPLE_RATE = 8_000
 const JITTER_SECONDS = 0.1
 const MAX_SCHEDULE_AHEAD_SECONDS = 0.5
 const MAX_PLAYBACK_LAG_SECONDS = 0.05
@@ -126,19 +126,19 @@ export class AudioStreamPlayer {
 
   private scheduleFrame(data: ArrayBuffer): boolean {
     const context = this.playback.value?.context
-    if (!context || data.byteLength < 11)
+    if (!context)
       return false
-    const view = new DataView(data)
-    if (view.getUint8(0) !== 1 || view.getUint8(1) !== 1)
+    const frame = parseAudioFrame(new Uint8Array(data))
+    if (!frame)
       return false
 
-    const timestamp = view.getUint32(6, false)
+    const { payload, timestamp } = frame
     const now = context.currentTime
     const previous = this.lastFrame
     let startTime = now + JITTER_SECONDS
     if (previous) {
       // The rolling reference preserves small signed deltas across uint32 wrap.
-      const elapsedMs = (timestamp - previous.timestamp) | 0
+      const elapsedMs = signedMediaTimestampDifference(timestamp, previous.timestamp)
       if (elapsedMs <= 0 && elapsedMs >= -CLOCK_RESET_MS)
         return true // Valid transport data, but the frame is late or duplicated.
       const projected = previous.startTime + elapsedMs / 1_000
@@ -148,10 +148,9 @@ export class AudioStreamPlayer {
         startTime = projected
     }
 
-    const encoded = new Uint8Array(data, 10)
-    const buffer = context.createBuffer(1, encoded.length, SAMPLE_RATE)
+    const buffer = context.createBuffer(1, payload.length, SAMPLE_RATE)
     const samples = buffer.getChannelData(0)
-    encoded.forEach((value, index) => samples[index] = decodeMuLaw(value))
+    payload.forEach((value, index) => samples[index] = decodeMuLawSample(value) / 32_768)
     const source = context.createBufferSource()
     source.buffer = buffer
     // Keep scheduled sound connected when the topology meter unmounts.
@@ -171,13 +170,4 @@ export class AudioStreamPlayer {
       source.stop()
     this.scheduledSources.clear()
   }
-}
-
-function decodeMuLaw(value: number): number {
-  const muLaw = (~value) & 0xFF
-  const sign = muLaw & 0x80
-  const exponent = (muLaw >> 4) & 0x07
-  const mantissa = muLaw & 0x0F
-  const sample = (((mantissa << 3) + 0x84) << exponent) - 0x84
-  return (sign ? -sample : sample) / 32_768
 }

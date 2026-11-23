@@ -1,6 +1,7 @@
 import type { Frame, TimedFrame } from './segment-audio.js'
 import { randomUUID } from 'node:crypto'
-import { decodeFrame, insertTimedFrame, parseAudioFrame, renderTimeline, SAMPLES_PER_MS, segmentDuration, signedDifference, sliceFrame, splitTimeline, trimSilence, voicedDuration } from './segment-audio.js'
+import { parseAudioFrame, signedMediaTimestampDifference } from '@iaxweb/audio-protocol'
+import { decodeFrame, insertTimedFrame, renderTimeline, SAMPLES_PER_MS, segmentDuration, sliceFrame, splitTimeline, trimSilence, voicedDuration } from './segment-audio.js'
 
 export { findCutIndex, VOICE_DBFS_THRESHOLD } from './segment-audio.js'
 
@@ -67,7 +68,7 @@ export class NodeSegmenter {
     if (!audio)
       return
     const { payload, timestamp } = audio
-    const frame = decodeFrame(payload, this.now())
+    const frame = decodeFrame(payload.slice(), this.now())
     if (this.recording)
       this.recordFrame(timestamp, frame)
     else
@@ -110,7 +111,7 @@ export class NodeSegmenter {
     if (!this.recording)
       return
     const end = timestamp !== undefined && this.originTimestamp !== null
-      ? signedDifference(timestamp, this.originTimestamp) * SAMPLES_PER_MS
+      ? signedMediaTimestampDifference(timestamp, this.originTimestamp) * SAMPLES_PER_MS
       : Number.POSITIVE_INFINITY
     // Normal stops point to a suppressed silent frame. On disconnect iaxmon
     // may instead point to the final audio frame; that whole frame belongs here.
@@ -175,26 +176,26 @@ export class NodeSegmenter {
   }
 
   private recordFrame(timestamp: number, frame: Frame): void {
-    if (this.startTimestamp !== undefined && signedDifference(timestamp, this.startTimestamp) < 0)
+    if (this.startTimestamp !== undefined && signedMediaTimestampDifference(timestamp, this.startTimestamp) < 0)
       return
     const frames = this.recording
     if (!frames)
       return
     this.originTimestamp ??= timestamp
-    let at = signedDifference(timestamp, this.originTimestamp) * SAMPLES_PER_MS
+    let at = signedMediaTimestampDifference(timestamp, this.originTimestamp) * SAMPLES_PER_MS
     if (at + frame.payload.length <= this.emittedThrough)
       return
     // An explicit start establishes the clock epoch, so earlier frames inside
     // that transmission are reordered, not mistaken for a clock reset.
     if (this.startTimestamp === undefined && this.lastTimestamp !== null
-      && signedDifference(timestamp, this.lastTimestamp) < BACKWARD_JUMP_MS
+      && signedMediaTimestampDifference(timestamp, this.lastTimestamp) < BACKWARD_JUMP_MS
       && !frames.some(entry => entry.at === at)) {
       this.discardRecording('reset')
       this.clearPending()
       this.bufferFrame(timestamp, frame)
       return
     }
-    if (this.lastTimestamp === null || signedDifference(timestamp, this.lastTimestamp) > 0)
+    if (this.lastTimestamp === null || signedMediaTimestampDifference(timestamp, this.lastTimestamp) > 0)
       this.lastTimestamp = timestamp
     if (at < this.emittedThrough) {
       frame = sliceFrame(frame, this.emittedThrough - at)

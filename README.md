@@ -1,44 +1,27 @@
 # iaxweb
 
-面向 `iaxmon --nats` 的 Web 网关，提供节点拓扑、音频播放和记录管理。项目使用 npm workspaces，后端为 Node.js / TypeScript，前端为 Vue / Vite。
+iaxweb 是面向 `iaxmon --nats` 的 Web 网关。它通过 Allmon3 获取节点和链路状态，通过 NATS 接收节点音频，并向浏览器提供实时状态和播放。
 
-## 环境要求
+- **公开站**提供中继拓扑、地图、覆盖预测、实时监听和通联统计。
+- **AI 值机员**可按节点启用，支持语音转写、呼号识别和公开 AI Spots。
+- **管理后台**在启用持久化后提供录音回听、人工校对、标注、声纹识别和用户管理。
 
-- Node.js 24 或更新版本；npm 版本见 [package.json](package.json) 的 `packageManager`。
-- 可访问的 NATS 和 Allmon3 服务。
-- Docker Compose：用于容器部署。
-- SQLite 命令行工具：仅数据库备份脚本需要。
+[快速开始](#快速开始) · [部署与升级](#部署与升级) · [AI 与记录管理](#ai-与记录管理) · [日常维护](#日常维护) · [开发与目录](#开发与目录)
 
-## 目录结构
+## 快速开始
 
-```text
-apps/
-  backend/           HTTP、WebSocket 和后台服务
-  public/            公开页面
-  admin/             管理后台
-packages/contracts/  前后端共享类型与接口 schema
-examples/ai/         AI 提示词和输出 schema 示例
-scripts/             模型下载、数据库备份等工具
-config/              部署配置，不提交到 Git
-  nodes.json         节点配置
-  admin.json         系统管理员账号
-  prompt.txt         AI 提取提示词（启用 LLM 时必需）
-  schema.json        AI 识别共用的输出 Schema
-  models/            声纹模型（可选）
-data/                数据库、录音、用户和会话等运行数据，不提交到 Git
-```
+准备可访问的 Allmon3 和 NATS 服务，并让音频节点以 `iaxmon --nats` 发布。源码运行需要 Node.js 24 或更新版本，npm 版本以 `packageManager` 为准。使用发布镜像时，宿主机需要 Docker Compose 和部署配置。 [版本配置](package.json)
 
-## 本地开发
+### 配置上游与节点
 
-在项目根目录执行：
+在仓库根目录创建配置和数据目录。已有 `.env` 时继续使用原文件。
 
 ```bash
-npm ci
-cp .env.example .env
 mkdir -p config data
+test -f .env || cp .env.example .env
 ```
 
-修改 `.env` 中的服务地址；以下地址为占位示例：
+在 `.env` 中填写实际服务地址和主题前缀。以下地址是示例，`NATS_SUBJECT_ROOT` 应与 iaxmon 一致。NATS 如需认证，可配置 `NATS_USERNAME` 与 `NATS_PASSWORD`，或配置 `NATS_TOKEN`。完整配置见 [.env.example](.env.example)。
 
 ```dotenv
 NATS_SERVERS=nats://nats.example:4222
@@ -46,15 +29,16 @@ NATS_SUBJECT_ROOT=iaxmon.nodes
 ALLMON3_BASE_URL=http://allmon.example/allmon3/
 ```
 
-完整配置项见 [.env.example](.env.example)。服务会读取项目根目录的 `.env`，进程环境变量优先。相对文件路径均以项目根目录为基准。
+应用读取仓库根目录的 `.env`，进程环境变量优先。环境变量中的相对文件路径以仓库根目录为基准。修改环境变量或节点配置后，重启后端。
 
-创建 `config/nodes.json`，节点号和名称按实际环境替换：
+创建 `config/nodes.json`，将示例节点号和名称换成实际配置。节点号使用数字字符串，`TYPE` 可用 `HUB` 或 `REPEATER`。
 
 ```json
 {
   "1000": {
     "NAME": "示例中心节点",
     "TYPE": "HUB",
+    "AUDIO": true,
     "LINK": ["1001"]
   },
   "1001": {
@@ -62,162 +46,38 @@ ALLMON3_BASE_URL=http://allmon.example/allmon3/
     "TYPE": "REPEATER",
     "GB": "156330106",
     "LOCATION": { "lat": 30.25, "lon": 120.1 },
-    "LINK": ["1000"],
-    "AUDIO": true
+    "LINK": ["1000"]
   }
 }
 ```
 
-中继的 `LOCATION` 可选，填写 WGS84 经纬度（`lat` 为纬度，`lon` 为经度）。地图优先使用经纬度定位，未配置 `LOCATION` 时按 `GB` 使用县区内部中心。
+- `AUDIO: true` 启用该节点的实时音频订阅。公开站在已启用音频的 HUB 卡片上显示播放按钮。
+- `AI: true` 启用该节点的 AI 值机员，同时需要 `AUDIO: true` 和对应的 [AI 配置](#ai-与记录管理)。
+- 地图优先使用 `LOCATION` 中的 WGS84 经纬度。省略 `LOCATION` 时，按 `GB` 使用县区内部中心。
 
-启动开发服务：
+### 本地启动
+
+首次开发先构建两套前端，因为后端在启动时会加载它们的 HTML。删除 `dist` 后也需要重建一次。
 
 ```bash
+npm ci
+npm run build
 npm run dev
 ```
 
-| 服务 | 地址 | 单独启动 |
+| 服务 | 默认地址 | 单独启动 |
 | --- | --- | --- |
-| 后端 | `http://localhost:3000` | `npm run dev:backend` |
-| 公开页面 | `http://localhost:5173` | `npm run dev:public` |
+| 公开站 | `http://localhost:5173` | `npm run dev:public` |
 | 管理后台 | `http://localhost:5174/admin/` | `npm run dev:admin` |
+| 后端 | `http://localhost:3000` | `npm run dev:backend` |
 
-Vite 开发服务器已配置后端代理。环境变量和节点配置修改后需重启服务。
+开发时访问 Vite 地址可使用热更新。两套 Vite 服务的代理默认指向 `localhost:3000`。修改后端 `PORT` 时，需要同步调整对应的 Vite 代理。管理后台登录需要先[启用记录管理](#记录管理与账号)。
 
-### 地图覆盖预测
+## 部署与升级
 
-地图页可分别开启 BR5AI、BR5BB、BR5AF 和 BR5AO 的预测覆盖图层，按需从 `data/coverage/` 加载对应文件。仿真半径均设为 300 km。
+### Docker Compose
 
-| 中继 | 频率 | 功率 | 天线离地高度 |
-| --- | --- | --- | --- |
-| BR5AI | 145.4 MHz | 25 W | 400 m |
-| BR5BB | 145.48 MHz | 10 W | 526 m |
-| BR5AF | 145.52 MHz | 25 W | 100 m |
-| BR5AO | 145.22 MHz | 25 W | 70 m |
-
-更新或增加中继图层时，先从 [Meshtastic Site Planner](https://site.meshtastic.org/) 的站点弹窗导出 GeoJSON，再运行以下命令。将 `BR5AI` 替换成对应中继名即可生成同名文件。
-
-```bash
-node scripts/pack-coverage.mjs BR5AI /path/to/coverage.geojson
-```
-
-脚本保留每档的 dBm 阈值、原始颜色、多边形和孔洞。经纬度舍入到小数点后四位，并清理重复的连续点和线段上的共线中间点。舍入后会塌缩或反转的环保留原精度。最后将紧凑 JSON 用 gzip 最高压缩级别打包，并原子替换 `data/coverage/<中继名>.geojson.gz`。保留原始导出，以便重做。
-
-覆盖文件随部署主机的 `data/` 目录管理，由 Docker Compose 挂载到容器。`/api/coverage/BR5AI.geojson` 直接发送磁盘上的 gzip 字节，客户端须在 `Accept-Encoding` 声明接受 gzip，否则返回 `406`。响应缓存有效期为 30 天。同名文件替换后，已缓存的客户端可能继续使用旧版本直至过期。
-
-## 可选功能配置
-
-### AI 识别
-
-在需要识别的节点中同时设置 `"AUDIO": true` 和 `"AI": true`，并配置 `.env`：
-
-```dotenv
-AI_ASR_API_KEY=replace-with-asr-key
-AI_LLM_API_KEY=replace-with-llm-key
-```
-
-ASR 和 LLM 的端点、模型可分别配置；只使用语音转写时设置 `AI_LLM_ENABLED=false`。
-
-启用 LLM 时，将呼号提取提示词和 Schema 复制到 `config/`。
-
-```bash
-cp examples/ai/simple/prompt.txt config/prompt.txt
-cp examples/ai/schema.json config/schema.json
-```
-
-`config/prompt.txt` 只包含一份提取提示词，无需分段。每次调用前重新读取，编辑后无需重启。提示词或 Schema 缺失、不可读、无效时跳过识别。
-
-已有部署升级时须同时更新 `config/prompt.txt` 和 `config/schema.json`。模型在一阶段只输出自报与解释法的四个提取字段，最终呼号由程序匹配。二阶段由程序使用声纹补证。
-
-ASR 可选配置包括 `config/hotwords.json`（热词）和 `config/background.txt`（背景文本）。可将 [ASR 背景示例](examples/ai/background.txt) 复制为 `config/background.txt`，保存后下一次转写即生效。
-
-### 记录管理
-
-在 `.env` 中设置 `AI_PERSISTENCE_ENABLED=true`，启用 SQLite、录音保存和管理后台。
-
-先生成管理员密码哈希：
-
-```bash
-npm run hash-admin-password -- 'replace-with-your-password'
-```
-
-将输出的哈希填入 `config/admin.json`：
-
-```json
-{
-  "users": [
-    {
-      "username": "admin",
-      "passwordHash": "replace-with-generated-scrypt-hash"
-    }
-  ]
-}
-```
-
-登录 `/admin/` 后，可在用户管理页面创建其他账号，角色支持 `admin`、`editor` 和 `viewer`。修改系统管理员配置后需重启服务。
-
-默认运行数据：
-
-| 路径 | 内容 |
-| --- | --- |
-| `data/ai.sqlite` | 识别记录及声纹 |
-| `data/rec/` | WAV 录音，按 UTC 日期分目录 |
-| `data/users.json` | 普通用户账号 |
-| `data/sessions.json` | 登录会话 |
-| `data/stats/speech-activity.json` | 前台语音活动统计缓存，访问时按北京时间刷新 |
-| `data/embedding-backfill/` | 声纹补算进度及备份 |
-
-### 声纹模型
-
-使用声纹功能前，在宿主机准备一次模型：
-
-```bash
-npm run download:speaker-model
-```
-
-模型为 ERes2NetV2，保存在 `config/models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx`，约 71.4 MB；已有正确文件时跳过下载。也可以将同一模型文件从开发机复制到服务器。自定义路径使用 `AI_SPEAKER_MODEL_FILE`，升级时需同步更新旧路径覆盖。
-
-Docker 不下载、不打包模型，通过 `config/` 的只读挂载使用该文件。模型随配置独立保存，更新应用镜像无需重新下载。
-
-启用 `AI_LLM_STAGE2_ENABLED=true` 可以在 ASR 时并行计算录音特征，在文字识别留空时尝试第二阶段补证。该开关默认关闭，需要同时启用 `AI_LLM_ENABLED` 和 `AI_PERSISTENCE_ENABLED`。自动特征匹配的等待上限为 20 秒，超时后继续使用文字识别结果。`AI_LLM_PUBLISH_SPOT=false` 会关闭公开 AI Spot 面板、实时发布和历史返回，后台识别及记录管理可继续使用。
-
-自动和手动查询生成的有效特征都缓存到 `ai_segment_embeddings`。后续查询复用同版本向量，匹配范围始终是已标注录音。
-
-匹配接口保留逐条命中的统计，并为每个候选呼号返回 `referenceSimilarity`（合成相似度）和 `referenceRecordCount`（参与合成数量）。参考来自该呼号最近最多 16 条已标注、当前模型版本的有效特征，排除查询录音自身。达到 5 条参考时，`referenceGroups` 返回完全链接分组后的合成分数和条数，组内最低相似度为 0.72，保留条数严格大于参考总数 20% 的组。参考不足 5 条或无合格组时返回空数组。合成使用 `addMulti`，分数供手动对照。`measurements.referenceLookupMs` 记录参考查询耗时，`referenceMatchMs` 包含合成比对任务的排队与执行耗时。
-
-`speaker-recognition` 响应的 `measurements` 返回分阶段耗时，单位为毫秒。未执行或未取得计时的阶段为 `null`；复用模型时启动、校验和加载耗时为 `null`，进程未回收时退出耗时为 `null`。`processTotalMs` 是本条录音在计算子进程中的处理耗时（包含本次启动或回收），`totalMs` 还包含排队和数据库查询，两者与内部阶段存在包含关系，不应重复相加。测量数据不写入日志或数据库。
-
-声纹采用独立常驻计算进程，单任务、2 个推理线程，首次需要模型时加载，后续录音复用模型。支持最长 60 秒录音，子进程最多 2 GiB RSS（可用内存不足时进一步降低），每条实际提取超时为 60 秒。空闲 5 分钟或任务完成后 RSS 达到 1 GiB（低内存环境进一步降低）时回收，不按任务条数或进程存活时间回收；预计需要至少 1 GiB 内存的长录音先回收旧进程再计算，防止旧内存池叠加。超时、运行中取消或异常会终止进程，等待退出后才能处理下一条。最多排队等待 4 条，按提交顺序处理，排队时间不计入提取超时；取消等待请求仅移除该任务。后台每轮只处理一条，完成后间隔 5 秒，手动队列繁忙时暂缓重算。内存不足会暂停并保留待处理记录。提取使用完整录音，不分段、不截断，已有有效向量无需重算。
-
-升级后自动重试之前因 20 秒或 640 MiB 限制排除、且当前仍已标注的不超过 60 秒录音；已有有效声纹和干扰检查结论保留。
-
-一分钟整段声纹提取建议使用至少 4 GiB 内存的宿主机。默认 Compose 限制应用为 1.5 核、2.5 GiB 内存，并禁止容器使用 Swap。已有部署需同步更新 `docker-compose.yml` 的资源限制并重建容器，单独拉取镜像不会更新这些配置。
-
-当前声纹表使用固定 192 维、768 字节的向量。服务启动时创建新库所需的表，已升级的声纹、录音、识别结果和人工标注继续保留。早期声纹表需先使用支持旧库迁移的版本完成升级。
-
-## 检查与构建
-
-```bash
-npm run typecheck
-npm run lint
-npm run build
-```
-
-构建产物位于 `apps/public/dist` 和 `apps/admin/dist`。本地检查约定见 [AGENTS.md](AGENTS.md)。
-
-直接运行生产服务：
-
-```bash
-npm start
-```
-
-后端默认监听 `3000`，同时托管公开页面 `/` 和管理后台 `/admin/`。
-
-## Docker 部署
-
-先准备 `.env`、`config/` 和 `data/`；启用记录管理时需提供 `config/admin.json`，使用声纹时需准备模型文件。
-
-使用仓库发布的镜像部署：
+完成[上游和节点配置](#配置上游与节点)后，在部署目录运行以下命令。需要记录管理或声纹时，先准备对应的账号配置和模型文件。
 
 ```bash
 docker compose pull iaxweb
@@ -225,13 +85,16 @@ docker compose up -d iaxweb
 docker compose logs -f iaxweb
 ```
 
-访问 `http://localhost:8059`，管理后台为 `/admin/`。
+- 默认访问 `http://localhost:8059`，管理后台为 `/admin/`。Compose 将宿主机的 `8059` 映射到容器的 `3000`。
+- `./config` 以只读方式挂载到 `/app/config`，`./data` 挂载到 `/app/data`。可在 `.env` 中设置 `PUID` 和 `PGID`，确保容器能读取配置并写入数据。
+- `NATS_SERVERS` 和 `ALLMON3_BASE_URL` 须填写容器可达的地址。Docker Desktop 上的宿主机服务可通过 `host.docker.internal` 访问。
+- 反向代理须为 `/status` 和 `/audio/<nodeId>` 支持 WebSocket Upgrade。使用 HTTPS 时，代理应转发 `X-Forwarded-Proto`。
+- `GET /healthz` 用于存活检查。返回中的 `allmon3` 表示已经生成状态快照，`nats` 表示已配置的音频节点连接状态。判断上游是否正常时，也应查看节点状态和服务日志。
 
-Compose 使用 `ghcr.io/tallcode/iaxweb:latest`，挂载 `./config:/app/config:ro` 和 `./data:/app/data`。根据宿主机目录权限在 `.env` 设置 `PUID`、`PGID`，确保配置可读、数据目录可写。
+镜像为 `ghcr.io/tallcode/iaxweb:latest`。推送到 `main` 后，发布流程会构建并推送 `latest` 和 `sha-<短 SHA>` 标签。私有镜像需要先运行 `docker login ghcr.io`。 [镜像发布工作流](.github/workflows/docker-publish.yml)
 
-`NATS_SERVERS` 和 `ALLMON3_BASE_URL` 必须是容器可达地址。Docker Desktop 访问宿主机可使用 `host.docker.internal`。
-
-自行构建和运行：
+<details>
+<summary>从源码构建容器</summary>
 
 ```bash
 docker build -t iaxweb:local .
@@ -244,25 +107,110 @@ docker run -d --name iaxweb \
   iaxweb:local
 ```
 
-停止服务使用 `docker compose stop` 或 `docker compose down`。
+</details>
 
-推送到 `main` 后，[GitHub Actions](.github/workflows/docker-publish.yml) 自动构建并发布 `latest` 和 `sha-<commit>` 镜像标签。私有镜像需先执行 `docker login ghcr.io`。
+### 不使用容器
 
-反向代理需支持 `/audio/<nodeId>` 和 `/status` 的 WebSocket Upgrade；HTTPS 代理应转发 `X-Forwarded-Proto`。存活检查接口为 `GET /healthz`。
+在已完成配置的仓库根目录执行 `npm ci`、`npm run build` 和 `npm start`。后端默认监听 `3000`，同时提供公开站和管理后台。
 
-## 维护命令
+### 更新已有实例
 
-### 数据库备份
+1. 保留宿主机的 `.env`、`config/` 和 `data/`。拉取镜像只会更新应用，部署配置和模型由宿主机管理。
+2. 启用了 LLM 的实例应将 `examples/ai/schema.json` 同步到配置目录或 `AI_LLM_SCHEMA_FILE` 指定的位置。仍在使用旧 full 提示词的实例还需换成当前的 simple 提示词。
+3. 已完成迁移的 SQLite 数据库可直接继续使用。历史录音、声纹、识别结果和人工标注会保留，旧 full 字段也仍保存在原表中。恢复尚未迁移的早期备份时，需先用支持旧库迁移的版本完成升级。
+4. 镜像发布完成后拉取并重建容器。调整 Compose 资源限制时，也需将更新后的 `docker-compose.yml` 同步到部署主机。
 
-在安装了 `sqlite3` 的宿主机执行：
+## AI 与记录管理
+
+### 语音转写和呼号识别
+
+为需要识别的节点同时设置 `"AUDIO": true` 和 `"AI": true`，并在 `.env` 配置 `AI_ASR_API_KEY`。只需要转写时，设置 `AI_LLM_ENABLED=false`。
+
+启用呼号识别时，另设 `AI_LLM_API_KEY`，并在实际运行环境准备 simple 提示词和 Schema。ASR 和 LLM 的端点与模型可分别配置。 [环境变量示例](.env.example)
+
+```bash
+cp examples/ai/simple/prompt.txt config/prompt.txt
+cp examples/ai/schema.json config/schema.json
+```
+
+- 模型提取原文中的自报和字母解释法证据，由程序匹配最终呼号。程序每次解析时重新读取提示词与 Schema。文件缺失、不可读或无效时跳过呼号解析，已生成的转写仍可使用。
+- `AI_LLM_PUBLISH_SPOT=false` 会关闭公开 AI Spots 面板、实时发布和历史返回。该设置可与后台转写、记录和人工审核独立使用。
+- 可通过 `AI_HOTWORDS_FILE` 和 `AI_BACKGROUND_FILE` 为 ASR 指定热词与背景文件。默认路径为 `config/hotwords.json` 和 `config/background.txt`，保存后下一次转写生效。 [背景示例](examples/ai/background.txt)
+
+### 记录管理与账号
+
+设置 `AI_PERSISTENCE_ENABLED=true`，开启 SQLite、WAV 录音保存、管理后台和公开通联统计。启用前先生成系统管理员密码哈希。
+
+```bash
+npm run hash-admin-password -- 'replace-with-your-password'
+```
+
+将哈希写入 `config/admin.json`，然后启动服务并访问 `/admin/`。修改系统管理员配置后需重启后端。
+
+```json
+{
+  "users": [
+    {
+      "username": "admin",
+      "passwordHash": "replace-with-generated-scrypt-hash"
+    }
+  ]
+}
+```
+
+| 角色 | 权限 |
+| --- | --- |
+| `viewer` | 查看记录、回听录音 |
+| `editor` | 在查看权限基础上，编辑未标注记录的转写和主叫、被叫呼号 |
+| `admin` | 查看、编辑、标注和删除记录，手动声纹识别，管理用户 |
+
+### 声纹识别
+
+手动声纹识别和自动声纹补证均需要启用持久化，并在宿主机准备 ERes2NetV2 模型。
+
+```bash
+npm run download:speaker-model
+```
+
+默认模型路径为 `config/models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx`，约 71.4 MB。自定义存放位置使用 `AI_SPEAKER_MODEL_FILE`。容器通过只读的 `config/` 挂载读取模型，更新镜像后可继续使用原文件。
+
+| 用法 | 行为 |
+| --- | --- |
+| 后台手动识别 | 管理员可用一条录音查找候选呼号，参考库使用已标注录音 |
+| 自动二阶段补证 | 设置 `AI_LLM_STAGE2_ENABLED=true`，同时启用 LLM 和持久化。程序在转写阶段并行提取特征，文字匹配留空时最多等待 20 秒进行补证 |
+
+同版本的有效声纹可复用。声纹以独立进程运行，使用 2 个 CPU 推理线程，一次处理一条最长 60 秒的完整录音。处理一分钟录音建议宿主机至少有 4 GiB 内存。仓库的 Compose 配置将应用限制在 1.5 核、2.5 GiB 内存并禁用 Swap。
+
+<details>
+<summary>匹配与诊断细节</summary>
+
+- 声纹表使用 192 维、768 字节的向量。查询排除当前录音，并从同版本的有效已标注录音中选择参考。逐条相似度须大于 0.80。
+- 每个候选呼号最多取最近 16 条参考。接口返回合成相似度 `referenceSimilarity` 及参考条数 `referenceRecordCount`。达到 5 条参考时尝试分组，组内最低相似度为 0.72，分组条数须严格大于参考总数的 20%。
+- `speaker-recognition` 接口的 `measurements` 以毫秒记录各阶段耗时，未执行或未测得的阶段为 `null`。`totalMs` 涵盖排队和查询，`processTotalMs` 只涵盖计算子进程阶段。
+- 实际提取超时为 60 秒，排队最多 4 项，排队时长另计。进程 RSS 上限为 2 GiB，可用内存不足时进一步降低。进程空闲 5 分钟或任务结束后 RSS 达到约 1 GiB 时回收。运行中的任务超时、取消或异常时，等旧进程退出后再继续。
+
+</details>
+
+## 日常维护
+
+### 数据目录和备份
+
+| 默认路径 | 用途 |
+| --- | --- |
+| `data/ai.sqlite` | 识别、人工标注和声纹 |
+| `data/rec/` | WAV 录音，按采集时间的 UTC 日期存放 |
+| `data/users.json`、`data/sessions.json` | 后台用户及登录会话 |
+| `data/stats/speech-activity.json` | 公开通联统计缓存，按北京时间聚合，访问时刷新 |
+| `data/embedding-backfill/` | 声纹补算清单、进度和备份 |
+| `data/coverage/` | 可选地图覆盖预测图层 |
+
+在装有 `sqlite3` 的宿主机执行以下命令，可在服务运行时备份 `data/ai.sqlite`。备份默认输出到 `data/backups/`，第二个参数可指定输出目录。脚本以传入目录下的 `ai.sqlite` 为源，录音和部署配置需单独备份。
 
 ```bash
 ./scripts/backup-sqlite.sh ./data
 ```
 
-默认输出到 `data/backups/`；第二个参数可指定备份目录。脚本只备份数据库，录音和配置需另外备份。
-
-### 已标注录音声纹补算
+### 补算已标注录音的声纹
 
 ```bash
 npm run backfill:speaker -- --dry-run
@@ -270,24 +218,54 @@ npm run backfill:speaker
 npm run backfill:speaker -- --help
 ```
 
-只处理已标注录音缺失或旧版本的声纹，自动备份并保存进度；当前版本已有声纹及在线待处理任务不覆盖。中断后再次执行相同命令即可续跑，无需指定任务目录。可用 `--limit`、`--delay-ms` 控制处理数量和间隔。
+试跑会保存候选清单，正式执行前会备份数据库并保存进度。默认补算已标注且声纹缺失或版本过旧的记录，当前版本已有有效声纹和在线待处理任务继续保留。中断后运行相同命令即可续跑，支持 `--limit`、`--delay-ms` 和重试选项。质量门禁调整后，已保存的质量结论继续保留。手动识别时可重新检查 `rejected`、`unknown` 和 `skip` 的录音。
 
-只有声纹模型变更才需要批量重算已有声纹，质量门禁调整不会触发重算或自动重试。已升级数据库保留历史录音的质量结论。已有有效声纹的历史记录为 `passed` 并继续复用缓存，明确被质量门禁拦截的记录为 `rejected`，其余为 `skip`。在线服务在手动识别时重新检查 `rejected`、`unknown` 和 `skip`。
+容器部署使用 `docker compose exec iaxweb npm run backfill:speaker -- --dry-run` 试跑，去掉 `-- --dry-run` 即可执行补算。
 
-容器中使用：
+### 更新地图覆盖预测
+
+目前地图支持四个图层，从 `data/coverage/` 按需加载。原有仿真半径均为 300 km。
+
+| 中继 | 频率 | 功率 | 天线离地高度 |
+| --- | --- | --- | --- |
+| BR5AI | 145.4 MHz | 25 W | 400 m |
+| BR5BB | 145.48 MHz | 10 W | 526 m |
+| BR5AF | 145.52 MHz | 25 W | 100 m |
+| BR5AO | 145.22 MHz | 25 W | 70 m |
+
+从站点弹窗导出 GeoJSON，再在宿主机打包。脚本保留 dBm 阈值、颜色和多边形孔洞，压缩后的文件保存到 `data/coverage/<呼号>.geojson.gz`。建议保留原始导出文件。 [Meshtastic Site Planner](https://site.meshtastic.org/)
 
 ```bash
-docker compose exec iaxweb npm run backfill:speaker -- --dry-run
-docker compose exec iaxweb npm run backfill:speaker
+node scripts/pack-coverage.mjs BR5AI /path/to/coverage.geojson
 ```
 
-### 手动调试工具
+新增地图开关时也要更新前端的呼号列表并重新构建。`/api/coverage/<呼号>.geojson` 直接发送 gzip 文件，客户端需通过 `Accept-Encoding` 接受 gzip，响应可缓存 30 天。 [地图图层列表](apps/public/src/pages/MapPage.vue#L26)
 
-| 命令 | 用途 |
+## 开发与目录
+
+| 路径 | 职责 |
 | --- | --- |
-| `npm run phonetic-corrector-test -- "待检查的文本"` | 音素纠错 |
-| `npm run llm-parse-test -- "待检查的文本"` | LLM 解析，会调用配置的模型接口 |
+| `apps/backend/` | Fastify HTTP 与 WebSocket、上游网关、AI 识别和 SQLite 持久化 |
+| `apps/public/` | Vue / Vite 公开站、拓扑、地图、实时播放和统计 |
+| `apps/admin/` | Vue / Vite 管理后台 |
+| `packages/contracts/` | 前后端共享类型和接口 Schema |
+| `packages/audio-protocol/` | 公开站和后端共享的实时音频帧解析与 PCMU 解码 |
+| `examples/ai/`、`scripts/` | AI 示例配置、备份和维护工具 |
+| `config/`、`data/` | 部署配置与运行数据，随宿主机管理 |
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+```
+
+构建产物位于 `apps/public/dist` 和 `apps/admin/dist`。本地检查约定见 [AGENTS.md](AGENTS.md)。
+
+| 调试命令 | 用途 |
+| --- | --- |
+| `npm run phonetic-corrector-test -- "待检查的文本"` | 查看音素纠错结果 |
+| `npm run llm-parse-test -- "待检查的文本"` | 使用已配置的模型接口调试呼号提取 |
 
 ## 许可证
 
-本项目采用 **GNU GPL v2 或后续版本（GPL-2.0-or-later）**，见 [LICENSE](LICENSE)。第三方组件及数据保留各自的许可证。
+本项目采用 GNU GPL v2 或后续版本（GPL-2.0-or-later）。第三方组件及数据保留各自的许可证。 [LICENSE](LICENSE)

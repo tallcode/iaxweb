@@ -1,6 +1,6 @@
-import type { AudioQuality, PersistedRecord, RadioSignal, RecordPage } from '@iaxweb/contracts'
+import type { AudioQuality, PersistedRecord, RadioSignal } from '@iaxweb/contracts'
 import type { PublicRecordQueries, RecognitionRepository, RecordListRepository, SpeakerReferenceRepository } from './ports.js'
-import type { ManualReviewPatch, PendingReviewedVoiceprint, ReadyVoiceprint, RecognitionRecord, SpeakerReferenceGroup, SpeakerSearchResult, SpeechHour, StoredSpot, Voiceprint } from './types.js'
+import type { ManualReviewPatch, PendingReviewedVoiceprint, ReadyVoiceprint, RecognitionRecord, RecordPage, SpeakerReferenceGroup, SpeakerSearchResult, SpeechHour, StoredSpot, Voiceprint } from './types.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -9,8 +9,8 @@ import { SqliteRecordStore } from './sqlite/record-store.js'
 import { initializeRecordSchema } from './sqlite/schema.js'
 import { SqliteSpeakerStore } from './sqlite/speaker-store.js'
 
-export type { ManualReviewPatch, SpeechHour, StoredSpot } from './types.js'
-export type { PersistedRecord, RecordPage } from '@iaxweb/contracts'
+export type { ManualReviewPatch, RecordPage, SpeechHour, StoredSpot } from './types.js'
+export type { PersistedRecord } from '@iaxweb/contracts'
 
 // Owns the connection shared by record writes, voiceprints and public queries.
 export class RecordRepository implements RecognitionRepository, RecordListRepository, SpeakerReferenceRepository, PublicRecordQueries {

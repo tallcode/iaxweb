@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { PersistedRecord } from '@iaxweb/contracts'
 import type { CallsignRole } from '../../composables/records/types'
-import { CALLSIGN_HINT, MANUAL_CALLSIGN_PATTERN } from '@iaxweb/contracts'
+import { MANUAL_CALLSIGN_PATTERN } from '@iaxweb/contracts'
+import { CALLSIGN_HINT } from '../../utils/callsign'
 import CallsignEditor from './CallsignEditor.vue'
 import CallsignText from './CallsignText.vue'
 

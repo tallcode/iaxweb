@@ -19,6 +19,7 @@
     "@fastify/cookie": "^11.1.2",
     "@fastify/static": "^10.1.3",
     "@fastify/websocket": "^11.3.0",
+    "@iaxweb/audio-protocol": "*",
     "@iaxweb/contracts": "*",
     "@lunarisapp/cmudict": "^1.0.2",
     "@nats-io/transport-node": "^3.4.0",

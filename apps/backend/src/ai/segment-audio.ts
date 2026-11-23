@@ -7,14 +7,6 @@ export const VOICE_DBFS_THRESHOLD = -50
 // audio is kept.
 const TRIM_DBFS_THRESHOLD = -60
 
-// Audio frame layout published by iaxmon:
-// 10-byte header (byte 0 version, byte 1 type, bytes 6..9 big-endian uint32
-// media timestamp in ms) followed by PCMU payload.
-const FRAME_HEADER_LENGTH = 10
-const FRAME_MIN_LENGTH = 11
-const FRAME_VERSION = 1
-const FRAME_TYPE = 1
-
 // Reconstructed PCMU silence uses the same 20 ms cadence as iaxmon.
 const SILENCE_FRAME_SAMPLES = 160
 export const SAMPLES_PER_MS = SAMPLE_RATE / 1000
@@ -37,16 +29,6 @@ export interface Frame {
 export interface TimedFrame extends Frame {
   // Sample offset relative to this transmission's media clock origin.
   at: number
-}
-
-// The media timestamp describes position on the sender's clock and can wrap
-// during a transmission.
-export function parseAudioFrame(data: Uint8Array): { payload: Uint8Array, timestamp: number } | undefined {
-  if (data.length < FRAME_MIN_LENGTH || data[0] !== FRAME_VERSION || data[1] !== FRAME_TYPE)
-    return undefined
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-  const timestamp = view.getUint32(6, false)
-  return { payload: data.slice(FRAME_HEADER_LENGTH), timestamp }
 }
 
 export function insertTimedFrame(frames: TimedFrame[], frame: Frame, at: number): boolean {
@@ -221,8 +203,4 @@ export function findCutIndex(frames: Frame[], maxMs: number, minMs: number): num
   if (bestIndex > 0 && bestAverageRms < voiceRmsThreshold)
     return bestIndex
   return hardIndex
-}
-
-export function signedDifference(current: number, previous: number): number {
-  return (current - previous) | 0
 }

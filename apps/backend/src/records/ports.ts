@@ -1,5 +1,5 @@
-import type { AudioQuality, PersistedRecord, RadioSignal, RecordPage } from '@iaxweb/contracts'
-import type { ManualReviewPatch, PendingReviewedVoiceprint, ReadyVoiceprint, RecognitionRecord, SpeakerReferenceGroup, SpeakerSearchResult, SpeechHour, StoredSpot, Voiceprint } from './types.js'
+import type { AudioQuality, PersistedRecord, RadioSignal } from '@iaxweb/contracts'
+import type { ManualReviewPatch, PendingReviewedVoiceprint, ReadyVoiceprint, RecognitionRecord, RecordPage, SpeakerReferenceGroup, SpeakerSearchResult, SpeechHour, StoredSpot, Voiceprint } from './types.js'
 
 interface RecordLookup {
   find: (id: string) => PersistedRecord | undefined

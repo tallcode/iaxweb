@@ -1,5 +1,6 @@
 import type { PersistedRecord } from '@iaxweb/contracts'
-import { adminRecordPageSchema, CALLSIGN_HINT, manualCallsignSchema, manualRecognitionSchema, persistedRecordSchema, reviewSchema, speakerRecognitionSchema } from '@iaxweb/contracts'
+import { adminRecordPageSchema, manualCallsignSchema, manualRecognitionSchema, persistedRecordSchema, reviewSchema, speakerRecognitionSchema } from '@iaxweb/contracts'
+import { CALLSIGN_HINT } from '../utils/callsign'
 import { parseInput, request, requestJson } from './client'
 
 export interface RecordsQuery {

@@ -1,19 +1,12 @@
-// iaxmon publishes node audio as G.711 μ-law (PCMU), 8 kHz mono.
-export const SAMPLE_RATE = 8_000
+import { decodeMuLawSample } from '@iaxweb/audio-protocol'
 
-// Decodes G.711 μ-law bytes into signed 16-bit PCM, mirroring the browser
-// decoder in public/index/audio-player.js.
+export { SAMPLE_RATE } from '@iaxweb/audio-protocol'
+
+// Decodes G.711 μ-law bytes into signed 16-bit PCM.
 export function decodeMuLaw(encoded: Uint8Array): Int16Array {
   const samples = new Int16Array(encoded.length)
-  for (let index = 0; index < encoded.length; index++) {
-    const muLaw = (~(encoded[index] ?? 0)) & 0xFF
-    const sign = muLaw & 0x80
-    const exponent = (muLaw >> 4) & 0x07
-    const mantissa = muLaw & 0x0F
-    let sample = ((mantissa << 3) + 0x84) << exponent
-    sample -= 0x84
-    samples[index] = sign ? -sample : sample
-  }
+  for (let index = 0; index < encoded.length; index++)
+    samples[index] = decodeMuLawSample(encoded[index] ?? 0)
   return samples
 }
 

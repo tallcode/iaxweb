@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { CALLSIGN_HINT, MANUAL_CALLSIGN_PATTERN as CALLSIGN_PATTERN } from '@iaxweb/contracts'
+import { MANUAL_CALLSIGN_PATTERN as CALLSIGN_PATTERN } from '@iaxweb/contracts'
 import { computed, ref } from 'vue'
 import { useRecordsFeedbackContext, useRecordsQueryContext } from '../../composables/records/use-records-context'
 import { useToolbarHeight } from '../../composables/use-toolbar-height'
+import { CALLSIGN_HINT } from '../../utils/callsign'
 
 const { state, actions } = useRecordsQueryContext()
 const { total, callsignFilter, isLoading, disabled } = state

@@ -1,10 +1,11 @@
 import type { AdminRecord, PersistedRecord } from '@iaxweb/contracts'
 import type { RecordsQuery } from '../../api/records'
 import type { RecordsFeedback, RecordsQueryController } from './types'
-import { CALLSIGN_HINT, MANUAL_CALLSIGN_PATTERN } from '@iaxweb/contracts'
+import { MANUAL_CALLSIGN_PATTERN } from '@iaxweb/contracts'
 import { computed, onBeforeUnmount, onMounted, readonly, ref, shallowRef } from 'vue'
 import { ApiError, apiErrorMessage } from '../../api/client'
 import { recordsApi } from '../../api/records'
+import { CALLSIGN_HINT } from '../../utils/callsign'
 import { useConditionalAutoRefresh } from '../use-conditional-auto-refresh'
 
 const PAGE_SIZE = 50

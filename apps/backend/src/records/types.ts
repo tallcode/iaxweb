@@ -1,4 +1,11 @@
-import type { AudioQuality, SpeakerMatch } from '@iaxweb/contracts'
+import type { AudioQuality, PersistedRecord, SpeakerMatch } from '@iaxweb/contracts'
+
+export interface RecordPage {
+  items: PersistedRecord[]
+  page: number
+  pageSize: number
+  total: number
+}
 
 export interface SpeakerReferenceGroup {
   callsign: string

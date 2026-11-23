@@ -3,9 +3,9 @@ import { CALLSIGN_PATTERN, MANUAL_CALLSIGN_PATTERN, MAX_RECOGNITION_LENGTH } fro
 
 const nonempty = z.string().min(1)
 const timestamp = z.iso.datetime()
-export const transmitSourceSchema = z.enum(['local', 'remote', 'system']).nullable()
-export const nodeTypeSchema = z.enum(['HUB', 'REPEATER'])
-export const adminRoleSchema = z.enum(['admin', 'editor', 'viewer'])
+const transmitSourceSchema = z.enum(['local', 'remote', 'system']).nullable()
+const nodeTypeSchema = z.enum(['HUB', 'REPEATER'])
+const adminRoleSchema = z.enum(['admin', 'editor', 'viewer'])
 export const adminSessionSchema = z.object({
   role: adminRoleSchema,
   username: nonempty,
@@ -39,7 +39,7 @@ export const spotEventSchema = z.object({
   type: z.literal('spot').optional(),
 })
 export const spotHistorySchema = z.array(spotEventSchema)
-export const statsDaySchema = z.object({
+const statsDaySchema = z.object({
   date: z.iso.date(),
   hourlyCounts: z.array(z.number().int().nonnegative()).length(24),
   voicedMs: z.number().nonnegative(),
@@ -55,12 +55,12 @@ export const audioStateSchema = z.object({
   speaking: z.boolean(),
   listeners: z.number().int().nonnegative().optional(),
 })
-export const publicConnectionStatusSchema = z.object({ CSTATE: z.literal('ESTABLISHED') })
+const publicConnectionStatusSchema = z.object({ CSTATE: z.literal('ESTABLISHED') })
 export const nodeLocationSchema = z.object({
   lat: z.number().min(-90).max(90),
   lon: z.number().min(-180).max(180),
 })
-export const publicNodeStatusSchema = z.object({
+const publicNodeStatusSchema = z.object({
   AI: z.boolean().optional(),
   AI_SPOT: z.boolean().optional(),
   AUDIO: z.boolean().optional(),
@@ -80,7 +80,7 @@ export const publicNodeStatusSchema = z.object({
 export const publicStatusSnapshotSchema = z.record(z.string().regex(/^\d+$/), publicNodeStatusSchema)
 const callsign = z.string().regex(CALLSIGN_PATTERN).nullable()
 const manualCallsign = z.string().regex(MANUAL_CALLSIGN_PATTERN).nullable()
-export const radioSignalSchema = z.object({
+const radioSignalSchema = z.object({
   type: z.enum(['BSS', 'APRS', 'FleetSync', 'MDC1200', 'DTMF']),
   content: z.string().min(1).max(256),
 })
@@ -115,16 +115,15 @@ export const persistedRecordSchema = z.object({
   manualNote: z.string().nullable(),
   reviewed: z.boolean(),
 })
-export const recordPageSchema = z.object({
-  items: z.array(persistedRecordSchema),
+const adminRecordSchema = persistedRecordSchema.extend({ hasAudio: z.boolean() })
+export const adminRecordPageSchema = z.object({
+  items: z.array(adminRecordSchema),
   page: z.number().int().positive(),
   pageSize: z.number().int().min(1).max(100),
   total: z.number().int().nonnegative(),
 })
-export const adminRecordSchema = persistedRecordSchema.extend({ hasAudio: z.boolean() })
-export const adminRecordPageSchema = recordPageSchema.extend({ items: z.array(adminRecordSchema) })
 
-export const speakerMatchSchema = z.object({
+const speakerMatchSchema = z.object({
   callsign: z.string().regex(CALLSIGN_PATTERN),
   confidence: z.enum(['high', 'medium', 'low']).nullable(),
   count: z.number().int().positive(),
@@ -141,7 +140,7 @@ export const speakerMatchSchema = z.object({
   })).max(4),
 })
 const measuredMilliseconds = z.number().nonnegative().nullable()
-export const speakerRecognitionMeasurementsSchema = z.object({
+const speakerRecognitionMeasurementsSchema = z.object({
   totalMs: z.number().nonnegative(),
   recordLookupMs: measuredMilliseconds,
   audioReadMs: measuredMilliseconds,

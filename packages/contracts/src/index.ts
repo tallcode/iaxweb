@@ -1,8 +1,61 @@
 import type { z } from 'zod'
 import type {
   adminRecordPageSchema,
-  adminRecordSchema,
-  adminRoleSchema,
+  adminSessionSchema,
+  adminUsersPageSchema,
+  audioQualitySchema,
+  audioStateSchema,
+  createUserSchema,
+  loginSchema,
+  persistedRecordSchema,
+  publicStatsSchema,
+  publicStatusSnapshotSchema,
+  radioSignalsSchema,
+  speakerRecognitionSchema,
+  spotEventSchema,
+  updateUserSchema,
+} from './schemas.js'
+
+export type TransmitSource = Exclude<PublicNodeStatus['TX_SOURCE'], undefined>
+export type NodeType = NonNullable<PublicNodeStatus['TYPE']>
+export type AdminRole = AdminSession['role']
+export type AdminSession = z.output<typeof adminSessionSchema>
+export type AdminUsersPage = z.output<typeof adminUsersPageSchema>
+export type PublicConnectionStatus = NonNullable<PublicNodeStatus['CONNS']>[string]
+export type PublicNodeStatus = PublicStatusSnapshot[string]
+export type PublicStatusSnapshot = z.output<typeof publicStatusSnapshotSchema>
+export type SpotEvent = z.output<typeof spotEventSchema>
+export type PublicStats = z.output<typeof publicStatsSchema>
+export type StatsDay = PublicStats['today']['day']
+export type AudioState = z.output<typeof audioStateSchema>
+export type AudioQuality = z.output<typeof audioQualitySchema>
+export type RadioSignal = z.output<typeof radioSignalsSchema>[number]
+export type PersistedRecord = z.output<typeof persistedRecordSchema>
+export type AdminRecord = AdminRecordPage['items'][number]
+export type AdminRecordPage = z.output<typeof adminRecordPageSchema>
+export type SpeakerMatch = SpeakerRecognition['matches'][number]
+export type SpeakerRecognition = z.output<typeof speakerRecognitionSchema>
+export type SpeakerRecognitionMeasurements = SpeakerRecognition['measurements']
+export type LoginInput = z.input<typeof loginSchema>
+export type CreateUserInput = z.input<typeof createUserSchema>
+export type UpdateUserInput = z.input<typeof updateUserSchema>
+
+export {
+  CALLSIGN_PATTERN,
+  CALLSIGN_PREFIX_SOURCE,
+  CALLSIGN_SECOND_LETTERS,
+  CALLSIGN_SOURCE,
+  hasCallerCallsign,
+  isDisplayableCallsign,
+  isValidCallsign,
+  MANUAL_CALLSIGN_PATTERN,
+  MAX_RECOGNITION_LENGTH,
+  NO_CALLSIGN,
+  REVIEW_CALLSIGN_CLEAR_MESSAGE,
+  REVIEW_CALLSIGN_REQUIRED_MESSAGE,
+} from './callsign.js'
+export {
+  adminRecordPageSchema,
   adminSessionSchema,
   adminUsersPageSchema,
   audioQualitySchema,
@@ -11,52 +64,14 @@ import type {
   loginSchema,
   manualCallsignSchema,
   manualRecognitionSchema,
-  nodeTypeSchema,
+  nodeLocationSchema,
   persistedRecordSchema,
-  publicConnectionStatusSchema,
-  publicNodeStatusSchema,
   publicStatsSchema,
   publicStatusSnapshotSchema,
-  radioSignalSchema,
-  recordPageSchema,
+  radioSignalsSchema,
   reviewSchema,
-  speakerMatchSchema,
-  speakerRecognitionMeasurementsSchema,
   speakerRecognitionSchema,
   spotEventSchema,
-  statsDaySchema,
-  transmitSourceSchema,
+  spotHistorySchema,
   updateUserSchema,
 } from './schemas.js'
-
-export type TransmitSource = z.output<typeof transmitSourceSchema>
-export type NodeType = z.output<typeof nodeTypeSchema>
-export type AdminRole = z.output<typeof adminRoleSchema>
-export type AdminSession = z.output<typeof adminSessionSchema>
-export type AdminUsersPage = z.output<typeof adminUsersPageSchema>
-export type PublicConnectionStatus = z.output<typeof publicConnectionStatusSchema>
-export type PublicNodeStatus = z.output<typeof publicNodeStatusSchema>
-export type PublicStatusSnapshot = z.output<typeof publicStatusSnapshotSchema>
-export type SpotEvent = z.output<typeof spotEventSchema>
-export type PublicStats = z.output<typeof publicStatsSchema>
-export type StatsDay = z.output<typeof statsDaySchema>
-export type AudioState = z.output<typeof audioStateSchema>
-export type AudioQuality = z.output<typeof audioQualitySchema>
-export type RadioSignal = z.output<typeof radioSignalSchema>
-export type PersistedRecord = z.output<typeof persistedRecordSchema>
-export type RecordPage = z.output<typeof recordPageSchema>
-export type AdminRecord = z.output<typeof adminRecordSchema>
-export type AdminRecordPage = z.output<typeof adminRecordPageSchema>
-export type SpeakerMatch = z.output<typeof speakerMatchSchema>
-export type SpeakerRecognition = z.output<typeof speakerRecognitionSchema>
-export type SpeakerRecognitionMeasurements = z.output<typeof speakerRecognitionMeasurementsSchema>
-export type LoginInput = z.input<typeof loginSchema>
-export type CreateUserInput = z.input<typeof createUserSchema>
-export type UpdateUserInput = z.input<typeof updateUserSchema>
-export type ManualCallsignInput = z.input<typeof manualCallsignSchema>
-export type ManualRecognitionInput = z.input<typeof manualRecognitionSchema>
-export type ManualRecognition = z.output<typeof manualRecognitionSchema>
-export type ReviewInput = z.input<typeof reviewSchema>
-
-export * from './callsign.js'
-export * from './schemas.js'

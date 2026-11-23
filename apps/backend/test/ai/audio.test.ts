@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-
+import { parseAudioFrame } from '@iaxweb/audio-protocol'
 import { decodeMuLaw, rmsOfPcm, SAMPLE_RATE } from '../../src/ai/mulaw.js'
 import { encodeWav } from '../../src/ai/wav.js'
+
+test('parses the media timestamp and payload within an offset byte view', () => {
+  const storage = new Uint8Array(24)
+  const frame = storage.subarray(3, 14)
+  frame.set([1, 1])
+  new DataView(frame.buffer, frame.byteOffset, frame.byteLength).setUint32(6, 0xFFFF_FFF0, false)
+  frame[10] = 0x80
+
+  const parsed = parseAudioFrame(frame)
+  assert.ok(parsed)
+  assert.equal(parsed.timestamp, 0xFFFF_FFF0)
+  assert.deepEqual(parsed.payload, new Uint8Array([0x80]))
+  assert.equal(parsed.payload.buffer, storage.buffer)
+})
 
 test('decodes mu-law silence and full-scale values', () => {
   const samples = decodeMuLaw(new Uint8Array([0xFF, 0x80]))

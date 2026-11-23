@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { AdminRecord, RecordPage } from '@iaxweb/contracts'
+import type { AdminRecord, AdminRecordPage } from '@iaxweb/contracts'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { adminSession } from '../src/admin-session'
@@ -459,7 +459,7 @@ describe('record callsign editing', () => {
 
     const aiRecord = record()
     const reviewedRecord = { ...aiRecord, effectiveCallsign: 'BG5BBB', manualCallsign: 'BG5BBB' }
-    const page: RecordPage = { items: [aiRecord], page: 1, pageSize: 50, total: 1 }
+    const page: AdminRecordPage = { items: [aiRecord], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page))
       .mockResolvedValueOnce(jsonResponse(reviewedRecord))
@@ -535,8 +535,8 @@ describe('record callsign editing', () => {
     const scrollTo = vi.fn()
     vi.stubGlobal('scrollTo', scrollTo)
 
-    const firstPage: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 51 }
-    const secondPage: RecordPage = { items: [{ ...record(), id: 'record-2' }], page: 2, pageSize: 50, total: 51 }
+    const firstPage: AdminRecordPage = { items: [record()], page: 1, pageSize: 50, total: 51 }
+    const secondPage: AdminRecordPage = { items: [{ ...record(), id: 'record-2' }], page: 2, pageSize: 50, total: 51 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(firstPage))
       .mockResolvedValueOnce(jsonResponse(secondPage))
@@ -564,7 +564,7 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
 
-    const page: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
+    const page: AdminRecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page))
       .mockResolvedValueOnce(jsonResponse(page))
@@ -591,7 +591,7 @@ describe('record callsign editing', () => {
       removeAttribute(): void {}
     })
 
-    const page: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
+    const page: AdminRecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(page))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
@@ -614,7 +614,7 @@ describe('record callsign editing', () => {
       play(): Promise<void> { return Promise.resolve() }
       removeAttribute(): void {}
     })
-    const page: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
+    const page: AdminRecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(page)))
     vi.stubGlobal('fetch', fetchMock)
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
@@ -661,7 +661,7 @@ describe('record callsign editing', () => {
     })
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
 
-    const page: RecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
+    const page: AdminRecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page))
       .mockResolvedValueOnce(jsonResponse(page))
