@@ -13,7 +13,7 @@ test('legacy history upgrades with an independent signaling column and preserves
   const record = { id: 'segment-1', timestamp: '2026-11-21T12:00:00.000Z', durationMs: 1000, voicedMs: 500, recognition: 'existing transcript', callsign: 'BG5ABC', callsignAlgorithm: 'stage1_text' }
   const before = new RecordRepository(file)
   before.insert('1900', record)
-  before.updateAnalysis(record)
+  before.updateAutomaticCallsign(record)
   before.updateManualReview(record.id, { callsign: 'BG5XYZ', recognition: 'manual transcript' })
   before.close()
   const legacy = new DatabaseSync(file)
@@ -30,7 +30,7 @@ test('legacy history upgrades with an independent signaling column and preserves
     assert.equal(result.manualCallsign, 'BG5XYZ')
     assert.equal(result.manualRecognition, 'manual transcript')
     assert.deepEqual(repository.list(1, 10).items[0]?.signaling, result.signaling)
-    repository.updateAnalysis(record)
+    repository.updateAutomaticCallsign(record)
     assert.deepEqual(repository.find(record.id)?.signaling, result.signaling)
     repository.delete(record.id, () => {})
     assert.equal(repository.updateSignaling(record.id, []), false)

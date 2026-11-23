@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { hasCallerCallsign } from '@iaxweb/contracts'
-import { useRecordInteractions, useRecordsQueryContext } from '../../composables/records/use-records-context'
+import { useRecordRows } from '../../composables/records/use-record-rows'
 import { formatRecordTime as formatTime } from '../../utils/records-format'
 import RecognitionEditor from './RecognitionEditor.vue'
 import RecordCallsign from './RecordCallsign.vue'
@@ -8,8 +7,7 @@ import RecordDuration from './RecordDuration.vue'
 import ReviewStar from './ReviewStar.vue'
 import SpeakerRecognitionButton from './SpeakerRecognitionButton.vue'
 
-const { records, isLoading } = useRecordsQueryContext().state
-const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecord, isSaving, togglePlayback, requestSpeakerRecognition, acquireEditor, finishEditing, isEditingCallsign, saveRecognition, saveCallsign, setReviewed, playingRecordId } = useRecordInteractions()
+const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback, requestSpeakerRecognition, actionsDisabled, recognitionProps, callsignProps, reviewProps } = useRecordRows('card')
 </script>
 
 <template>
@@ -24,19 +22,19 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
           <button v-if="record.hasAudio" class="shrink-0 rounded-md border border-slate-700 px-3 py-1.5 text-xs transition hover:bg-slate-700" @click="togglePlayback(record.id)">
             {{ playingRecordId === record.id ? '停止' : '播放' }}
           </button><span v-else class="shrink-0 text-xs text-slate-600">已过期</span>
-          <SpeakerRecognitionButton v-if="isAdministrator" :disabled="isLoading || isSaving(record.id) || isMutating || hasActiveEditor" @recognize="requestSpeakerRecognition(record)" />
-          <ReviewStar v-if="isAdministrator" :reviewed="record.reviewed" :has-caller="hasCallerCallsign(record)" :disabled="isSaving(record.id) || isMutating || hasActiveEditor" @toggle="setReviewed(record, !record.reviewed)" />
+          <SpeakerRecognitionButton v-if="isAdministrator" :disabled="actionsDisabled()" @recognize="requestSpeakerRecognition(record)" />
+          <ReviewStar v-if="isAdministrator" v-bind="reviewProps(record)" />
         </div>
       </div>
       <div class="mt-3">
-        <RecognitionEditor :signals="record.signaling" :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="hasActiveEditor || isSaving(record.id) || isMutating" :save="value => saveRecognition(record, value)" :request-edit="() => acquireEditor(record, 'recognition', 'card')" @editing="editing => !editing && finishEditing(record, 'recognition', 'card')" />
+        <RecognitionEditor v-bind="recognitionProps(record)" />
       </div>
       <div class="mt-4 flex gap-4 text-sm">
         <div class="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <span class="shrink-0 self-start text-xs leading-8 text-slate-500">被叫</span><RecordCallsign :record="record" role="callee" :editing="isEditingCallsign(record, 'callee', 'card')" :disabled="hasActiveEditor || !canEditRecord(record) || isMutating" :saving="isSaving(record.id)" :save="value => saveCallsign(record, 'callee', value)" @begin="acquireEditor(record, 'callee', 'card')" @close="finishEditing(record, 'callee', 'card')" />
+          <span class="shrink-0 self-start text-xs leading-8 text-slate-500">被叫</span><RecordCallsign v-bind="callsignProps(record, 'callee')" />
         </div>
         <div class="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <span class="shrink-0 self-start text-xs leading-8 text-slate-500">主叫</span><RecordCallsign :record="record" role="caller" :editing="isEditingCallsign(record, 'caller', 'card')" :disabled="hasActiveEditor || !canEditRecord(record) || isMutating" :saving="isSaving(record.id)" :save="value => saveCallsign(record, 'caller', value)" @begin="acquireEditor(record, 'caller', 'card')" @close="finishEditing(record, 'caller', 'card')" />
+          <span class="shrink-0 self-start text-xs leading-8 text-slate-500">主叫</span><RecordCallsign v-bind="callsignProps(record, 'caller')" />
         </div>
       </div>
     </article>

@@ -24,7 +24,6 @@ function record(): AdminRecord {
     voicedMs: 900,
     recognition: '这里是 BG5AAA',
     corrected: null,
-    revise: null,
     callsign: 'BG5AAA',
     callsignAlgorithm: null,
     effectiveCallsign: 'BG5AAA',
@@ -33,10 +32,6 @@ function record(): AdminRecord {
     manualRecognition: null,
     reviewed: false,
     manualNote: null,
-    manualRiskLevel: null,
-    riskLevel: null,
-    effectiveRiskLevel: null,
-    riskReason: null,
   }
 }
 

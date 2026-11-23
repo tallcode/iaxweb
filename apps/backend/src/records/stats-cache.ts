@@ -1,5 +1,5 @@
 import type { PublicStats, StatsDay } from '@iaxweb/contracts'
-import type { RecordRepository } from './record-repository.js'
+import type { PublicRecordQueries } from './ports.js'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -20,7 +20,7 @@ export class StatsCache {
 
   constructor(
     private readonly file: string,
-    private readonly repository: Pick<RecordRepository, 'speechHours'>,
+    private readonly repository: Pick<PublicRecordQueries, 'speechHours'>,
     private readonly reportError: (error: unknown) => void,
   ) {}
 

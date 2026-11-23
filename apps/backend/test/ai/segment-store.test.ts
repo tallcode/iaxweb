@@ -29,24 +29,23 @@ test('accumulates stage fields on the same record', () => {
   // Later stages mutate the record; the store reflects it.
   record.recognition = '原始文本'
   record.corrected = '纠错文本'
-  record.revise = '规范化文本'
   record.callsign = 'BG5XXX'
-  record.risk = { level: 1, reason: '正常' }
+  record.callsignAlgorithm = 'stage1_text'
 
   assert.deepEqual(store.recent(), [record])
   assert.equal(store.asrContext(), '原始文本')
   assert.equal(store.recent()[0]?.corrected, '纠错文本')
 })
 
-test('ASR and structured LLM contexts use raw recognitions rather than model revisions', () => {
+test('ASR and structured LLM contexts use raw recognitions', () => {
   const store = new SegmentStore(300_000)
   const first = makeRecord({ id: 'a', recognition: '第一条原始' })
-  first.revise = '第一条规范'
+  first.corrected = '第一条纠错'
   store.add(first)
   // A segment whose ASR returned nothing contributes to neither.
   store.add(makeRecord({ id: 'b' }))
   const third = makeRecord({ id: 'c', recognition: '第三条原始' })
-  third.revise = '第三条规范'
+  third.corrected = '第三条纠错'
   store.add(third)
 
   assert.equal(store.asrContext(), '第一条原始\n第三条原始')
@@ -92,9 +91,9 @@ test('keeps the tail of a single oversize entry', () => {
   assert.ok(!context.includes('头'))
 })
 
-test('structured LLM turns retain raw evidence and chunk identity, not revised labels', () => {
+test('structured LLM turns retain raw evidence and chunk identity', () => {
   const store = new SegmentStore(300_000)
-  store.add(makeRecord({ id: 'first', recognition: 'Bravo Golf Five', revise: 'BG5ATV', callsign: 'BG5ATV', transmissionId: 'tx', partIndex: 0 }))
+  store.add(makeRecord({ id: 'first', recognition: 'Bravo Golf Five', corrected: 'BG5ATV', callsign: 'BG5ATV', transmissionId: 'tx', partIndex: 0 }))
   store.add(makeRecord({ id: 'current', recognition: 'Alpha Tango Victor', transmissionId: 'tx', partIndex: 1 }))
   assert.deepEqual(store.llmTurns(undefined, 'current'), [{ id: 'first', text: 'Bravo Golf Five', transmissionId: 'tx', partIndex: 0 }])
 })

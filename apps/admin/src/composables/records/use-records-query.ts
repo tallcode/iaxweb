@@ -1,12 +1,15 @@
 import type { AdminRecord, PersistedRecord } from '@iaxweb/contracts'
+import type { RecordsQuery } from '../../api/records'
 import type { RecordsFeedback, RecordsQueryController } from './types'
 import { CALLSIGN_HINT, MANUAL_CALLSIGN_PATTERN } from '@iaxweb/contracts'
-import { computed, onBeforeUnmount, onMounted, readonly, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, readonly, ref, shallowRef } from 'vue'
 import { ApiError, apiErrorMessage } from '../../api/client'
 import { recordsApi } from '../../api/records'
 import { useConditionalAutoRefresh } from '../use-conditional-auto-refresh'
 
 const PAGE_SIZE = 50
+type QueryCriteria = Required<Omit<RecordsQuery, 'pageSize'>>
+
 interface QueryOptions {
   canChange: () => boolean
   canAutoRefresh: () => boolean
@@ -25,9 +28,10 @@ export function useRecordsQuery(options: QueryOptions): RecordsQueryController {
   const editedOnly = ref(false)
   const reviewedOnly = ref(false)
   const isLoading = ref(false)
-  let request: AbortController | undefined
+  const appliedQuery = shallowRef<QueryCriteria>({ page: 1, callsign: '', editedOnly: false, reviewedOnly: false })
+  let request: { controller: AbortController, restore: () => void } | undefined
   const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
-  const filtered = computed(() => !!callsignFilter.value || editedOnly.value || reviewedOnly.value)
+  const filtered = computed(() => !!appliedQuery.value.callsign || appliedQuery.value.editedOnly || appliedQuery.value.reviewedOnly)
   const summary = computed(() => `共 ${total.value} 条${filtered.value ? '匹配' : ''}记录`)
   const { markRefreshed } = useConditionalAutoRefresh({
     canRefresh: () => options.canAutoRefresh() && currentPage.value === 1 && !isLoading.value
@@ -38,40 +42,66 @@ export function useRecordsQuery(options: QueryOptions): RecordsQueryController {
   onBeforeUnmount(abort)
 
   function abort(): void {
-    request?.abort()
+    if (!request)
+      return
+    request.controller.abort()
+    request.restore()
+    request = undefined
+    isLoading.value = false
   }
 
-  async function reload(): Promise<void> {
-    abort()
-    const active = new AbortController()
+  async function reload(navigate = false): Promise<void> {
+    // Consecutive page or filter changes use the controls' latest pending values.
+    request?.controller.abort()
+    const controller = new AbortController()
+    const draft = searchInput.value
+    const query: QueryCriteria = {
+      page: currentPage.value,
+      callsign: callsignFilter.value,
+      editedOnly: editedOnly.value,
+      reviewedOnly: reviewedOnly.value,
+    }
+    const active = {
+      controller,
+      restore() {
+        const applied = appliedQuery.value
+        if (query.callsign !== applied.callsign && searchInput.value === draft)
+          searchInput.value = applied.callsign
+        currentPage.value = applied.page
+        pageInput.value = String(applied.page)
+        callsignFilter.value = applied.callsign
+        editedOnly.value = applied.editedOnly
+        reviewedOnly.value = applied.reviewedOnly
+      },
+    }
     request = active
     isLoading.value = true
     try {
-      const data = await recordsApi.list({
-        page: currentPage.value,
-        pageSize: PAGE_SIZE,
-        callsign: callsignFilter.value,
-        editedOnly: editedOnly.value,
-        reviewedOnly: reviewedOnly.value,
-      }, active.signal)
-      if (active.signal.aborted)
-        return
-      total.value = data.total
-      const lastPage = Math.max(1, Math.ceil(data.total / PAGE_SIZE))
-      if (currentPage.value > lastPage) {
-        currentPage.value = lastPage
-        pageInput.value = String(lastPage)
-        await reload()
-        return
+      while (true) {
+        const data = await recordsApi.list({ ...query, pageSize: PAGE_SIZE }, controller.signal)
+        if (controller.signal.aborted)
+          return
+        const lastPage = Math.max(1, Math.ceil(data.total / PAGE_SIZE))
+        if (query.page > lastPage) {
+          query.page = lastPage
+          continue
+        }
+        appliedQuery.value = query
+        currentPage.value = query.page
+        pageInput.value = String(query.page)
+        total.value = data.total
+        records.value = data.items
+        markRefreshed()
+        options.feedback.showSummary()
+        if (navigate)
+          options.onNavigate()
+        break
       }
-      records.value = data.items
-      pageInput.value = String(currentPage.value)
-      markRefreshed()
-      options.feedback.showSummary()
     }
     catch (error) {
-      if (active.signal.aborted)
+      if (controller.signal.aborted)
         return
+      active.restore()
       if (error instanceof ApiError && error.status === 401)
         await options.onUnauthorized()
       else
@@ -90,8 +120,7 @@ export function useRecordsQuery(options: QueryOptions): RecordsQueryController {
       return
     currentPage.value = Math.min(Math.max(page, 1), pageCount.value)
     pageInput.value = String(currentPage.value)
-    await reload()
-    options.onNavigate()
+    await reload(true)
   }
 
   async function goToPage(): Promise<void> {
@@ -123,8 +152,7 @@ export function useRecordsQuery(options: QueryOptions): RecordsQueryController {
       return
     currentPage.value = 1
     pageInput.value = '1'
-    await reload()
-    options.onNavigate()
+    await reload(true)
   }
 
   async function clearCallsignSearch(): Promise<void> {
@@ -139,12 +167,17 @@ export function useRecordsQuery(options: QueryOptions): RecordsQueryController {
 
   async function updateRecord(updated: PersistedRecord): Promise<void> {
     abort()
-    records.value = records.value.map(row => row.id === updated.id ? { ...row, ...updated } : row)
     const edited = updated.manualRecognition !== null || updated.manualCallsign !== null || updated.calleeCallsign !== null
-    const matches = (!callsignFilter.value || updated.effectiveCallsign === callsignFilter.value)
-      && (!editedOnly.value || edited) && (!reviewedOnly.value || updated.reviewed)
-    if (!matches)
+    const applied = appliedQuery.value
+    const matches = (!applied.callsign || updated.effectiveCallsign === applied.callsign)
+      && (!applied.editedOnly || edited) && (!applied.reviewedOnly || updated.reviewed)
+    if (matches) {
+      records.value = records.value.map(row => row.id === updated.id ? { ...row, ...updated } : row)
+    }
+    else {
+      removeRecord(updated.id)
       await reload()
+    }
   }
 
   function removeRecord(id: string): void {

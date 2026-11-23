@@ -1,26 +1,23 @@
 import type { SpeakerMatch } from '@iaxweb/contracts'
 import type { TranscriptTurn } from './callsign-evidence.js'
 import type { CallsignExtraction } from './callsign-extraction.js'
-import type { TranscriptAnalysis } from './callsign-model-output.js'
 import type { LlmClientOptions } from './llm-client.js'
 import type { LlmConfigFilePaths } from './llm-config-files.js'
-import { cleanCallsignExtraction, matchExtractedCallsign, readCallsignExtraction } from './callsign-extraction.js'
+import { cleanCallsignExtraction, matchExtractedCallsign } from './callsign-extraction.js'
 import { matchFeatureCallsign } from './callsign-stage2.js'
 import { LlmClient } from './llm-client.js'
 import { LlmConfigFiles } from './llm-config-files.js'
 import { correctExplanationText } from './phonetic-corrector.js'
 
-export type { RiskRating } from './callsign-model-output.js'
 export { LlmError } from './llm-client.js'
 export { validateAgainstSchema } from './schema-validator.js'
 
-export interface ParsedTranscript extends TranscriptAnalysis {
+export interface ParsedTranscript {
   callsign?: string | undefined
   extraction?: CallsignExtraction
 }
 
 export interface LlmParserOptions extends LlmClientOptions, LlmConfigFilePaths {
-  analysisEnabled?: boolean
   model: string
   enableThinking?: boolean
   thinkingBudget?: number
@@ -44,7 +41,6 @@ export class LlmParser {
   async parse(
     transcript: string,
     history?: string | readonly TranscriptTurn[],
-    _corrected: string = transcript,
     metadata: Omit<TranscriptTurn, 'text'> = { id: 'current' },
   ): Promise<ParsedTranscript | undefined> {
     const prompt = this.files.loadPrompt()
@@ -66,15 +62,11 @@ export class LlmParser {
       ],
     }
     const raw = parseJsonObject(await this.client.requestWithRetry(body))
-    const cleaned = raw && cleanCallsignExtraction(raw, transcript, turns)
-    if (!cleaned || schema.validate(cleaned))
+    const extraction = raw && cleanCallsignExtraction(raw, transcript, turns)
+    if (!extraction || schema.validate(extraction))
       return {}
-    const analysis = this.readAnalysis(cleaned)
-    if (!analysis)
-      return {}
-    const extraction = readCallsignExtraction(cleaned)
     const callsign = matchExtractedCallsign(extraction)
-    return { ...analysis, extraction, ...(callsign ? { callsign } : {}) }
+    return { extraction, ...(callsign ? { callsign } : {}) }
   }
 
   // A missing extraction means Stage 1 was skipped or failed. Never re-parse
@@ -89,18 +81,6 @@ export class LlmParser {
       ...(this.isDeepSeek ? { thinking: { type: enabled ? 'enabled' : 'disabled' } } : { enable_thinking: enabled }),
       ...(this.options.thinkingBudget !== undefined && !this.isDeepSeek ? { thinking_budget: this.options.thinkingBudget } : {}),
     }
-  }
-
-  private readAnalysis(value: Record<string, unknown>): TranscriptAnalysis | undefined {
-    if (!this.options.analysisEnabled)
-      return {}
-    const { message, risk } = value
-    if (typeof message !== 'string' || typeof risk !== 'object' || risk === null || Array.isArray(risk))
-      return undefined
-    const { level, reason } = risk as Record<string, unknown>
-    if (typeof level !== 'number' || !Number.isInteger(level) || level < 1 || level > 5 || typeof reason !== 'string')
-      return undefined
-    return { message, risk: { level, reason } }
   }
 }
 

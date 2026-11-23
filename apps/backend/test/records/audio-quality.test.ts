@@ -5,89 +5,10 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
-import { QUALITY_REASONS } from '../../src/records/audio-quality.js'
 import { RecordRepository } from '../../src/records/record-repository.js'
 
-test('historical quality preserves prior passes and rejections without changing stored vectors or analysis', (t) => {
-  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-audio-quality-migration-'))
-  t.after(() => rmSync(directory, { recursive: true, force: true }))
-  const file = join(directory, 'history.sqlite')
-  const before = new RecordRepository(file)
-  const embedding = new Float32Array(SPEAKER_DIMENSIONS)
-  embedding[0] = 1
-  for (const id of ['ready', 'rejected', 'resource', 'plain']) {
-    before.insert('1900', { id, timestamp: '2026-11-22T01:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: 'original' })
-    before.updateManualReview(id, { reviewed: true, callsign: 'BG5XXX', recognition: 'manual' })
-  }
-  before.updateVoiceprint('ready', { status: 'ready', version: SPEAKER_VERSION, embedding })
-  before.updateVoiceprint('resource', { status: 'unavailable', version: SPEAKER_VERSION, reason: 'resource_limit_2g' })
-  before.close()
-  const raw = new DatabaseSync(file)
-  raw.exec('ALTER TABLE ai_segments DROP COLUMN audio_quality')
-  raw.prepare('UPDATE ai_segment_embeddings SET status = ?, reason = ? WHERE record_id = ?').run('unavailable', 'interference_high_band', 'rejected')
-  const vectorBefore = raw.prepare('SELECT embedding FROM ai_segment_embeddings WHERE record_id = ?').get('ready')?.embedding
-  const repository = new RecordRepository(file)
-  for (const id of ['ready', 'rejected', 'resource', 'plain']) {
-    const row = repository.find(id)!
-    assert.equal(row.audioQuality?.status, id === 'ready' ? 'passed' : id === 'rejected' ? 'rejected' : 'skip')
-    assert.equal(row.audioQuality?.metrics, null)
-    assert.equal(row.recognition, 'original')
-    assert.equal(row.manualRecognition, 'manual')
-    assert.equal(row.manualCallsign, 'BG5XXX')
-  }
-  assert.equal(repository.find('rejected')?.audioQuality?.reason, 'interference_high_band')
-  assert.equal(raw.prepare('SELECT reason FROM ai_segment_embeddings WHERE record_id = ?').get('rejected')?.reason, null)
-  assert.equal(raw.prepare('SELECT reason FROM ai_segment_embeddings WHERE record_id = ?').get('resource')?.reason, 'resource_limit_2g')
-  assert.deepEqual(raw.prepare('SELECT embedding FROM ai_segment_embeddings WHERE record_id = ?').get('ready')?.embedding, vectorBefore)
-  assert.deepEqual(repository.pendingReviewedVoiceprints(), [])
-  repository.updateAudioQuality('plain', { status: 'unknown', reason: 'check_timeout', metrics: null })
-  repository.close()
-  const reopened = new RecordRepository(file)
-  assert.equal(reopened.find('plain')?.audioQuality?.status, 'unknown')
-  assert.equal(reopened.find('ready')?.audioQuality?.status, 'passed')
-  assert.equal(reopened.find('rejected')?.audioQuality?.status, 'rejected')
-  assert.deepEqual(reopened.pendingReviewedVoiceprints(), [])
-  reopened.close()
-  raw.close()
-})
-
-test('deployed skip records with explicit quality reasons become rejected without reassessment or retries', (t) => {
-  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-audio-quality-rejected-repair-'))
-  t.after(() => rmSync(directory, { recursive: true, force: true }))
-  const file = join(directory, 'history.sqlite')
-  const before = new RecordRepository(file)
-  const metrics = { highBandFraction: 0.02, toneProminenceDb: 20, highBandRolloffDb: -5, highBandDynamicDb: 16 }
-  for (const reason of [...QUALITY_REASONS, 'resource_limit_2g']) {
-    before.insert('1900', { id: reason, timestamp: '2026-11-22T01:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: 'original', audioQuality: { status: 'skip', reason, metrics } })
-    before.updateManualReview(reason, { reviewed: true, callsign: 'BG5XXX' })
-    before.updateVoiceprint(reason, { status: 'unavailable', version: SPEAKER_VERSION })
-  }
-  // A later completed check takes precedence even if its reason resembles an
-  // old rejection. The compatibility repair must only touch skip records.
-  before.insert('1900', { id: 'later-unknown', timestamp: '2026-11-22T01:00:00Z', durationMs: 2000, voicedMs: 1500, recognition: 'original', audioQuality: { status: 'unknown', reason: 'interference_tone', metrics: null } })
-  before.close()
-  const raw = new DatabaseSync(file)
-  const originalEmbeddings = raw.prepare('SELECT * FROM ai_segment_embeddings ORDER BY record_id').all()
-  for (let reopen = 0; reopen < 2; reopen++) {
-    const repaired = new RecordRepository(file)
-    for (const reason of QUALITY_REASONS) {
-      const record = repaired.find(reason)!
-      assert.deepEqual(record.audioQuality, { status: 'rejected', reason, metrics })
-      assert.equal(record.recognition, 'original')
-      assert.equal(record.manualCallsign, 'BG5XXX')
-      assert.equal(record.reviewed, true)
-    }
-    assert.equal(repaired.find('resource_limit_2g')?.audioQuality?.status, 'skip')
-    assert.equal(repaired.find('later-unknown')?.audioQuality?.status, 'unknown')
-    assert.deepEqual(repaired.pendingReviewedVoiceprints(), [])
-    assert.deepEqual(raw.prepare('SELECT * FROM ai_segment_embeddings ORDER BY record_id').all(), originalEmbeddings)
-    repaired.close()
-  }
-  raw.close()
-})
-
-test('already deployed skip migration is repaired without overwriting later quality checks or cached embeddings', (t) => {
-  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-audio-quality-repair-'))
+test('opening existing history preserves saved quality assessments and cached embeddings', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-audio-quality-history-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const file = join(directory, 'history.sqlite')
   const before = new RecordRepository(file)
@@ -104,17 +25,13 @@ test('already deployed skip migration is repaired without overwriting later qual
   before.close()
   const raw = new DatabaseSync(file)
   const originalEmbeddings = raw.prepare('SELECT * FROM ai_segment_embeddings ORDER BY record_id').all()
-  const originalQuality = raw.prepare('SELECT id, audio_quality FROM ai_segments WHERE id != ? ORDER BY id').all('skip')
-  const repaired = new RecordRepository(file)
-  assert.deepEqual(repaired.find('skip')?.audioQuality, { status: 'passed', reason: null, metrics: null })
-  assert.deepEqual(repaired.findReadyVoiceprint('skip'), { status: 'ready', version: SPEAKER_VERSION, embedding })
-  assert.deepEqual(raw.prepare('SELECT * FROM ai_segment_embeddings ORDER BY record_id').all(), originalEmbeddings)
-  assert.deepEqual(raw.prepare('SELECT id, audio_quality FROM ai_segments WHERE id != ? ORDER BY id').all('skip'), originalQuality)
-  assert.deepEqual(repaired.pendingReviewedVoiceprints(), [])
-  repaired.close()
+  const originalQuality = raw.prepare('SELECT id, audio_quality FROM ai_segments ORDER BY id').all()
   const reopened = new RecordRepository(file)
-  assert.equal(reopened.find('skip')?.audioQuality?.status, 'passed')
+  assert.deepEqual(reopened.find('skip')?.audioQuality, { status: 'skip', reason: null, metrics: null })
+  assert.deepEqual(reopened.findReadyVoiceprint('skip'), { status: 'ready', version: SPEAKER_VERSION, embedding })
   assert.deepEqual(raw.prepare('SELECT * FROM ai_segment_embeddings ORDER BY record_id').all(), originalEmbeddings)
+  assert.deepEqual(raw.prepare('SELECT id, audio_quality FROM ai_segments ORDER BY id').all(), originalQuality)
+  assert.deepEqual(reopened.pendingReviewedVoiceprints(), [])
   reopened.close()
   raw.close()
 })

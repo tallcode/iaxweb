@@ -1,6 +1,6 @@
 import type { SegmentRecord } from '../../src/ai/segment-store.js'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -58,7 +58,7 @@ test('reviewed AI-only callers are searchable and manual callers override them',
   const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5ABC' })
   repository.insert('1900', segment)
-  repository.updateAnalysis(segment)
+  repository.updateAutomaticCallsign(segment)
   assert.equal(repository.updateManualReview(segment.id, { reviewed: true }), true)
   assert.equal(repository.find(segment.id)?.manualCallsign, null)
   const embedding = new Float32Array(SPEAKER_DIMENSIONS)
@@ -78,7 +78,7 @@ test('cached query vectors become searchable only while their recording is revie
   try {
     const segment = record({ callsign: 'BG5ABC' })
     repository.insert('1900', segment)
-    repository.updateAnalysis(segment)
+    repository.updateAutomaticCallsign(segment)
     const embedding = new Float32Array(SPEAKER_DIMENSIONS)
     embedding[0] = 1
     const voiceprint = { status: 'ready', version: SPEAKER_VERSION, embedding } as const
@@ -129,7 +129,7 @@ test('reference templates use the latest sixteen eligible records, including bel
     for (let index = 0; index < 18; index++) {
       const segment = record({ id: `ref-${index}`, timestamp: `2026-10-${String(index + 1).padStart(2, '0')}T00:00:00Z`, callsign: 'BG5ABC' })
       repository.insert('1900', segment)
-      repository.updateAnalysis(segment)
+      repository.updateAutomaticCallsign(segment)
       repository.updateManualReview(segment.id, { reviewed: true })
       const embedding = new Float32Array(SPEAKER_DIMENSIONS)
       embedding[0] = index / 25
@@ -181,75 +181,28 @@ test('SQL voice search uses current reviewed main callsigns, groups duplicates, 
   repository.close()
 })
 
-test('legacy embedding tables gain the reason column and keep unreviewed stored data', (t) => {
-  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-embedding-upgrade-'))
-  t.after(() => rmSync(directory, { recursive: true, force: true }))
-  const filename = join(directory, 'ai.sqlite')
-  const first = new RecordRepository(filename)
-  first.insert('1900', record())
-  first.updateManualReview('segment-1', { reviewed: true, callsign: 'BG5XXX' })
-  first.updateVoiceprint('segment-1', { status: 'unavailable', version: SPEAKER_VERSION, reason: 'interference_tone' })
-  first.updateManualReview('segment-1', { reviewed: false })
-  first.close()
-  const legacy = new DatabaseSync(filename)
-  legacy.exec('ALTER TABLE ai_segment_embeddings DROP COLUMN reason')
-  legacy.close()
-  const upgraded = new RecordRepository(filename)
-  const inspect = new DatabaseSync(filename)
-  assert.equal(inspect.prepare('SELECT status FROM ai_segment_embeddings').get()?.status, 'unavailable')
-  assert.ok(inspect.prepare('PRAGMA table_info(ai_segment_embeddings)').all().some(row => row.name === 'reason'))
-  inspect.close()
-  upgraded.close()
-})
-
-test('legacy vectors are cleared once without an automatic backup; only reviewed rows are rebuilt as 768-byte vectors', (t) => {
-  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-model-upgrade-'))
+test('the current schema enforces voiceprint dimensions and preserves stored vectors on reopen', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-embedding-schema-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const filename = join(directory, 'ai.sqlite')
   const initial = new RecordRepository(filename)
   initial.insert('1900', record({ id: 'reviewed' }))
-  initial.insert('1900', record({ id: 'cancelled' }))
-  initial.close()
-  const database = new DatabaseSync(filename)
-  database.exec(`
-    DROP TABLE ai_segment_embeddings;
-    CREATE TABLE ai_segment_embeddings (
-      record_id TEXT PRIMARY KEY REFERENCES ai_segments(id) ON DELETE CASCADE,
-      version TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'unavailable', 'failed')),
-      embedding BLOB,
-      CHECK ((status = 'ready' AND embedding IS NOT NULL AND length(embedding) = 1024)
-        OR (status != 'ready' AND embedding IS NULL))
-    );
-    UPDATE ai_segments SET reviewed = 1, manual_callsign = 'BG5XXX' WHERE id = 'reviewed';
-  `)
-  const legacy = new Uint8Array(new Float32Array(256).fill(0.0625).buffer)
-  for (const id of ['reviewed', 'cancelled'])
-    database.prepare('INSERT INTO ai_segment_embeddings VALUES (?, ?, ?, ?)').run(id, 'wespeaker-legacy', 'ready', legacy)
-  const upgraded = new RecordRepository(filename)
-  assert.equal(database.prepare('SELECT COUNT(*) AS n FROM ai_segment_embeddings').get()?.n, 0)
-  assert.equal(upgraded.find('cancelled')?.reviewed, false)
-  assert.equal(upgraded.find('reviewed')?.reviewed, true)
-  assert.deepEqual(upgraded.pendingReviewedVoiceprints().map(row => row.id), ['reviewed'])
-  assert.equal(upgraded.prepareReviewedVoiceprint('reviewed'), true)
+  initial.updateManualReview('reviewed', { reviewed: true, callsign: 'BG5XXX' })
   const embedding = new Float32Array(SPEAKER_DIMENSIONS)
   embedding[0] = 1
-  assert.equal(upgraded.updateVoiceprint('reviewed', { status: 'ready', version: SPEAKER_VERSION, embedding }), true)
-  assert.equal(database.prepare('SELECT length(embedding) AS n FROM ai_segment_embeddings WHERE record_id = ?').get('reviewed')?.n, SPEAKER_DIMENSIONS * 4)
-  assert.equal(database.prepare('SELECT embedding FROM ai_segment_embeddings WHERE record_id = ?').get('cancelled'), undefined)
-  assert.throws(() => database.prepare('UPDATE ai_segment_embeddings SET embedding = ? WHERE record_id = ?').run(legacy, 'reviewed'))
-  assert.throws(() => database.prepare('UPDATE ai_segment_embeddings SET dimensions = 256 WHERE record_id = ?').run('reviewed'))
-  assert.equal(upgraded.searchSpeakerMatches({ status: 'ready', version: SPEAKER_VERSION, embedding }, 'query').referenceCount, 1)
-  assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), [])
-  assert.equal(existsSync(join(directory, 'backups')), false)
-  upgraded.close()
+  assert.equal(initial.updateVoiceprint('reviewed', { status: 'ready', version: SPEAKER_VERSION, embedding }), true)
+  initial.close()
+
   const reopened = new RecordRepository(filename)
+  const inspect = new DatabaseSync(filename)
+  const previousEmbedding = new Uint8Array(new Float32Array(256).buffer)
+  assert.throws(() => inspect.prepare('UPDATE ai_segment_embeddings SET embedding = ? WHERE record_id = ?').run(previousEmbedding, 'reviewed'))
+  assert.throws(() => inspect.prepare('UPDATE ai_segment_embeddings SET dimensions = 256 WHERE record_id = ?').run('reviewed'))
+  assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(), [])
+  assert.deepEqual(reopened.findReadyVoiceprint('reviewed')?.embedding, embedding)
   assert.deepEqual(reopened.pendingReviewedVoiceprints(), [])
-  assert.equal(existsSync(join(directory, 'backups')), false)
-  reopened.delete('cancelled', () => {})
-  assert.equal(database.prepare('SELECT COUNT(*) AS n FROM ai_segment_embeddings WHERE record_id = ?').get('cancelled')?.n, 0)
+  inspect.close()
   reopened.close()
-  database.close()
 })
 
 test('resource policy upgrade retries only eligible legacy limit rejections once', (t) => {
@@ -295,7 +248,7 @@ function record(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
   }
 }
 
-test('persists ASR and later LLM results in one row', () => {
+test('persists ASR and the later automatic callsign in one row', () => {
   const repository = new RecordRepository(':memory:')
   const segment = record()
   repository.insert('1900', segment)
@@ -311,73 +264,56 @@ test('persists ASR and later LLM results in one row', () => {
     createdAt: repository.find(segment.id)?.createdAt,
     durationMs: 6_000,
     effectiveCallsign: null,
-    effectiveRiskLevel: null,
     id: segment.id,
     manualCallsign: null,
     manualRecognition: null,
     manualNote: null,
-    manualRiskLevel: null,
     nodeId: '1900',
     recognition: segment.recognition,
     reviewed: false,
-    revise: null,
-    riskLevel: null,
-    riskReason: null,
     voicedMs: 5_500,
   })
 
-  segment.revise = '这里是 BG5XXX。'
   segment.callsign = 'BG5XXX'
   segment.callsignAlgorithm = 'stage2_feature'
-  segment.risk = { level: 2, reason: '轻微不适宜' }
-  assert.equal(repository.updateAnalysis(segment), true)
+  assert.equal(repository.updateAutomaticCallsign(segment), true)
 
   const persisted = repository.find(segment.id)
-  assert.equal(persisted?.revise, '这里是 BG5XXX。')
   assert.equal(persisted?.callsign, 'BG5XXX')
   assert.equal(persisted?.callsignAlgorithm, 'stage2_feature')
-  assert.equal(persisted?.riskLevel, 2)
-  assert.equal(persisted?.riskReason, '轻微不适宜')
   assert.equal(persisted?.effectiveCallsign, 'BG5XXX')
-  assert.equal(persisted?.effectiveRiskLevel, 2)
   repository.close()
 })
 
 test('manual review takes precedence without overwriting AI results', () => {
   const repository = new RecordRepository(':memory:')
-  const segment = record({ callsign: 'BG5XXX', risk: { level: 4, reason: '明显不当' } })
+  const segment = record({ callsign: 'BG5XXX' })
   repository.insert('1900', segment)
-  repository.updateAnalysis(segment)
+  repository.updateAutomaticCallsign(segment)
 
   assert.equal(repository.updateManualReview(segment.id, {
     callsign: 'BG5ABC',
     note: '人工复听确认',
-    riskLevel: 1,
   }), true)
 
   const reviewed = repository.find(segment.id)
   assert.equal(reviewed?.callsign, 'BG5XXX')
-  assert.equal(reviewed?.riskLevel, 4)
   assert.equal(reviewed?.manualCallsign, 'BG5ABC')
-  assert.equal(reviewed?.manualRiskLevel, 1)
   assert.equal(reviewed?.manualNote, '人工复听确认')
   assert.equal(reviewed?.effectiveCallsign, 'BG5ABC')
-  assert.equal(reviewed?.effectiveRiskLevel, 1)
-
-  repository.updateManualReview(segment.id, { callsign: null, riskLevel: null })
+  repository.updateManualReview(segment.id, { callsign: null })
   const cleared = repository.find(segment.id)
   assert.equal(cleared?.effectiveCallsign, 'BG5XXX')
-  assert.equal(cleared?.effectiveRiskLevel, 4)
   repository.close()
 })
 
-test('keeps manual text and review status independent of AI analysis', () => {
+test('keeps manual text and review status independent of automatic callsign updates', () => {
   const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5AAA' })
   repository.insert('1900', segment)
-  repository.updateAnalysis(segment)
+  repository.updateAutomaticCallsign(segment)
   repository.updateManualReview(segment.id, { recognition: ' 人工复听文本 ', reviewed: true })
-  repository.updateAnalysis(segment)
+  repository.updateAutomaticCallsign(segment)
   assert.equal(repository.find(segment.id)?.recognition, segment.recognition)
   assert.equal(repository.find(segment.id)?.manualRecognition, '人工复听文本')
   assert.equal(repository.list(1, 50).items[0]?.reviewed, true)
@@ -389,7 +325,7 @@ test('keeps manual text and review status independent of AI analysis', () => {
   repository.close()
 })
 
-test('migrates old databases without losing AI or manual callsign evidence', (t) => {
+test('keeps old SQLite evidence and only exposes current record fields', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-review-migration-'))
   t.after(() => rmSync(directory, { force: true, recursive: true }))
   const databaseFile = join(directory, 'old.sqlite')
@@ -399,15 +335,16 @@ test('migrates old databases without losing AI or manual callsign evidence', (t)
       id TEXT PRIMARY KEY, node_id TEXT, captured_at TEXT, duration_ms INTEGER,
       voiced_ms INTEGER, recognition TEXT, corrected TEXT, revise TEXT,
       callsign TEXT, risk_level INTEGER, risk_reason TEXT, manual_callsign TEXT,
-      callee_callsign TEXT, manual_risk_level INTEGER, manual_note TEXT, created_at TEXT
+      callee_callsign TEXT, manual_risk_level INTEGER, manual_note TEXT, created_at TEXT,
+      audio_quality TEXT
     );
     CREATE VIEW ai_segments_effective AS SELECT *,
       COALESCE(manual_callsign, callsign) AS effective_callsign,
       COALESCE(manual_risk_level, risk_level) AS effective_risk_level FROM ai_segments;
     INSERT INTO ai_segments (id, node_id, captured_at, duration_ms, voiced_ms,
-      recognition, callsign, manual_callsign, created_at)
+      recognition, callsign, manual_callsign, created_at, revise, risk_level, risk_reason, manual_risk_level)
     VALUES ('old', '1900', '2026-11-14T00:00:00Z', 1000, 900,
-      'AI 原文', 'BG5AAA', 'BG5BBB', '2026-11-14T00:00:00Z');
+      'AI 原文', 'BG5AAA', 'BG5BBB', '2026-11-14T00:00:00Z', '历史整理', 2, '历史原因', 1);
   `)
   old.close()
   const repository = new RecordRepository(databaseFile)
@@ -415,19 +352,31 @@ test('migrates old databases without losing AI or manual callsign evidence', (t)
   assert.equal(repository.find('old')?.effectiveCallsign, 'BG5BBB')
   assert.equal(repository.find('old')?.manualRecognition, null)
   assert.equal(repository.find('old')?.reviewed, false)
+  assert.equal(Object.hasOwn(repository.find('old')!, 'revise'), false)
+  assert.equal(repository.updateAutomaticCallsign(record({ id: 'old', callsign: 'BG5CCC' })), true)
   repository.updateManualReview('old', { recognition: '人工文本', reviewed: true })
   repository.close()
   const reopened = new RecordRepository(databaseFile)
   assert.equal(reopened.find('old')?.manualRecognition, '人工文本')
   assert.equal(reopened.find('old')?.reviewed, true)
+  assert.equal(reopened.list(1, 1).items[0]?.callsign, 'BG5CCC')
+  assert.equal(reopened.find('old')?.effectiveCallsign, 'BG5BBB')
   reopened.close()
+  const inspect = new DatabaseSync(databaseFile, { readOnly: true })
+  assert.deepEqual({ ...inspect.prepare('SELECT revise, risk_level, risk_reason, manual_risk_level FROM ai_segments').get() }, {
+    revise: '历史整理',
+    risk_level: 2,
+    risk_reason: '历史原因',
+    manual_risk_level: 1,
+  })
+  inspect.close()
 })
 
-test('persists a manually reviewed callee callsign without changing AI analysis', () => {
+test('persists a manually reviewed callee callsign without changing the automatic caller', () => {
   const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5AAA' })
   repository.insert('1900', segment)
-  repository.updateAnalysis(segment)
+  repository.updateAutomaticCallsign(segment)
 
   assert.equal(repository.updateManualReview(segment.id, { calleeCallsign: 'BG5BBB' }), true)
   const reviewed = repository.find(segment.id)
@@ -467,15 +416,11 @@ test('persists data across repository instances and indexes ordered history quer
   database.close()
 })
 
-test('enforces risk levels and rejects empty manual patches', () => {
+test('rejects empty manual patches', () => {
   const repository = new RecordRepository(':memory:')
   const segment = record()
   repository.insert('1900', segment)
 
-  assert.throws(
-    () => repository.updateManualReview(segment.id, { riskLevel: 6 }),
-    /CHECK constraint failed/,
-  )
   assert.throws(
     () => repository.updateManualReview(segment.id, {}),
     /at least one field/,
@@ -492,9 +437,9 @@ test('returns the newest effective spot per callsign and excludes N0CALL', () =>
   repository.insert('1900', first)
   repository.insert('1901', second)
   repository.insert('1902', reviewed)
-  repository.updateAnalysis(first)
-  repository.updateAnalysis(second)
-  repository.updateAnalysis(reviewed)
+  repository.updateAutomaticCallsign(first)
+  repository.updateAutomaticCallsign(second)
+  repository.updateAutomaticCallsign(reviewed)
   repository.updateManualReview(reviewed.id, { callsign: 'N0CALL' })
 
   assert.deepEqual(repository.recentSpots(), [{
@@ -525,7 +470,7 @@ test('deletes records and rolls back when recording removal fails', () => {
   const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5AAA' })
   repository.insert('1900', segment)
-  repository.updateAnalysis(segment)
+  repository.updateAutomaticCallsign(segment)
   repository.updateManualReview(segment.id, { recognition: '人工文本', reviewed: true })
   assert.throws(() => repository.delete(segment.id, () => {
     throw new Error('Recording permission denied')
@@ -538,7 +483,7 @@ test('deletes records and rolls back when recording removal fails', () => {
   assert.equal(repository.find(segment.id), undefined)
   assert.equal(repository.list(1, 50).total, 0)
   assert.deepEqual(repository.recentSpots(), [])
-  assert.equal(repository.updateAnalysis(segment), false)
+  assert.equal(repository.updateAutomaticCallsign(segment), false)
   assert.equal(repository.delete(segment.id, () => removals++), false)
   assert.equal(removals, 1)
   repository.close()
@@ -551,7 +496,7 @@ test('filters pages by exact effective callsign without case sensitivity', () =>
   const latestMatch = record({ callsign: 'BG5AAA', id: 'latest-match', timestamp: '2026-08-12T12:00:00.000Z' })
   for (const segment of [firstMatch, overridden, latestMatch]) {
     repository.insert('1900', segment)
-    repository.updateAnalysis(segment)
+    repository.updateAutomaticCallsign(segment)
   }
   repository.updateManualReview(overridden.id, { callsign: 'BG5BBB' })
 
@@ -568,14 +513,14 @@ test('filters edits across all editable fields independently from review status'
   for (const id of ['ai-only', 'text-edit', 'caller-edit', 'callee-edit', 'review-only', 'both', 'note-only']) {
     const segment = record({ callsign: 'BG5AAA', id })
     repository.insert('1900', segment)
-    repository.updateAnalysis(segment)
+    repository.updateAutomaticCallsign(segment)
   }
   repository.updateManualReview('text-edit', { recognition: '人工文本' })
   repository.updateManualReview('caller-edit', { callsign: 'BG5BBB' })
   repository.updateManualReview('callee-edit', { calleeCallsign: 'BG5CCC' })
   repository.updateManualReview('review-only', { reviewed: true })
   repository.updateManualReview('both', { recognition: '已编辑并复核', reviewed: true })
-  repository.updateManualReview('note-only', { note: '仅备注', riskLevel: 1 })
+  repository.updateManualReview('note-only', { note: '仅备注' })
 
   const edited = repository.list(1, 50, undefined, true)
   assert.equal(edited.total, 4)

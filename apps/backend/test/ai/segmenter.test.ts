@@ -54,14 +54,17 @@ function pushVoice(segmenter: NodeSegmenter, frames: number, startTimestampMs: n
 }
 
 test('produces a segment for a transmission over the minimum', () => {
-  const { capture, segmenter } = makeSegmenter()
+  let now = Date.parse('2026-11-22T23:59:58.000Z')
+  const { capture, segmenter } = makeSegmenter({ now: () => now })
   segmenter.setSpeaking(true)
   pushVoice(segmenter, 300, 0) // 6 s
+  now += 6_000
   segmenter.setSpeaking(false)
 
   assert.equal(capture.discards.length, 0)
   const segment = capture.segments[0]
   assert.ok(segment)
+  assert.equal(segment.capturedAt, '2026-11-22T23:59:58.000Z')
   assert.equal(segment.durationMs, 6_000)
   assert.equal(segment.voicedMs, 6_000)
   assert.equal(segment.payloads.length, 300)

@@ -1,11 +1,8 @@
 import { open } from 'node:fs/promises'
-import { join } from 'node:path'
+import { recordingPath } from '../records/recording-store.js'
 
 export function speakerWavFile(directory: string, record: { id: string, timestamp: string }): string {
-  if (!/^[0-9a-f-]+$/i.test(record.id) || !Number.isFinite(Date.parse(record.timestamp)))
-    throw new Error('Invalid record ID or timestamp')
-  const date = new Date(record.timestamp).toISOString().slice(0, 10).replaceAll('-', '')
-  return join(directory, date, `${record.id}.wav`)
+  return recordingPath(directory, record.id, record.timestamp)
 }
 
 // Stored recordings are PCM16 mono 8kHz. Parse RIFF chunks rather than assuming

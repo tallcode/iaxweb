@@ -118,18 +118,16 @@ AI_LLM_API_KEY=replace-with-llm-key
 
 ASR 和 LLM 的端点、模型可分别配置；只使用语音转写时设置 `AI_LLM_ENABLED=false`。
 
-启用 LLM 时，选择一套示例复制到 `config/`：
+启用 LLM 时，将呼号提取提示词和 Schema 复制到 `config/`。
 
 ```bash
 cp examples/ai/simple/prompt.txt config/prompt.txt
 cp examples/ai/schema.json config/schema.json
 ```
 
-`examples/ai/full/prompt.txt` 提供包含文本整理和风险评级的完整提示词，使用时设置 `AI_LLM_ANALYSIS_ENABLED=true`。
-
 `config/prompt.txt` 只包含一份提取提示词，无需分段。每次调用前重新读取，编辑后无需重启。提示词或 Schema 缺失、不可读、无效时跳过识别。
 
-已有部署升级时须同时替换 `config/prompt.txt` 和 `config/schema.json`。模型只输出自报与解释法的四个提取字段；最终呼号由程序匹配，二阶段不再调用模型。完整模式继续输出 `message` 和 `risk`。
+已有部署升级时须同时更新 `config/prompt.txt` 和 `config/schema.json`。模型在一阶段只输出自报与解释法的四个提取字段，最终呼号由程序匹配。二阶段由程序使用声纹补证。
 
 ASR 可选配置包括 `config/hotwords.json`（热词）和 `config/background.txt`（背景文本）。可将 [ASR 背景示例](examples/ai/background.txt) 复制为 `config/background.txt`，保存后下一次转写即生效。
 
@@ -181,7 +179,7 @@ npm run download:speaker-model
 
 Docker 不下载、不打包模型，通过 `config/` 的只读挂载使用该文件。模型随配置独立保存，更新应用镜像无需重新下载。
 
-启用 `AI_LLM_STAGE2_ENABLED=true` 可以在 ASR 时并行计算录音特征，在文字识别留空时尝试第二阶段补证。该开关默认关闭，需要同时启用 `AI_LLM_ENABLED` 和 `AI_PERSISTENCE_ENABLED`。自动特征匹配的等待上限为 20 秒，超时后继续使用文字识别结果。两阶段识别成功后均按 `AI_LLM_PUBLISH_SPOT` 发布。
+启用 `AI_LLM_STAGE2_ENABLED=true` 可以在 ASR 时并行计算录音特征，在文字识别留空时尝试第二阶段补证。该开关默认关闭，需要同时启用 `AI_LLM_ENABLED` 和 `AI_PERSISTENCE_ENABLED`。自动特征匹配的等待上限为 20 秒，超时后继续使用文字识别结果。`AI_LLM_PUBLISH_SPOT=false` 会关闭公开 AI Spot 面板、实时发布和历史返回，后台识别及记录管理可继续使用。
 
 自动和手动查询生成的有效特征都缓存到 `ai_segment_embeddings`。后续查询复用同版本向量，匹配范围始终是已标注录音。
 
@@ -195,7 +193,7 @@ Docker 不下载、不打包模型，通过 `config/` 的只读挂载使用该�
 
 一分钟整段声纹提取建议使用至少 4 GiB 内存的宿主机。默认 Compose 限制应用为 1.5 核、2.5 GiB 内存，并禁止容器使用 Swap。已有部署需同步更新 `docker-compose.yml` 的资源限制并重建容器，单独拉取镜像不会更新这些配置。
 
-旧数据库首次启动时，在事务内清空旧声纹并升级为固定 192 维、768 字节的声纹表；升级前请自行备份数据库。后台分批重算已标注录音，期间只检索已完成的新声纹；录音、识别结果及人工标注保留。后续重启不会重复清空，无需手动删除数据。
+当前声纹表使用固定 192 维、768 字节的向量。服务启动时创建新库所需的表，已升级的声纹、录音、识别结果和人工标注继续保留。早期声纹表需先使用支持旧库迁移的版本完成升级。
 
 ## 检查与构建
 
@@ -274,7 +272,7 @@ npm run backfill:speaker -- --help
 
 只处理已标注录音缺失或旧版本的声纹，自动备份并保存进度；当前版本已有声纹及在线待处理任务不覆盖。中断后再次执行相同命令即可续跑，无需指定任务目录。可用 `--limit`、`--delay-ms` 控制处理数量和间隔。
 
-只有声纹模型变更才需要批量重算已有声纹，质量门禁调整不会触发重算或自动重试。已有有效声纹的历史录音质量迁移为 `passed` 并继续复用缓存，明确被质量门禁拦截的迁移为 `rejected`，其余历史录音迁移为 `skip`。`rejected`、`unknown`、`skip` 仅手动识别时重新检查。已执行过全量 `skip` 迁移的数据库会在启动时自动校正已有声纹或明确拒绝原因的记录，无需重算。
+只有声纹模型变更才需要批量重算已有声纹，质量门禁调整不会触发重算或自动重试。已升级数据库保留历史录音的质量结论。已有有效声纹的历史记录为 `passed` 并继续复用缓存，明确被质量门禁拦截的记录为 `rejected`，其余为 `skip`。在线服务在手动识别时重新检查 `rejected`、`unknown` 和 `skip`。
 
 容器中使用：
 

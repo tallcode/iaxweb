@@ -85,13 +85,13 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
     voicedMs: 900,
   }
   repository.insert('1900', segment)
-  repository.updateAnalysis(segment)
+  repository.updateAutomaticCallsign(segment)
   const exactSearch = await app.inject({
     headers: { cookie: cookie!.split(';', 1)[0] },
     url: '/api/admin/records?callsign=bg5aaa',
   })
   assert.equal(exactSearch.statusCode, 200)
-  assert.equal(exactSearch.json().items[0].hasAudio, true)
+  assert.equal(exactSearch.json().items[0].hasAudio, false)
   assert.equal(Object.hasOwn(exactSearch.json(), 'recordingDates'), false)
   assert.equal(Object.hasOwn(exactSearch.json(), 'user'), false)
   assert.equal(exactSearch.json().total, 1)
@@ -161,7 +161,7 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   assert.equal(repository.find(emptyCaller.id)?.manualCallsign, 'BG5CCC')
   assert.equal((await app.inject({ headers, method: 'PATCH', payload: { reviewed: false }, url: reviewUrl })).statusCode, 200)
   assert.equal((await app.inject({ headers, method: 'PATCH', payload: { callsign: null }, url: callerUrl })).statusCode, 200)
-  repository.updateAnalysis(emptyCaller)
+  repository.updateAutomaticCallsign(emptyCaller)
   const aiOnlyReview = await mark()
   assert.equal(aiOnlyReview.statusCode, 200)
   assert.equal(aiOnlyReview.json().manualCallsign, null)
@@ -247,7 +247,7 @@ test('editors can edit fields but only administrators can annotate or delete', a
     payloads: [],
   }
   repository.insert('1900', segment)
-  repository.updateAnalysis(segment)
+  repository.updateAutomaticCallsign(segment)
   const wav = new RecordingStore(directory).save(segment.id, segment.timestamp, new Uint8Array([82, 73, 70, 70]))
   const app = Fastify()
   context.after(() => app.close())

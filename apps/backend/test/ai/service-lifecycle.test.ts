@@ -8,7 +8,7 @@ test('AI stop does not close an injected repository owned by the server', () => 
   const repository = {
     find: () => undefined,
     insert() {},
-    updateAnalysis: () => false,
+    updateAutomaticCallsign: () => false,
     close() { closes++ },
   }
   const config = loadAiConfig({ AI_PERSISTENCE_ENABLED: 'true', AI_LLM_ENABLED: 'false' })

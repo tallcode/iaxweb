@@ -1,6 +1,7 @@
 import { SPEAKER_DIMENSIONS } from './speaker-model.mjs'
 
 export const SPEAKER_REFERENCE_LIMIT = 16
+export const SPEAKER_REFERENCE_THRESHOLD = 0.80
 const GROUP_SIMILARITY_THRESHOLD = 0.72
 const MIN_REFERENCES_TO_GROUP = 5
 

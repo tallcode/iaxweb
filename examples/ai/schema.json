@@ -51,31 +51,6 @@
         "type": "string",
         "pattern": "^B[ABDEGHIY][0-9][A-Z]{2,3}$"
       }
-    },
-    "message": {
-      "type": "string",
-      "description": "完整模式的规范化文本"
-    },
-    "risk": {
-      "additionalProperties": false,
-      "description": "风控评级",
-      "properties": {
-        "level": {
-          "description": "风控等级 1~5，5 最严重",
-          "maximum": 5,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "reason": {
-          "description": "风控原因，中文 20 字以内",
-          "type": "string"
-        }
-      },
-      "required": [
-        "level",
-        "reason"
-      ],
-      "type": "object"
     }
   }
 }

@@ -4,18 +4,19 @@ import { ReconnectingWebSocket } from './reconnecting-websocket'
 
 const SAMPLE_RATE = 8_000
 const JITTER_SECONDS = 0.1
-const SPECTRUM_BARS = 28
+const MAX_SCHEDULE_AHEAD_SECONDS = 0.5
+const MAX_PLAYBACK_LAG_SECONDS = 0.05
+const CLOCK_RESET_MS = 1_000
 
 export const audioPlayerKey: InjectionKey<AudioStreamPlayer> = Symbol('audioPlayer')
 
 export class AudioStreamPlayer {
   private analyser: AnalyserNode | null = null
-  private baseAudioTime = 0
-  private baseTimestamp: number | null = null
   private connection: ReconnectingWebSocket | null = null
-  private lastTimestamp: number | null = null
+  private lastFrame: { timestamp: number, startTime: number } | null = null
   private readonly playback = shallowRef<{ nodeId: string, context: AudioContext } | null>(null)
   private playbackVersion = 0
+  private readonly scheduledSources = new Set<AudioBufferSourceNode>()
 
   get playingNodeId(): string | null {
     return this.playback.value?.nodeId ?? null
@@ -85,7 +86,7 @@ export class AudioStreamPlayer {
       await context.close()
   }
 
-  attachSpectrum(meter: SpectrumMeter): (() => void) | undefined {
+  attachAnalyser(): { analyser: AnalyserNode, detach: () => void } | undefined {
     const context = this.playback.value?.context
     if (!context)
       return
@@ -94,11 +95,12 @@ export class AudioStreamPlayer {
     analyser.fftSize = 256
     analyser.smoothingTimeConstant = 0.7
     this.analyser = analyser
-    meter.attach(analyser)
-    return () => {
-      meter.detach()
-      if (this.analyser === analyser)
-        this.analyser = null
+    return {
+      analyser,
+      detach: () => {
+        if (this.analyser === analyser)
+          this.analyser = null
+      },
     }
   }
 
@@ -131,18 +133,19 @@ export class AudioStreamPlayer {
       return false
 
     const timestamp = view.getUint32(6, false)
-    if (this.lastTimestamp !== null && signedDifference(timestamp, this.lastTimestamp) < -1_000)
-      this.resetTimeline()
-    if (this.baseTimestamp === null) {
-      this.baseTimestamp = timestamp
-      this.baseAudioTime = context.currentTime + JITTER_SECONDS
-    }
-
-    let startTime = this.baseAudioTime + unsignedDifference(timestamp, this.baseTimestamp) / 1_000
-    if (startTime < context.currentTime - 0.05) {
-      this.baseTimestamp = timestamp
-      this.baseAudioTime = context.currentTime + JITTER_SECONDS
-      startTime = this.baseAudioTime
+    const now = context.currentTime
+    const previous = this.lastFrame
+    let startTime = now + JITTER_SECONDS
+    if (previous) {
+      // The rolling reference preserves small signed deltas across uint32 wrap.
+      const elapsedMs = (timestamp - previous.timestamp) | 0
+      if (elapsedMs <= 0 && elapsedMs >= -CLOCK_RESET_MS)
+        return true // Valid transport data, but the frame is late or duplicated.
+      const projected = previous.startTime + elapsedMs / 1_000
+      if (elapsedMs < 0 || projected < now - MAX_PLAYBACK_LAG_SECONDS || projected > now + MAX_SCHEDULE_AHEAD_SECONDS)
+        this.resetTimeline()
+      else
+        startTime = projected
     }
 
     const encoded = new Uint8Array(data, 10)
@@ -155,120 +158,19 @@ export class AudioStreamPlayer {
     source.connect(context.destination)
     if (this.analyser)
       source.connect(this.analyser)
-    source.start(Math.max(startTime, context.currentTime))
-    this.lastTimestamp = timestamp
+    source.onended = () => this.scheduledSources.delete(source)
+    source.start(Math.max(startTime, now))
+    this.scheduledSources.add(source)
+    this.lastFrame = { timestamp, startTime }
     return true
   }
 
   private resetTimeline(): void {
-    this.baseTimestamp = null
-    this.baseAudioTime = 0
-    this.lastTimestamp = null
+    this.lastFrame = null
+    for (const source of this.scheduledSources)
+      source.stop()
+    this.scheduledSources.clear()
   }
-}
-
-export class SpectrumMeter {
-  private analyser: AnalyserNode | null = null
-  private readonly bars: HTMLSpanElement[] = []
-  private frame = 0
-  private freqData: Uint8Array<ArrayBuffer> | null = null
-  private readonly levelFill: HTMLElement | null
-  private readonly levelPeak: HTMLElement | null
-  private peak = 0
-  private readonly spectrum: HTMLElement
-  private timeData: Uint8Array<ArrayBuffer> | null = null
-
-  constructor(rootElement: HTMLElement) {
-    const spectrum = rootElement.querySelector<HTMLElement>('.spectrum')
-    if (!spectrum)
-      throw new Error('Spectrum meter requires a .spectrum element')
-    this.spectrum = spectrum
-    this.levelFill = rootElement.querySelector('.level-fill')
-    this.levelPeak = rootElement.querySelector('.level-peak')
-    this.render = this.render.bind(this)
-    this.reset()
-  }
-
-  attach(analyser: AnalyserNode): void {
-    this.ensureBars()
-    this.analyser = analyser
-    this.timeData = new Uint8Array(analyser.fftSize)
-    this.freqData = new Uint8Array(analyser.frequencyBinCount)
-    if (!this.frame)
-      this.frame = requestAnimationFrame(this.render)
-  }
-
-  detach(): void {
-    if (this.frame) {
-      cancelAnimationFrame(this.frame)
-      this.frame = 0
-    }
-    this.analyser = null
-    this.peak = 0
-    this.reset()
-  }
-
-  private ensureBars(): void {
-    if (this.bars.length > 0)
-      return
-    for (let index = 0; index < SPECTRUM_BARS; index++) {
-      const bar = document.createElement('span')
-      bar.className = 'bar'
-      this.spectrum.append(bar)
-      this.bars.push(bar)
-    }
-  }
-
-  private reset(): void {
-    for (const bar of this.bars)
-      bar.style.transform = 'scaleY(0.02)'
-    if (this.levelFill)
-      this.levelFill.style.transform = 'scaleX(0)'
-    if (this.levelPeak)
-      this.levelPeak.style.left = '0%'
-  }
-
-  private render(): void {
-    const analyser = this.analyser
-    const timeData = this.timeData
-    const freqData = this.freqData
-    if (!analyser || !timeData || !freqData)
-      return
-    this.frame = requestAnimationFrame(this.render)
-
-    if (this.levelFill && this.levelPeak) {
-      analyser.getByteTimeDomainData(timeData)
-      const sumSquares = timeData.reduce((sum, value) => {
-        const sample = (value - 128) / 128
-        return sum + sample * sample
-      }, 0)
-      const rms = Math.sqrt(sumSquares / timeData.length)
-      const dbfs = rms > 0 ? 20 * Math.log10(rms) : Number.NEGATIVE_INFINITY
-      const level = Number.isFinite(dbfs) ? Math.max(0, Math.min(1, (dbfs + 60) / 60)) : 0
-      this.levelFill.style.transform = `scaleX(${level})`
-      this.peak = Math.max(level, this.peak - 0.01)
-      this.levelPeak.style.left = `${this.peak * 100}%`
-    }
-
-    analyser.getByteFrequencyData(freqData)
-    const usableBins = Math.floor(freqData.length * 0.85)
-    this.bars.forEach((bar, index) => {
-      const start = Math.floor((index / this.bars.length) * usableBins)
-      const end = Math.max(start + 1, Math.floor(((index + 1) / this.bars.length) * usableBins))
-      let sum = 0
-      for (let bin = start; bin < end; bin++)
-        sum += freqData[bin] ?? 0
-      bar.style.transform = `scaleY(${Math.max(0.02, sum / (end - start) / 255)})`
-    })
-  }
-}
-
-function unsignedDifference(current: number, base: number): number {
-  return (current - base) >>> 0
-}
-
-function signedDifference(current: number, previous: number): number {
-  return (current - previous) | 0
 }
 
 function decodeMuLaw(value: number): number {

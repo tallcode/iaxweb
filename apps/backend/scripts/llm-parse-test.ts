@@ -4,7 +4,6 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { config as loadEnv } from 'dotenv'
 import { LlmParser } from '../src/ai/llm-parser.js'
-import { correctExplanationText } from '../src/ai/phonetic-corrector.js'
 import { loadAiConfig } from '../src/config.js'
 
 loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../..', '.env'), quiet: true })
@@ -22,7 +21,6 @@ if (!config.llm.apiKey) {
 }
 
 const parser = new LlmParser({
-  analysisEnabled: config.llm.analysisEnabled,
   apiKey: config.llm.apiKey,
   baseUrl: config.llm.baseUrl,
   ...(config.llm.enableThinking !== undefined ? { enableThinking: config.llm.enableThinking } : {}),
@@ -34,7 +32,7 @@ const parser = new LlmParser({
 })
 
 try {
-  const parsed = await parser.parse(text, undefined, correctExplanationText(text).text)
+  const parsed = await parser.parse(text)
   if (!parsed) {
     console.error('LLM 解析未生效：提示词或 schema 不可用')
     process.exit(1)
@@ -42,8 +40,6 @@ try {
   console.log(JSON.stringify({
     ...(parsed.extraction ?? { selfCallsignEvidence: null, spelledCallsignEvidence: [], selfCallsign: null, spelledCallsigns: [] }),
     matchedCallsign: parsed.callsign ?? null,
-    ...(parsed.message === undefined ? {} : { message: parsed.message }),
-    ...(parsed.risk === undefined ? {} : { risk: parsed.risk }),
   }, null, 2))
 }
 catch (error) {

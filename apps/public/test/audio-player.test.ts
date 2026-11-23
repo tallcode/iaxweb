@@ -12,15 +12,24 @@ function deferred() {
   return { promise, reject, resolve }
 }
 
-describe('audio playback cancellation', () => {
+describe('audio playback', () => {
   let player: AudioStreamPlayer
   let contexts: FakeContext[]
   let sockets: FakeSocket[]
 
+  class FakeSource {
+    connect = vi.fn()
+    start = vi.fn<(time: number) => void>()
+    stop = vi.fn()
+  }
+
   class FakeContext {
     state = 'suspended'
+    currentTime = 0
+    destination = {}
     resumeOperation = deferred()
     closeOperation: ReturnType<typeof deferred> | undefined
+    sources: FakeSource[] = []
 
     constructor() {
       contexts.push(this)
@@ -34,6 +43,16 @@ describe('audio playback cancellation', () => {
       this.state = 'closed'
       await this.closeOperation?.promise
     }
+
+    createBuffer(_channels: number, length: number) {
+      return { getChannelData: () => new Float32Array(length) }
+    }
+
+    createBufferSource(): FakeSource {
+      const source = new FakeSource()
+      this.sources.push(source)
+      return source
+    }
   }
 
   class FakeSocket extends EventTarget {
@@ -43,6 +62,15 @@ describe('audio playback cancellation', () => {
     }
 
     close(): void {}
+
+    frame(timestamp: number): void {
+      const data = new ArrayBuffer(170)
+      const view = new DataView(data)
+      view.setUint8(0, 1)
+      view.setUint8(1, 1)
+      view.setUint32(6, timestamp, false)
+      this.dispatchEvent(new MessageEvent('message', { data }))
+    }
   }
 
   beforeEach(() => {
@@ -99,5 +127,36 @@ describe('audio playback cancellation', () => {
     expect(player.playingNodeId).toBe('1900')
     expect(sockets).toHaveLength(2)
     expect(contexts[1]!.state).not.toBe('closed')
+  })
+
+  it('drops an out-of-order frame and schedules across timestamp rollover', async () => {
+    const starting = player.start('1900')
+    const context = contexts[0]!
+    context.resumeOperation.resolve()
+    await starting
+
+    const socket = sockets[0]!
+    socket.frame(0xFFFF_FFF0)
+    socket.frame(0xFFFF_FFDC)
+    socket.frame(4)
+
+    expect(context.sources).toHaveLength(2)
+    expect(context.sources[1]!.start.mock.calls[0]![0]).toBeCloseTo(0.12)
+  })
+
+  it('rebases large forward jumps and cancels previously scheduled audio', async () => {
+    const starting = player.start('1900')
+    const context = contexts[0]!
+    context.resumeOperation.resolve()
+    await starting
+
+    const socket = sockets[0]!
+    socket.frame(100)
+    context.currentTime = 0.02
+    socket.frame(10_100)
+
+    expect(context.sources).toHaveLength(2)
+    expect(context.sources[0]!.stop).toHaveBeenCalledOnce()
+    expect(context.sources[1]!.start.mock.calls[0]![0]).toBeCloseTo(0.12)
   })
 })

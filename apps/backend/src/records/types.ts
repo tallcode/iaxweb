@@ -6,6 +6,40 @@ export interface SpeakerReferenceGroup {
 }
 
 export type SpeakerReferenceScore = Pick<SpeakerMatch, 'callsign' | 'referenceSimilarity' | 'referenceRecordCount' | 'trimmedReferenceSimilarity' | 'trimmedReferenceRecordCount' | 'referenceGroups'>
+type SpeakerSearchMatch = Omit<SpeakerMatch, 'confidence' | Exclude<keyof SpeakerReferenceScore, 'callsign'>>
+
+export interface SpeakerSearchResult {
+  referenceCount: number
+  matches: SpeakerSearchMatch[]
+}
+
+export interface PendingReviewedVoiceprint {
+  id: string
+  timestamp: string
+  voicedMs: number
+}
+
+export interface StoredSpot {
+  at: string
+  callsign: string
+  id: string
+  node: string
+}
+
+export interface SpeechHour {
+  date: string
+  hour: number
+  count: number
+  voicedMs: number
+}
+
+export interface ManualReviewPatch {
+  callsign?: string | null
+  calleeCallsign?: string | null
+  recognition?: string | null
+  reviewed?: boolean
+  note?: string | null
+}
 
 export type Voiceprint = { version: string, reason?: string | undefined } & (
   | { status: 'ready', embedding: Float32Array }
@@ -22,8 +56,6 @@ export interface RecognitionRecord {
   recognition?: string | undefined
   corrected?: string | undefined
   audioQuality?: AudioQuality | undefined
-  revise?: string | undefined
   callsign?: string | undefined
   callsignAlgorithm?: string | undefined
-  risk?: { level: number, reason: string } | undefined
 }

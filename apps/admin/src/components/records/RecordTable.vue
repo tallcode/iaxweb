@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { hasCallerCallsign } from '@iaxweb/contracts'
-import { useRecordInteractions, useRecordsQueryContext } from '../../composables/records/use-records-context'
+import { useRecordRows } from '../../composables/records/use-record-rows'
 import { formatRecordTime as formatTime } from '../../utils/records-format'
 import RecognitionEditor from './RecognitionEditor.vue'
 import RecordCallsign from './RecordCallsign.vue'
@@ -8,8 +7,7 @@ import RecordDuration from './RecordDuration.vue'
 import ReviewStar from './ReviewStar.vue'
 import SpeakerRecognitionButton from './SpeakerRecognitionButton.vue'
 
-const { records, isLoading } = useRecordsQueryContext().state
-const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecord, isSaving, togglePlayback, requestDeletion, requestSpeakerRecognition, acquireEditor, finishEditing, isEditingCallsign, saveRecognition, saveCallsign, setReviewed, playingRecordId } = useRecordInteractions()
+const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback, requestSpeakerRecognition, requestDeletion, actionsDisabled, recognitionProps, callsignProps, reviewProps } = useRecordRows('table')
 </script>
 
 <template>
@@ -40,20 +38,20 @@ const { isAdministrator, activeEditor, hasActiveEditor, isMutating, canEditRecor
           </td><td class="whitespace-nowrap px-4 py-4">
             <RecordDuration :duration-ms="record.durationMs" :quality="record.audioQuality" />
           </td><td class="px-4 py-4">
-            <RecognitionEditor :signals="record.signaling" :original="record.recognition" :manual="record.manualRecognition" :read-only="!canEditRecord(record)" :disabled="hasActiveEditor || isSaving(record.id) || isMutating" :save="value => saveRecognition(record, value)" :request-edit="() => acquireEditor(record, 'recognition', 'table')" @editing="editing => !editing && finishEditing(record, 'recognition', 'table')" />
+            <RecognitionEditor v-bind="recognitionProps(record)" />
           </td><td class="hidden px-4 py-3 min-[1200px]:table-cell">
-            <RecordCallsign :record="record" role="callee" :editing="isEditingCallsign(record, 'callee', 'table')" :disabled="hasActiveEditor || !canEditRecord(record) || isMutating" :saving="isSaving(record.id)" :save="value => saveCallsign(record, 'callee', value)" @begin="acquireEditor(record, 'callee', 'table')" @close="finishEditing(record, 'callee', 'table')" />
+            <RecordCallsign v-bind="callsignProps(record, 'callee')" />
           </td><td class="px-4 py-3">
-            <RecordCallsign :record="record" role="caller" :editing="isEditingCallsign(record, 'caller', 'table')" :disabled="hasActiveEditor || !canEditRecord(record) || isMutating" :saving="isSaving(record.id)" :save="value => saveCallsign(record, 'caller', value)" @begin="acquireEditor(record, 'caller', 'table')" @close="finishEditing(record, 'caller', 'table')" />
+            <RecordCallsign v-bind="callsignProps(record, 'caller')" />
           </td><td class="px-4 py-3">
             <button v-if="record.hasAudio" class="inline-flex h-8 items-center rounded-md border border-slate-700 px-3 py-1.5 text-xs transition hover:bg-slate-700" @click="togglePlayback(record.id)">
               {{ playingRecordId === record.id ? '停止' : '播放' }}
             </button><span v-else class="inline-flex h-8 items-center text-xs text-slate-600">已过期</span>
           </td><td v-if="isAdministrator" class="px-3 py-3">
             <div class="flex items-center gap-1">
-              <SpeakerRecognitionButton :disabled="isLoading || isSaving(record.id) || isMutating || hasActiveEditor" @recognize="requestSpeakerRecognition(record)" />
-              <ReviewStar :reviewed="record.reviewed" :has-caller="hasCallerCallsign(record)" :disabled="isSaving(record.id) || isMutating || hasActiveEditor" @toggle="setReviewed(record, !record.reviewed)" />
-              <button type="button" aria-label="删除记录" title="删除记录和录音" :disabled="isLoading || isMutating || hasActiveEditor" class="inline-flex size-8 items-center justify-center rounded-md text-red-400 transition hover:bg-red-500/10 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50 disabled:cursor-not-allowed disabled:opacity-40" @click="requestDeletion(record)">
+              <SpeakerRecognitionButton :disabled="actionsDisabled()" @recognize="requestSpeakerRecognition(record)" />
+              <ReviewStar v-bind="reviewProps(record)" />
+              <button type="button" aria-label="删除记录" title="删除记录和录音" :disabled="actionsDisabled()" class="inline-flex size-8 items-center justify-center rounded-md text-red-400 transition hover:bg-red-500/10 hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50 disabled:cursor-not-allowed disabled:opacity-40" @click="requestDeletion(record)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="size-4" aria-hidden="true"><path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M5 6l1 14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-14M10 10v7M14 10v7" /></svg>
               </button>
             </div>

@@ -21,7 +21,7 @@ export const useStatusStore = defineStore('status', () => {
   let historyRequest: AbortController | undefined
   let pendingSpotEvents: SpotEvent[] | undefined
 
-  const aiSpotEnabled = computed(() => Object.values(statusSnapshot.value).some(node => node.AI === true))
+  const aiSpotEnabled = computed(() => Object.values(statusSnapshot.value).some(node => (node.AI_SPOT ?? node.AI) === true))
   const recentSpots = computed(() => {
     void currentTime.value
     const newestByCallsign = new Map<string, SpotEvent>()
@@ -51,12 +51,22 @@ export const useStatusStore = defineStore('status', () => {
         statusSnapshot.value = nextSnapshot
         hasInitialSnapshot.value = true
         connectionState.value = 'ready'
-        if (aiSpotEnabled.value && needsSpotReconciliation) {
+        if (!aiSpotEnabled.value) {
+          historyRequest?.abort()
+          historyRequest = undefined
+          pendingSpotEvents = undefined
+          spotsById.value.clear()
+          spotHistoryReady.value = false
+          needsSpotReconciliation = true
+        }
+        else if (needsSpotReconciliation) {
           needsSpotReconciliation = false
           void loadSpotHistory()
         }
       },
       onSpot: (spot) => {
+        if (hasInitialSnapshot.value && !aiSpotEnabled.value)
+          return
         pendingSpotEvents?.push(spot)
         applySpot(spot)
       },

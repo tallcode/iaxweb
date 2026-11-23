@@ -62,6 +62,7 @@ export const nodeLocationSchema = z.object({
 })
 export const publicNodeStatusSchema = z.object({
   AI: z.boolean().optional(),
+  AI_SPOT: z.boolean().optional(),
   AUDIO: z.boolean().optional(),
   CONNS: z.record(z.string(), publicConnectionStatusSchema).optional(),
   DESC: z.string().optional(),
@@ -79,7 +80,6 @@ export const publicNodeStatusSchema = z.object({
 export const publicStatusSnapshotSchema = z.record(z.string().regex(/^\d+$/), publicNodeStatusSchema)
 const callsign = z.string().regex(CALLSIGN_PATTERN).nullable()
 const manualCallsign = z.string().regex(MANUAL_CALLSIGN_PATTERN).nullable()
-const riskLevel = z.number().int().min(1).max(5).nullable()
 export const radioSignalSchema = z.object({
   type: z.enum(['BSS', 'APRS', 'FleetSync', 'MDC1200', 'DTMF']),
   content: z.string().min(1).max(256),
@@ -104,7 +104,6 @@ export const persistedRecordSchema = z.object({
   voicedMs: z.number().nonnegative(),
   recognition: z.string(),
   corrected: z.string().nullable(),
-  revise: z.string().nullable(),
   callsign,
   callsignAlgorithm: nonempty.nullable().default(null),
   signaling: radioSignalsSchema.nullable().optional(),
@@ -114,10 +113,6 @@ export const persistedRecordSchema = z.object({
   effectiveCallsign: manualCallsign,
   manualRecognition: z.string().nullable(),
   manualNote: z.string().nullable(),
-  riskLevel,
-  manualRiskLevel: riskLevel,
-  effectiveRiskLevel: riskLevel,
-  riskReason: z.string().nullable(),
   reviewed: z.boolean(),
 })
 export const recordPageSchema = z.object({

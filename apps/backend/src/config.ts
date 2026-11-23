@@ -33,7 +33,6 @@ export interface AiApiConfig {
 }
 
 export interface AiLlmConfig extends AiApiConfig {
-  analysisEnabled: boolean
   enableThinking?: boolean
   enabled: boolean
   promptFile: string
@@ -140,7 +139,7 @@ function parsePositiveInteger(value: string, name: string): number {
 
 // AI settings are always parsed so invalid values fail fast even when no node
 // enables AI; the API key requirement is enforced where node definitions are
-// known (see server.ts).
+// known (see application.ts).
 export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   // ASR and LLM are configured independently so they can use different
   // providers. DASHSCOPE_* is only a backwards-compatible alias for ASR.
@@ -188,10 +187,6 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
   const llmEnabledText = optional(env, 'AI_LLM_ENABLED') ?? 'true'
   if (llmEnabledText !== 'true' && llmEnabledText !== 'false')
     throw new Error('AI_LLM_ENABLED must be "true" or "false"')
-
-  const llmAnalysisEnabledText = optional(env, 'AI_LLM_ANALYSIS_ENABLED') ?? 'false'
-  if (llmAnalysisEnabledText !== 'true' && llmAnalysisEnabledText !== 'false')
-    throw new Error('AI_LLM_ANALYSIS_ENABLED must be "true" or "false"')
 
   const llmStage2EnabledText = optional(env, 'AI_LLM_STAGE2_ENABLED') ?? 'false'
   if (llmStage2EnabledText !== 'true' && llmStage2EnabledText !== 'false')
@@ -242,7 +237,6 @@ export function loadAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig {
     hotwordsFile: resolveProjectPath(optional(env, 'AI_HOTWORDS_FILE') ?? 'config/hotwords.json'),
     llm: {
       ...(llmApiKey ? { apiKey: llmApiKey } : {}),
-      analysisEnabled: llmAnalysisEnabledText === 'true',
       baseUrl: llmBaseUrl,
       ...(llmEnableThinking !== undefined ? { enableThinking: llmEnableThinking } : {}),
       enabled: llmEnabledText === 'true',

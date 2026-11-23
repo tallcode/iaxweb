@@ -33,10 +33,11 @@ export function statusFingerprint(snapshot: StatusSnapshot): string {
 export function publicStatusSnapshot(
   snapshot: StatusSnapshot,
   listeners: ReadonlyMap<string, number> = new Map(),
+  spotPublishingEnabled?: boolean,
 ): PublicStatusSnapshot {
   return Object.fromEntries(Object.entries(snapshot).map(([node, status]) => [
     node,
-    publicNodeStatus(status, listeners.get(node)),
+    publicNodeStatus(status, listeners.get(node), spotPublishingEnabled),
   ]))
 }
 
@@ -55,10 +56,12 @@ function normalizeForComparison(value: unknown): JsonValue {
   return normalized
 }
 
-function publicNodeStatus(status: NodeStatus, listeners?: number): PublicNodeStatus {
+function publicNodeStatus(status: NodeStatus, listeners?: number, spotPublishingEnabled?: boolean): PublicNodeStatus {
   const publicStatus: PublicNodeStatus = {}
   if (typeof status.AI === 'boolean')
     publicStatus.AI = status.AI
+  if (status.AI === true && spotPublishingEnabled !== undefined)
+    publicStatus.AI_SPOT = spotPublishingEnabled
   if (status.AUDIO !== undefined)
     publicStatus.AUDIO = status.AUDIO
   if (status.CONNS !== undefined)

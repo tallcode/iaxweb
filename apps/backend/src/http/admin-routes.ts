@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
 import type { LoginRateLimiter } from '../admin/login-rate-limiter.js'
 import type { SpeakerReferenceService } from '../ai/speaker-references.js'
-import type { RecordRepository } from '../records/record-repository.js'
+import type { RecordListRepository } from '../records/ports.js'
 import type { SpotStore } from '../spots/spot-store.js'
 import { loginSchema } from '@iaxweb/contracts'
 import { registerRecordRoutes } from './record-routes.js'
@@ -15,10 +15,10 @@ interface AdminRoutesOptions {
   adminAuth: AdminAuth | undefined
   loginRateLimiter: LoginRateLimiter
   recordingsDirectory: string
-  recordRepository: RecordRepository | undefined
+  recordRepository: RecordListRepository | undefined
   speakerReferences?: Pick<SpeakerReferenceService, 'recognizeRecord'> | undefined
   sessionMaxAgeSeconds: number
-  spotStore: Pick<SpotStore, 'publishReview'>
+  spotStore?: Pick<SpotStore, 'publishReview'>
 }
 
 interface LoginBody {
@@ -88,7 +88,7 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
     recordRepository,
     ...(options.speakerReferences ? { speakerReferences: options.speakerReferences } : {}),
     recordingsDirectory: options.recordingsDirectory,
-    spotStore: options.spotStore,
+    ...(options.spotStore ? { spotStore: options.spotStore } : {}),
     requireAuthentication,
     requireEditor,
     requireAdministrator,

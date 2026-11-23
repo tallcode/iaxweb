@@ -2,10 +2,8 @@ import type { AdminRecordPage } from '@iaxweb/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
 import type { SpeakerReferenceService } from '../ai/speaker-references.js'
-import type { RecordRepository } from '../records/record-repository.js'
+import type { RecordListRepository } from '../records/ports.js'
 import type { SpotStore } from '../spots/spot-store.js'
-import { readFile } from 'node:fs/promises'
-import { resolve, sep } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { MANUAL_CALLSIGN_PATTERN, manualCallsignSchema, manualRecognitionSchema, reviewSchema } from '@iaxweb/contracts'
 import { RecordingStore } from '../records/recording-store.js'
@@ -16,10 +14,10 @@ interface RecordQuery { callsign?: string, editedOnly?: string, reviewedOnly?: s
 type Guard = (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | undefined>
 interface RecordRoutesOptions {
   adminAuth: AdminAuth
-  recordRepository: RecordRepository
+  recordRepository: RecordListRepository
   speakerReferences?: Pick<SpeakerReferenceService, 'recognizeRecord'>
   recordingsDirectory: string
-  spotStore: Pick<SpotStore, 'publishReview'>
+  spotStore?: Pick<SpotStore, 'publishReview'>
   requireAuthentication: Guard
   requireEditor: Guard
   requireAdministrator: Guard
@@ -53,11 +51,14 @@ export async function registerRecordRoutes(app: FastifyInstance, options: Record
     }
     const queryDuration = performance.now() - queryStarted
     const recordingStarted = performance.now()
-    const recordingDates = new Set(await recordings.availableDates())
+    const items = await Promise.all(result.items.map(async item => ({
+      ...item,
+      hasAudio: await recordings.has(item.id, item.capturedAt),
+    })))
     const recordingDuration = performance.now() - recordingStarted
     const response: AdminRecordPage = {
       ...result,
-      items: result.items.map(item => ({ ...item, hasAudio: recordingDates.has(item.capturedAt.slice(0, 10).replaceAll('-', '')) })),
+      items,
     }
     return reply.header('cache-control', 'no-store')
       .header('server-timing', `db;dur=${queryDuration.toFixed(2)}, recordings;dur=${recordingDuration.toFixed(2)}`)
@@ -116,13 +117,8 @@ export async function registerRecordRoutes(app: FastifyInstance, options: Record
 
   app.get<{ Params: RecordParams }>('/records/:id/audio', { preHandler: requireAuthentication }, async (request, reply) => {
     const record = reviews.find(request.params.id)
-    const root = resolve(options.recordingsDirectory)
-    const day = record.capturedAt.slice(0, 10).replaceAll('-', '')
-    const file = resolve(root, day, `${record.id}.wav`)
-    if (!file.startsWith(`${root}${sep}`))
-      return reply.code(400).send('Bad Request')
     try {
-      const wav = await readFile(file)
+      const wav = await recordings.read(record.id, record.capturedAt)
       return reply.headers({ 'cache-control': 'private, no-store', 'content-type': 'audio/wav' }).send(wav)
     }
     catch {

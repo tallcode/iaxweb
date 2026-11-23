@@ -44,6 +44,12 @@ it('reconciles on reconnect and replays corrections received during a stale hist
     send({ ...first, id: 'second', callsign: 'BG5BBB' })
     resolveHistory(Response.json([first]))
     await vi.waitFor(() => expect(store.recentSpots.map(spot => spot.callsign)).toEqual(['BG5BBB']))
+
+    sockets[1]!.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ 1900: { AI: true, AI_SPOT: false } }) }))
+    send(first)
+    expect(store.aiSpotEnabled).toBe(false)
+    expect(store.recentSpots).toHaveLength(0)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   }
   finally {
     store.stopStatusStream()

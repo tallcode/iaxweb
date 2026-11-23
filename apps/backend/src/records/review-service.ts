@@ -1,8 +1,8 @@
 import type { AdminSession, PersistedRecord } from '@iaxweb/contracts'
 import type { SpotStore } from '../spots/spot-store.js'
 import type { ReviewRepository } from './ports.js'
-import type { ManualReviewPatch } from './record-repository.js'
 import type { RecordingStore } from './recording-store.js'
+import type { ManualReviewPatch } from './types.js'
 import { hasCallerCallsign, NO_CALLSIGN, REVIEW_CALLSIGN_CLEAR_MESSAGE, REVIEW_CALLSIGN_REQUIRED_MESSAGE } from '@iaxweb/contracts'
 
 export class RecordReviewError extends Error {
@@ -13,7 +13,7 @@ export class RecordReviewService {
   constructor(
     private readonly repository: ReviewRepository,
     private readonly recordings: Pick<RecordingStore, 'remove'>,
-    private readonly spots: Pick<SpotStore, 'publishReview'>,
+    private readonly spots?: Pick<SpotStore, 'publishReview'>,
   ) {}
 
   update(id: string, patch: ManualReviewPatch, user: AdminSession | undefined): PersistedRecord {
@@ -55,6 +55,6 @@ export class RecordReviewService {
   }
 
   private publish(record: PersistedRecord, callsign: string): void {
-    this.spots.publishReview({ at: record.capturedAt, callsign, id: record.id, node: record.nodeId })
+    this.spots?.publishReview({ at: record.capturedAt, callsign, id: record.id, node: record.nodeId })
   }
 }

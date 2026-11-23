@@ -153,12 +153,6 @@ test('can disable the LLM stage', () => {
   assert.equal(config.llm.enabled, false)
 })
 
-test('enables transcript analysis independently from the shared schema', () => {
-  assert.equal(loadAiConfig({}).llm.analysisEnabled, false)
-  assert.equal(loadAiConfig({ AI_LLM_ANALYSIS_ENABLED: 'true' }).llm.analysisEnabled, true)
-  assert.throws(() => loadAiConfig({ AI_LLM_ANALYSIS_ENABLED: 'yes' }), /true.*false/)
-})
-
 test('can disable SQLite and recording persistence', () => {
   const config = loadAiConfig({ AI_PERSISTENCE_ENABLED: 'false' })
   assert.equal(config.persistenceEnabled, false)

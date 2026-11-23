@@ -147,6 +147,10 @@ test('includes the static AI flag in public snapshots', () => {
     1900: { AI: true, AUDIO: true, LISTENERS: 0, TYPE: 'HUB' },
     1901: { AI: false, TYPE: 'REPEATER' },
   })
+  assert.deepEqual(publicStatusSnapshot(snapshot, new Map(), false), {
+    1900: { AI: true, AI_SPOT: false, AUDIO: true, LISTENERS: 0, TYPE: 'HUB' },
+    1901: { AI: false, TYPE: 'REPEATER' },
+  })
 })
 
 test('adds listener counts to audio nodes in the public snapshot', () => {

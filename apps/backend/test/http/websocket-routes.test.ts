@@ -1,8 +1,8 @@
-import type { WebSocket } from 'ws'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import fastifyWebsocket from '@fastify/websocket'
 import Fastify from 'fastify'
+import { PublicStreams } from '../../src/gateway/public-streams.js'
 import { registerWebSocketRoutes } from '../../src/http/websocket-routes.js'
 
 test('Fastify WebSocket routes validate audio nodes and track clients', async (context) => {
@@ -10,19 +10,17 @@ test('Fastify WebSocket routes validate audio nodes and track clients', async (c
   context.after(() => app.close())
   await app.register(fastifyWebsocket)
 
-  const audioClients = new Set<WebSocket>()
-  const statusClients = new Set<WebSocket>()
-  const listenerChanges: string[] = []
-  await app.register(registerWebSocketRoutes, {
-    allmon3: { currentSnapshot: undefined },
-    audioClientNodes: new WeakMap(),
-    audioClients,
-    audioListeners: new Map(),
-    natsAudio: new Map([['1234', {
+  const listenerCounts: number[] = []
+  const streams = new PublicStreams({
+    hasAiListener: () => false,
+    audioSources: new Map([['1234', {
       currentState: { listeners: 1, online: true, speaking: false, type: 'state' as const },
+      setListenerCount: (count: number) => listenerCounts.push(count),
     }]]),
-    onAudioListenerChange: nodeId => listenerChanges.push(nodeId),
-    statusClients,
+  })
+  await app.register(registerWebSocketRoutes, {
+    currentSnapshot: () => ({ 1234: { AUDIO: true, TYPE: 'HUB' } }),
+    streams,
   })
   await app.ready()
 
@@ -41,16 +39,18 @@ test('Fastify WebSocket routes validate audio nodes and track clients', async (c
   })
   const state = await statePromise
   assert.deepEqual(JSON.parse(state), { listeners: 1, online: true, speaking: false, type: 'state' })
-  assert.equal(audioClients.size, 1)
-  assert.deepEqual(listenerChanges, ['1234'])
+  assert.deepEqual(listenerCounts, [1])
   audio.terminate()
   await new Promise<void>(resolve => setImmediate(resolve))
-  assert.equal(audioClients.size, 0)
-  assert.deepEqual(listenerChanges, ['1234', '1234'])
+  assert.deepEqual(listenerCounts, [1, 0])
 
-  const status = await app.injectWS('/status')
-  assert.equal(statusClients.size, 1)
+  let resolveSnapshot: (snapshot: string) => void = () => {}
+  const snapshotPromise = new Promise<string>((resolve) => {
+    resolveSnapshot = resolve
+  })
+  const status = await app.injectWS('/status', {}, {
+    onInit: socket => socket.once('message', data => resolveSnapshot(data.toString())),
+  })
+  assert.deepEqual(JSON.parse(await snapshotPromise), { 1234: { AUDIO: true, LISTENERS: 0, TYPE: 'HUB' } })
   status.terminate()
-  await new Promise<void>(resolve => setImmediate(resolve))
-  assert.equal(statusClients.size, 0)
 })

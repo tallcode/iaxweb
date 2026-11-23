@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { saveRecognizedRecording } from '../../src/records/recognition-persistence.js'
 import { RecordingStore } from '../../src/records/recording-store.js'
 
 test('writes each recording beneath its UTC date directory', (t) => {
@@ -46,45 +47,38 @@ test('removes only the selected WAV and tolerates an already missing recording',
   assert.equal(existsSync(otherPath), true)
 })
 
-test('caches date directories for twelve hours and shares newly saved dates across instances', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'iaxweb-rec-dates-'))
+test('reports audio availability per recording and observes deletions immediately', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'iaxweb-rec-availability-'))
   t.after(() => rmSync(root, { force: true, recursive: true }))
-  const now = Date.now()
-  const clock = t.mock.method(Date, 'now', () => now)
-  mkdirSync(join(root, '20260812'))
-  mkdirSync(join(root, '20260813'))
-  mkdirSync(join(root, 'notes'))
-  writeFileSync(join(root, '20260814'), 'A file is not a recording directory')
-  const reader = new RecordingStore(root)
-  const writer = new RecordingStore(root)
-
-  assert.deepEqual(await reader.availableDates(), ['20260812', '20260813'])
-  rmSync(join(root, '20260812'), { recursive: true })
-  assert.deepEqual(await writer.availableDates(), ['20260812', '20260813'])
-  writer.save('a1b2c3d4-e5f6-7890-abcd-ef0123456789', '2026-08-15T00:30:00.000Z', new Uint8Array())
-  assert.deepEqual(await reader.availableDates(), ['20260812', '20260813', '20260815'])
-
-  clock.mock.mockImplementation(() => now + 12 * 60 * 60 * 1_000)
-  assert.deepEqual(await reader.availableDates(), ['20260813', '20260815'])
+  const store = new RecordingStore(root)
+  const at = '2026-08-12T23:30:00.000Z'
+  const bytes = new Uint8Array([82, 73, 70, 70])
+  assert.equal(await store.has('aabbcc', at), false)
+  store.save('aabbcc', at, bytes)
+  assert.equal(await store.has('aabbcc', at), true)
+  assert.deepEqual(new Uint8Array(await store.read('aabbcc', at)), bytes)
+  assert.equal(await store.has('bbccdd', at), false)
+  store.remove('aabbcc', at)
+  mkdirSync(join(root, '20260812', 'aabbcc.wav'))
+  assert.equal(await store.has('aabbcc', at), false)
 })
 
-test('handles an absent recording root and makes the first saved date available immediately', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'iaxweb-rec-missing-'))
+test('removes the new WAV when the database insert fails', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'iaxweb-rec-rollback-'))
   t.after(() => rmSync(root, { force: true, recursive: true }))
-  const store = new RecordingStore(join(root, 'rec'))
-  assert.deepEqual(await store.availableDates(), [])
-  store.save('a1b2c3d4-e5f6-7890-abcd-ef0123456789', '2026-08-12T00:30:00.000Z', new Uint8Array())
-  assert.deepEqual(await store.availableDates(), ['20260812'])
-})
-
-test('does not cache a failed recording directory scan', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'iaxweb-rec-scan-error-'))
-  t.after(() => rmSync(root, { force: true, recursive: true }))
-  const path = join(root, 'rec')
-  writeFileSync(path, 'Not a directory')
-  const store = new RecordingStore(path)
-  await assert.rejects(store.availableDates(), { code: 'ENOTDIR' })
-  rmSync(path)
-  mkdirSync(join(path, '20260812'), { recursive: true })
-  assert.deepEqual(await store.availableDates(), ['20260812'])
+  const store = new RecordingStore(root)
+  const record = {
+    id: 'aabbcc',
+    timestamp: '2026-08-12T23:30:00.000Z',
+    recognition: 'test',
+    durationMs: 1000,
+    voicedMs: 900,
+  }
+  const repository = {
+    insert() {
+      throw new Error('SQLite unavailable')
+    },
+  }
+  assert.throws(() => saveRecognizedRecording(repository, store, '1900', record, new Uint8Array()), /SQLite unavailable/)
+  assert.equal(await store.has(record.id, record.timestamp), false)
 })

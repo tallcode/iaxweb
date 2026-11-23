@@ -3,8 +3,7 @@ import type { TranscriptTurn } from './callsign-evidence.js'
 
 // Unified per-segment record accumulating every pipeline stage:
 // segmentation fills the audio fields, ASR fills recognition and corrected,
-// the LLM stage fills revise/callsign/risk. Optional fields stay absent while the
-// corresponding stage has not run or failed.
+// and callsign recognition fills the matched callsign and its algorithm.
 export interface SegmentRecord extends RecognitionRecord {
   payloads: Uint8Array[]
   transmissionId?: string | undefined

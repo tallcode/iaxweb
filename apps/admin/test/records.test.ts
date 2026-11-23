@@ -412,6 +412,41 @@ describe('record callsign editing', () => {
     wrapper.unmount()
   })
 
+  it('restores the visible page and filters when a replacement request fails', async () => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [{ ...record(), recognition: 'Original page' }], page: 1, pageSize: 50, total: 51 }))
+      .mockRejectedValue(new TypeError('Network unavailable'))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '下一页')!.trigger('click')
+    await flushPromises()
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/admin/records?page=2&pageSize=50')
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="页码"]').element.value).toBe('1')
+
+    const edited = wrapper.get<HTMLInputElement>('input[aria-label="筛选已编辑"]')
+    await edited.setValue(true)
+    await flushPromises()
+    expect(fetchMock.mock.calls[2]?.[0]).toContain('editedOnly=true')
+    expect(edited.element.checked).toBe(false)
+
+    const callsign = wrapper.get<HTMLInputElement>('input[aria-label="呼号搜索"]')
+    await callsign.setValue('BG5AAA')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    expect(fetchMock.mock.calls[3]?.[0]).toContain('callsign=BG5AAA')
+    expect(callsign.element.value).toBe('')
+    expect(wrapper.get('tbody').text()).toContain('Original page')
+    wrapper.unmount()
+  })
+
   it('shows the effective callsign and switches to a green manual value after Enter', async () => {
     vi.stubGlobal('Audio', class extends EventTarget {
       src = ''
@@ -659,18 +694,13 @@ function record(): AdminRecord {
     createdAt: new Date().toISOString(),
     durationMs: 1_000,
     effectiveCallsign: 'BG5AAA',
-    effectiveRiskLevel: null,
     id: 'record-1',
     manualCallsign: null,
     manualRecognition: null,
     manualNote: null,
-    manualRiskLevel: null,
     nodeId: '1900',
     recognition: '这里是 BG5AAA',
     reviewed: false,
-    revise: null,
-    riskLevel: null,
-    riskReason: null,
     voicedMs: 900,
   }
 }

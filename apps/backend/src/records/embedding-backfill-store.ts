@@ -3,8 +3,7 @@ import type { StatementSync } from 'node:sqlite'
 import type { Voiceprint } from './types.js'
 import { DatabaseSync } from 'node:sqlite'
 import { SPEAKER_DIMENSIONS } from '../ai/speaker-model.mjs'
-import { isQualityReason, migrateAudioQuality, storeAudioQuality, voiceprintQuality } from './audio-quality.js'
-import { migrateEmbeddingSchema } from './embedding-schema.js'
+import { isQualityReason, storeAudioQuality, voiceprintQuality } from './audio-quality.js'
 import { encodeVoiceprint } from './voiceprint.js'
 
 export type BackfillMode = 'missing' | 'failed' | 'unavailable'
@@ -29,8 +28,7 @@ export interface BackfillResult {
   audioQuality?: AudioQuality | undefined
 }
 
-// Dedicated connection: never run application startup recovery or reset pending
-// rows belonging to the online service. Only legacy embedding DDL is upgraded.
+// This connection consumes the schema initialized by the server.
 export class EmbeddingBackfillStore {
   readonly database: DatabaseSync
   readonly hasEmbeddings: boolean
@@ -48,16 +46,6 @@ export class EmbeddingBackfillStore {
           throw new Error('Deploy the embedding schema before backfilling; dry-run is available on legacy databases')
         this.database.exec('PRAGMA journal_mode = WAL')
         this.database.exec('PRAGMA foreign_keys = ON')
-        this.database.exec('BEGIN IMMEDIATE')
-        try {
-          migrateAudioQuality(this.database)
-          migrateEmbeddingSchema(this.database)
-          this.database.exec('COMMIT')
-        }
-        catch (error) {
-          this.database.exec('ROLLBACK')
-          throw error
-        }
       }
     }
     catch (error) {

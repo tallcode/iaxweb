@@ -1,110 +1,34 @@
 <script setup lang="ts">
 import type { AdminRole, AdminSession } from '@iaxweb/contracts'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
-import { adminSession as currentUser } from '../admin-session'
-import { ApiError, apiErrorMessage } from '../api/client'
-import { sessionApi } from '../api/session'
-import { usersApi } from '../api/users'
+import type { UserDraft } from '../composables/use-users-page'
+import { ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import AdminPageHeader from '../components/AdminPageHeader.vue'
+import DeleteUserDialog from '../components/users/DeleteUserDialog.vue'
+import UserEditorDialog from '../components/users/UserEditorDialog.vue'
+import { useUsersPage } from '../composables/use-users-page'
 
-const router = useRouter()
-const users = ref<AdminSession[]>([])
-const search = ref('')
-const status = ref('')
-const loading = ref(false)
-const saving = ref(false)
-const loggingOut = ref(false)
-const editorVisible = ref(false)
-const editorTarget = ref<string | null>(null)
-const editorDialog = ref<HTMLDialogElement>()
-const editorError = ref('')
-const draft = reactive({ username: '', password: '', role: 'viewer' as AdminRole })
-const deleteTarget = ref<AdminSession | null>(null)
-const deleteDialog = ref<HTMLDialogElement>()
-const deleteError = ref('')
+const { currentUser, filteredUsers, search, status, loading, saving, loggingOut, editorError, deleteError, logout, saveUser, deleteUser } = useUsersPage()
+const editorDialog = ref<InstanceType<typeof UserEditorDialog>>()
+const deleteDialog = ref<InstanceType<typeof DeleteUserDialog>>()
 const addButton = ref<HTMLButtonElement>()
 const roleNames: Record<AdminRole, string> = { admin: '管理', editor: '编辑', viewer: '查看' }
-let request: AbortController | undefined
 let dialogTrigger: HTMLElement | undefined
 
-const filteredUsers = computed(() => {
-  const keyword = search.value.trim().toLocaleLowerCase()
-  return users.value.filter(user => !keyword || user.username.toLocaleLowerCase().includes(keyword))
-})
-
-onMounted(() => void loadUsers())
-onBeforeUnmount(() => request?.abort())
-
-async function handleAccessError(error: unknown): Promise<boolean> {
-  if (!(error instanceof ApiError))
-    return false
-  if (error.status === 401) {
-    await router.replace('/')
-    return true
-  }
-  if (error.status === 403) {
-    await router.replace('/records')
-    return true
-  }
-  return false
-}
-
-async function loadUsers(): Promise<void> {
-  request?.abort()
-  const activeRequest = new AbortController()
-  request = activeRequest
-  loading.value = true
-  status.value = ''
-  try {
-    const page = await usersApi.list(activeRequest.signal)
-    if (activeRequest.signal.aborted)
-      return
-    users.value = page.items
-  }
-  catch (error) {
-    if (!activeRequest.signal.aborted && !await handleAccessError(error))
-      status.value = apiErrorMessage(error, '加载用户失败，请重试')
-  }
-  finally {
-    if (request === activeRequest) {
-      loading.value = false
-      request = undefined
-    }
-  }
-}
-
-async function logout(): Promise<void> {
-  if (loggingOut.value || saving.value)
-    return
-  loggingOut.value = true
-  request?.abort()
-  try {
-    await sessionApi.logout()
-    users.value = []
-    currentUser.value = null
-    await router.replace('/')
-  }
-  catch (error) {
-    status.value = apiErrorMessage(error, '注销失败，请重试')
-  }
-  finally {
-    loggingOut.value = false
-  }
-}
-
-async function openEditor(user: AdminSession | undefined, event: MouseEvent): Promise<void> {
+function openEditor(user: AdminSession | undefined, event: MouseEvent): void {
   if (saving.value || loggingOut.value)
     return
   dialogTrigger = event.currentTarget as HTMLElement
-  editorTarget.value = user?.username ?? null
-  draft.username = user?.username ?? ''
-  draft.password = ''
-  draft.role = user?.role ?? 'viewer'
   editorError.value = ''
-  editorVisible.value = true
-  await nextTick()
-  editorDialog.value?.showModal()
+  void editorDialog.value?.open(user)
+}
+
+function openDelete(user: AdminSession, event: MouseEvent): void {
+  if (saving.value || loggingOut.value)
+    return
+  dialogTrigger = event.currentTarget as HTMLElement
+  deleteError.value = ''
+  void deleteDialog.value?.open(user)
 }
 
 function restoreFocus(): void {
@@ -115,90 +39,12 @@ function restoreFocus(): void {
   dialogTrigger = undefined
 }
 
-function onEditorClose(): void {
-  editorVisible.value = false
-  draft.password = ''
-  restoreFocus()
+function submitEditor(originalName: string | null, draft: UserDraft): void {
+  void saveUser(originalName, draft, () => editorDialog.value?.close())
 }
 
-function onCancel(event: Event): void {
-  if (saving.value)
-    event.preventDefault()
-}
-
-async function saveUser(): Promise<void> {
-  if (saving.value)
-    return
-  saving.value = true
-  editorError.value = ''
-  const originalName = editorTarget.value
-  const isCurrentUser = originalName !== null && originalName === currentUser.value?.username
-  const body = { username: draft.username.trim(), role: draft.role, ...(draft.password ? { password: draft.password } : {}) }
-  try {
-    if (originalName === null)
-      await usersApi.create({ ...body, password: draft.password })
-    else
-      await usersApi.update(originalName, body)
-    if (isCurrentUser && (body.username !== originalName || body.password)) {
-      editorDialog.value?.close()
-      await router.replace('/')
-      return
-    }
-    if (isCurrentUser && body.role !== 'admin') {
-      editorDialog.value?.close()
-      await router.replace('/records')
-      return
-    }
-    await loadUsers()
-    editorDialog.value?.close()
-  }
-  catch (error) {
-    if (!await handleAccessError(error))
-      editorError.value = apiErrorMessage(error, '保存用户失败，请重试')
-  }
-  finally {
-    saving.value = false
-  }
-}
-
-async function openDelete(user: AdminSession, event: MouseEvent): Promise<void> {
-  if (saving.value || loggingOut.value)
-    return
-  dialogTrigger = event.currentTarget as HTMLElement
-  deleteTarget.value = user
-  deleteError.value = ''
-  await nextTick()
-  deleteDialog.value?.showModal()
-}
-
-function onDeleteClose(): void {
-  deleteTarget.value = null
-  restoreFocus()
-}
-
-async function deleteUser(): Promise<void> {
-  const user = deleteTarget.value
-  if (!user || saving.value)
-    return
-  saving.value = true
-  deleteError.value = ''
-  try {
-    await usersApi.delete(user.username)
-    if (user.username === currentUser.value?.username) {
-      deleteDialog.value?.close()
-      await router.replace('/')
-      return
-    }
-    await loadUsers()
-    deleteDialog.value?.close()
-  }
-  catch (error) {
-    if (!await handleAccessError(error))
-      deleteError.value = apiErrorMessage(error, '删除用户失败，请重试')
-  }
-  finally {
-    saving.value = false
-  }
+function confirmDelete(username: string): void {
+  void deleteUser(username, () => deleteDialog.value?.close())
 }
 </script>
 
@@ -271,72 +117,7 @@ async function deleteUser(): Promise<void> {
       </div>
     </main>
 
-    <dialog ref="editorDialog" aria-labelledby="user-editor-title" class="m-auto w-[calc(100%_-_2rem)] max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl backdrop:bg-slate-950/75 backdrop:backdrop-blur-sm" @cancel="onCancel" @close="onEditorClose">
-      <form v-if="editorVisible" class="space-y-4" @submit.prevent="saveUser">
-        <h2 id="user-editor-title" class="text-lg font-semibold">
-          {{ editorTarget === null ? '新增用户' : '编辑用户' }}
-        </h2>
-        <label class="flex flex-col gap-2 text-sm text-slate-300">
-          <span>用户名</span>
-          <input v-model="draft.username" required autofocus maxlength="18" autocomplete="off" :disabled="saving" class="block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 outline-none focus:border-cyan-500">
-        </label>
-        <label class="flex flex-col gap-2 text-sm text-slate-300">
-          <span>角色</span>
-          <div class="relative">
-            <select v-model="draft.role" :disabled="saving" class="block w-full appearance-none rounded-lg border border-slate-700 bg-slate-950 py-2 pr-10 pl-3 text-white outline-none focus:border-cyan-500"><option v-for="(label, role) in roleNames" :key="role" :value="role">{{ label }}</option></select>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-white" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-          </div>
-        </label>
-        <p class="text-xs leading-5 text-slate-500">
-          {{ draft.role === 'admin' ? '可编辑、标注、删除记录，并管理用户。' : draft.role === 'editor' ? '仅可编辑识别文本、主叫和被叫。' : '仅可浏览、搜索、筛选及播放录音。' }}
-        </p>
-        <label class="flex flex-col gap-2 text-sm text-slate-300">
-          <span>{{ editorTarget === null ? '密码' : '新密码' }}</span>
-          <input v-model="draft.password" type="password" autocomplete="new-password" maxlength="32" :required="editorTarget === null" :disabled="saving" :placeholder="editorTarget === null ? '请输入密码' : '留空则不修改密码'" class="block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 outline-none focus:border-cyan-500">
-        </label>
-        <p v-if="editorTarget === currentUser?.username" class="text-xs leading-5 text-amber-300">
-          修改当前账号的用户名或密码后，需要重新登录。
-        </p>
-        <p v-if="editorError" role="alert" class="text-sm text-red-400">
-          {{ editorError }}
-        </p>
-        <div class="flex justify-end gap-3 pt-2">
-          <button type="button" :disabled="saving" class="rounded-lg border border-slate-600 px-4 py-2 text-sm hover:bg-slate-800 focus:outline-none disabled:opacity-50" @click="editorDialog?.close()">
-            取消
-          </button>
-          <button type="submit" :disabled="saving" class="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 focus:outline-none disabled:opacity-50">
-            {{ saving ? '保存中…' : editorTarget === null ? '创建用户' : '保存修改' }}
-          </button>
-        </div>
-      </form>
-    </dialog>
-
-    <dialog ref="deleteDialog" aria-labelledby="user-delete-title" class="m-auto w-[calc(100%_-_2rem)] max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl backdrop:bg-slate-950/75 backdrop:backdrop-blur-sm" @cancel="onCancel" @close="onDeleteClose">
-      <form v-if="deleteTarget" @submit.prevent="deleteUser">
-        <h2 id="user-delete-title" class="text-lg font-semibold">
-          删除用户？
-        </h2>
-        <p class="mt-3 break-all font-mono text-slate-200">
-          {{ deleteTarget.username }}
-        </p>
-        <p class="mt-3 text-sm leading-6 text-slate-300">
-          该用户将被注销，无法继续登录。此操作无法恢复。
-        </p>
-        <p v-if="deleteTarget.username === currentUser?.username" class="mt-3 text-sm text-amber-300">
-          删除当前账号后将退出登录。
-        </p>
-        <p v-if="deleteError" role="alert" class="mt-3 text-sm text-red-400">
-          {{ deleteError }}
-        </p>
-        <div class="mt-6 flex justify-end gap-3">
-          <button type="button" autofocus :disabled="saving" class="rounded-lg border border-slate-600 px-4 py-2 text-sm hover:bg-slate-800 focus:outline-none disabled:opacity-50" @click="deleteDialog?.close()">
-            取消
-          </button>
-          <button type="submit" :disabled="saving" class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 focus:outline-none disabled:opacity-50">
-            {{ saving ? '删除中…' : '确认删除' }}
-          </button>
-        </div>
-      </form>
-    </dialog>
+    <UserEditorDialog ref="editorDialog" :current-username="currentUser?.username ?? ''" :role-names="roleNames" :saving="saving" :error="editorError" @save="submitEditor" @closed="restoreFocus" />
+    <DeleteUserDialog ref="deleteDialog" :current-username="currentUser?.username ?? ''" :saving="saving" :error="deleteError" @confirm="confirmDelete" @closed="restoreFocus" />
   </div>
 </template>

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { PublicNodeStatus, TransmitSource } from '@iaxweb/contracts'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
-import { audioPlayerKey, SpectrumMeter } from '../services/audio-player'
+import { audioPlayerKey } from '../services/audio-player'
+import { SpectrumMeter } from './spectrum-meter'
 
 const props = defineProps<{
   isMobile: boolean
@@ -69,9 +70,14 @@ watch(audioControlsElement, (element, _, onCleanup) => {
   const stopWatching = watchEffect((onCleanup) => {
     if (props.isMobile || audioPlayer.playingNodeId !== props.nodeId)
       return
-    const detach = audioPlayer.attachSpectrum(meter)
-    if (detach)
-      onCleanup(detach)
+    const connection = audioPlayer.attachAnalyser()
+    if (!connection)
+      return
+    meter.attach(connection.analyser)
+    onCleanup(() => {
+      meter.detach()
+      connection.detach()
+    })
   })
   onCleanup(stopWatching)
 }, { flush: 'post' })

@@ -1,14 +1,20 @@
 import type { TranscriptTurn } from './callsign-evidence.js'
-import type { CallsignExtraction } from './callsign-model-output.js'
 import { isValidCallsign } from '@iaxweb/contracts'
 
-export type { CallsignExtraction } from './callsign-model-output.js'
+// The model extracts evidence. Callsign matching is computed by the backend.
+export interface CallsignExtraction {
+  selfCallsignEvidence: string | null
+  spelledCallsignEvidence: Array<{ quote: string, callsign: string }>
+  selfCallsign: string | null
+  spelledCallsigns: string[]
+}
 
 // Keep the model's identity decision intact. Only discard malformed, unsupported
 // or duplicate spelling entries; never decode words or infer speaker roles here.
-export function cleanCallsignExtraction(value: Record<string, unknown>, current: string, history: readonly TranscriptTurn[]): Record<string, unknown> | undefined {
-  const { selfCallsign, selfCallsignEvidence, spelledCallsignEvidence, spelledCallsigns } = value
-  if ((selfCallsign !== null && (typeof selfCallsign !== 'string' || !/^[A-Z0-9]{2,8}$/.test(selfCallsign)))
+export function cleanCallsignExtraction(value: Record<string, unknown>, current: string, history: readonly TranscriptTurn[]): CallsignExtraction | undefined {
+  const { selfCallsign, selfCallsignEvidence, spelledCallsignEvidence, spelledCallsigns, ...extra } = value
+  if (Object.keys(extra).length > 0
+    || (selfCallsign !== null && (typeof selfCallsign !== 'string' || !/^[A-Z0-9]{2,8}$/.test(selfCallsign)))
     || (selfCallsignEvidence !== null && (typeof selfCallsignEvidence !== 'string' || !selfCallsignEvidence.trim() || !current.includes(selfCallsignEvidence)))
     || (selfCallsign === null) !== (selfCallsignEvidence === null)
     || !Array.isArray(spelledCallsignEvidence) || !Array.isArray(spelledCallsigns)
@@ -28,17 +34,7 @@ export function cleanCallsignExtraction(value: Record<string, unknown>, current:
     seen.add(item.callsign)
     evidence.push({ quote: item.quote, callsign: item.callsign })
   }
-  return { ...value, selfCallsignEvidence, spelledCallsignEvidence: evidence, selfCallsign, spelledCallsigns: evidence.map(item => item.callsign) }
-}
-
-export function readCallsignExtraction(value: Record<string, unknown>): CallsignExtraction {
-  // Called after structural checks and the configured schema validation.
-  return {
-    selfCallsignEvidence: value.selfCallsignEvidence as string | null,
-    spelledCallsignEvidence: value.spelledCallsignEvidence as CallsignExtraction['spelledCallsignEvidence'],
-    selfCallsign: value.selfCallsign as string | null,
-    spelledCallsigns: value.spelledCallsigns as string[],
-  }
+  return { selfCallsignEvidence, spelledCallsignEvidence: evidence, selfCallsign, spelledCallsigns: evidence.map(item => item.callsign) }
 }
 
 export function matchExtractedCallsign(extraction: CallsignExtraction): string | undefined {

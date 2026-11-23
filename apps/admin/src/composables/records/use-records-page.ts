@@ -84,7 +84,7 @@ export function useRecordsPage(options: { onNavigate: () => void }) {
     return !query.state.isLoading.value && !loggingOut.value && deletion.state.pendingDeletion.value === null && speakerRecognition.state.record.value === null
   }
   function canSave(): boolean {
-    return !loggingOut.value && deletion.state.deletingRecordId.value === null
+    return !query.state.isLoading.value && !loggingOut.value && deletion.state.deletingRecordId.value === null
   }
   function canChange(): boolean {
     return !loggingOut.value && !editing.state.hasActiveEditor.value && !editing.state.isSaving.value

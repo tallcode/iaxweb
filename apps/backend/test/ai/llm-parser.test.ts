@@ -42,7 +42,6 @@ function makeParser(content: string | (() => Response), options: Partial<LlmPars
     model: 'deepseek-flash',
     promptFile,
     schemaFile,
-    analysisEnabled: false,
     retryDelaysMs: [],
     ...options,
     fetchImpl: async (url, init) => {
@@ -87,7 +86,7 @@ test('B, 布 and 补 trigger extraction without requiring pre-parsed spelling', 
 })
 
 test('no current trigger skips both stages even with historical spelling and a high feature match', async () => {
-  const { parser, calls } = makeParser(JSON.stringify(extraction), { analysisEnabled: true })
+  const { parser, calls } = makeParser(JSON.stringify(extraction))
   const parsed = await parser.parse('收到，您的信号很清楚。', [{ id: 'past', text: TEXT }])
   assert.deepEqual(parsed, {})
   assert.equal(parser.parseStage2(parsed!, [high]), undefined)
@@ -98,7 +97,7 @@ test('Flower correction opens only the gate and is never sent as corrected input
   const raw = 'Flower Golf Five Hotel Echo Zulu，这里 Flower Hotel Four Hotel Yankee X-ray，是否能够抄收？'
   const value = { selfCallsignEvidence: '这里 Flower Hotel Four Hotel Yankee X-ray', selfCallsign: 'BH4HYX', spelledCallsignEvidence: [{ quote: 'Flower Hotel Four Hotel Yankee X-ray', callsign: 'BH4HYX' }], spelledCallsigns: ['BH4HYX'] }
   const { parser, calls } = makeParser(JSON.stringify(value))
-  assert.equal((await parser.parse(raw, [], 'Bravo Golf Five Hotel Echo Zulu'))?.callsign, 'BH4HYX')
+  assert.equal((await parser.parse(raw))?.callsign, 'BH4HYX')
   const payload = JSON.parse(calls[0]!.body.messages[1]!.content)
   assert.equal(payload.current.text, raw)
   assert.equal(payload.corrected, undefined)
@@ -111,8 +110,9 @@ test('matches a self suffix to complete historical spelling while excluding the 
   const value = { ...extraction, selfCallsignEvidence: current, selfCallsign: 'XXX' }
   const { parser, calls } = makeParser(JSON.stringify(value))
   const history = [{ id: 'past', text: TEXT }, { id: 'current', text: current }]
-  assert.equal((await parser.parse(current, history))?.callsign, 'BD5XXX')
-  assert.deepEqual(JSON.parse(calls[0]!.body.messages[1]!.content).history, [history[0]])
+  const metadata = { id: 'current', transmissionId: 'transmission', partIndex: 2 }
+  assert.equal((await parser.parse(current, history, metadata))?.callsign, 'BD5XXX')
+  assert.deepEqual(JSON.parse(calls[0]!.body.messages[1]!.content), { history: [history[0]], current: { ...metadata, text: current } })
 })
 
 test('cleans duplicate, nonverbatim and malformed spelling without changing the self decision', async () => {
@@ -121,16 +121,19 @@ test('cleans duplicate, nonverbatim and malformed spelling without changing the 
   assert.deepEqual((await parser.parse(TEXT))?.extraction, extraction)
 })
 
-test('rejects fabricated self evidence, inconsistent identity fields, old protocol and model matching decisions', async () => {
+test('rejects non-extraction fields and evidence violations even with a permissive schema', async () => {
+  const permissiveSchema = join(dir, 'permissive-schema.json')
+  writeFileSync(permissiveSchema, JSON.stringify({ ...schema, additionalProperties: true }))
   for (const content of [
     { ...extraction, selfCallsignEvidence: '这里是模型编造的呼号' },
     { ...extraction, selfCallsign: null },
     { ...extraction, selfCallsignEvidence: ' ' },
     { speaker: 'self', callsign: 'BD5XXX' },
     { ...extraction, matchedCallsign: 'BG5BUT' },
+    { ...extraction, message: '规范化文本', risk: { level: 1, reason: '正常' } },
     { ...extraction, extra: true },
   ]) {
-    const { parser, calls } = makeParser(JSON.stringify(content))
+    const { parser, calls } = makeParser(JSON.stringify(content), { schemaFile: permissiveSchema })
     const result = await parser.parse(TEXT)
     assert.deepEqual(result, {})
     assert.equal(parser.parseStage2(result!, [high]), undefined)
@@ -186,17 +189,6 @@ test('Stage 2 preserves a first-stage match and performs no model requests', asy
 })
 
 test.todo('known deferred counterexample: no-self intersection can accept an explicit repetition of the other station (TODO.md)')
-
-test('full analysis shares the extraction schema and still requires message and risk', async () => {
-  const response = { ...extraction, message: '规范化文本', risk: { level: 1, reason: '正常' } }
-  const { parser } = makeParser(JSON.stringify(response), { analysisEnabled: true })
-  const parsed = await parser.parse(TEXT)
-  assert.equal(parsed?.callsign, 'BD5XXX')
-  assert.equal(parsed?.message, response.message)
-  assert.deepEqual(parsed?.risk, response.risk)
-  const invalid = makeParser(JSON.stringify(extraction), { analysisEnabled: true })
-  assert.deepEqual(await invalid.parser.parse(TEXT), {})
-})
 
 test('prompt/schema hot reload fails closed instead of using stale or default configuration', async () => {
   const own = mkdtempSync(join(tmpdir(), 'iaxweb-prompt-reload-'))
