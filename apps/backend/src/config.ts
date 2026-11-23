@@ -11,6 +11,7 @@ export interface AppConfig {
   }
   host: string
   port: number
+  publicSiteUrl?: string
   nats: {
     servers: string[]
     subjectRoot: string
@@ -112,6 +113,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     optional(env, 'ALLMON3_REQUEST_TIMEOUT_MS') ?? '10000',
     'ALLMON3_REQUEST_TIMEOUT_MS',
   )
+  const publicSiteUrl = optional(env, 'PUBLIC_SITE_URL')
 
   return {
     allmon3: {
@@ -121,6 +123,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     host: optional(env, 'HOST') ?? '0.0.0.0',
     port,
+    ...(publicSiteUrl ? { publicSiteUrl: parsePublicSiteUrl(publicSiteUrl) } : {}),
     nats: {
       servers,
       subjectRoot,
@@ -128,6 +131,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ...(token ? { token } : {}),
     },
   }
+}
+
+function parsePublicSiteUrl(value: string): string {
+  const url = URL.parse(value)
+  if (!url || !['http:', 'https:'].includes(url.protocol) || url.pathname !== '/'
+    || url.search || url.hash || url.username || url.password) {
+    throw new Error('PUBLIC_SITE_URL must be an HTTP or HTTPS origin')
+  }
+  return url.origin
 }
 
 function parsePositiveInteger(value: string, name: string): number {

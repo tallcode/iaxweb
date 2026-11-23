@@ -90,6 +90,7 @@ docker compose logs -f iaxweb
 - `NATS_SERVERS` 和 `ALLMON3_BASE_URL` 须填写容器可达的地址。Docker Desktop 上的宿主机服务可通过 `host.docker.internal` 访问。
 - 反向代理须为 `/status` 和 `/audio/<nodeId>` 支持 WebSocket Upgrade。使用 HTTPS 时，代理应转发 `X-Forwarded-Proto`。
 - `GET /healthz` 用于存活检查。返回中的 `allmon3` 表示已经生成状态快照，`nats` 表示已配置的音频节点连接状态。判断上游是否正常时，也应查看节点状态和服务日志。
+- `/sitemap.xml` 列出首页拓扑 `/`、地图 `/map` 和统计 `/stats`，并由 `/robots.txt` 引用。默认从请求取得域名和协议。反向代理需保留公开域名的 `Host` 并传递实际的 `X-Forwarded-Proto`。有多个访问域名时，可用 `PUBLIC_SITE_URL` 固定站点地图和页面的规范网址。
 
 镜像为 `ghcr.io/tallcode/iaxweb:latest`。推送到 `main` 后，发布流程会构建并推送 `latest` 和 `sha-<短 SHA>` 标签。私有镜像需要先运行 `docker login ghcr.io`。 [镜像发布工作流](.github/workflows/docker-publish.yml)
 

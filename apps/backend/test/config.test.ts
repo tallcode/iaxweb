@@ -16,6 +16,11 @@ test('normalizes the Allmon3 base URL', () => {
   assert.equal(config.allmon3.baseUrl, 'https://allmon.example/allmon3/')
 })
 
+test('accepts an origin for public sitemap URLs', () => {
+  assert.equal(loadConfig({ PUBLIC_SITE_URL: 'https://radio.example.test/' }).publicSiteUrl, 'https://radio.example.test')
+  assert.throws(() => loadConfig({ PUBLIC_SITE_URL: 'https://radio.example.test/admin' }), /HTTP or HTTPS origin/)
+})
+
 test('loads a NATS cluster and username authentication', () => {
   const config = loadConfig({
     NATS_SERVERS: 'nats://one:4222, nats://two:4222',

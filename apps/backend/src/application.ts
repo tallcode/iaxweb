@@ -145,6 +145,7 @@ export function createApplication({ config, aiConfig, nodeDefinitions, repositor
     adminRoot: resolve(repositoryRoot, 'apps/admin/dist'),
     nodeDefinitions,
     publicRoot: resolve(repositoryRoot, 'apps/public/dist'),
+    ...(config.publicSiteUrl ? { publicSiteUrl: config.publicSiteUrl } : {}),
   })
 
   let shuttingDown = false
