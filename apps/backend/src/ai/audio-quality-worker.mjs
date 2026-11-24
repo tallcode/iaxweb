@@ -1,9 +1,9 @@
 import { parentPort } from 'node:worker_threads'
-import { checkSpeakerQuality } from './speaker-quality.mjs'
+import { checkLegacySpeakerQuality, checkSpeakerQuality } from './speaker-quality.mjs'
 
-parentPort.on('message', (samples) => {
+parentPort.on('message', ({ samples, legacy }) => {
   try {
-    const result = checkSpeakerQuality(samples)
+    const result = legacy ? checkLegacySpeakerQuality(samples) : checkSpeakerQuality(samples)
     parentPort.postMessage({
       status: result.accepted ? 'passed' : 'rejected',
       reason: result.accepted ? null : result.reason,

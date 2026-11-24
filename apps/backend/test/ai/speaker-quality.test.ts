@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { checkSpeakerQuality } from '../../src/ai/speaker-quality.mjs'
+import { checkLegacySpeakerQuality, checkSpeakerQuality } from '../../src/ai/speaker-quality.mjs'
 
 test('invalid and silent audio cannot pass the speaker quality gate', () => {
   assert.deepEqual(checkSpeakerQuality(new Float32Array(8000)), { accepted: false, reason: 'insufficient_audio' })
@@ -92,17 +92,23 @@ function coloredNoise(tapWeight: number, modulated: boolean): Float32Array {
   })
 }
 
-test('high-band energy with spectral rolloff does not alone reject steady audio', () => {
-  const result = checkSpeakerQuality(coloredNoise(0.8, false))
+test('the current gate catches steady colored noise that passed the legacy rule', () => {
+  const samples = coloredNoise(0.8, false)
+  const result = checkLegacySpeakerQuality(samples)
   assert.equal(result.accepted, true, JSON.stringify(result))
   assert.ok(result.metrics)
   assert.ok(result.metrics.highBandFraction > 0.014)
   assert.ok(result.metrics.highBandRolloffDb < -6 && result.metrics.highBandRolloffDb > -8.5)
   assert.ok(result.metrics.highBandDynamicDb < 15)
+
+  const current = checkSpeakerQuality(samples)
+  assert.equal(current.accepted, false, JSON.stringify(current))
+  if (!current.accepted)
+    assert.equal(current.reason, 'interference_hiss')
 })
 
-test('varying colored interference is rejected even with moderate high-band rolloff', () => {
-  const result = checkSpeakerQuality(coloredNoise(0.8, true))
+test('the legacy gate rejects varying colored interference with moderate high-band rolloff', () => {
+  const result = checkLegacySpeakerQuality(coloredNoise(0.8, true))
   assert.equal(result.accepted, false, JSON.stringify(result))
   if (result.accepted)
     throw new Error('Expected rejected varying high-band interference')
@@ -114,8 +120,8 @@ test('varying colored interference is rejected even with moderate high-band roll
   assert.ok(result.metrics.highBandDynamicDb > 15)
 })
 
-test('time variation with steep high-band rolloff remains eligible', () => {
-  const result = checkSpeakerQuality(coloredNoise(1, true))
+test('the legacy gate accepts varying colored noise with steep high-band rolloff', () => {
+  const result = checkLegacySpeakerQuality(coloredNoise(1, true))
   assert.equal(result.accepted, true, JSON.stringify(result))
   assert.ok(result.metrics)
   assert.ok(result.metrics.highBandFraction > 0.014)

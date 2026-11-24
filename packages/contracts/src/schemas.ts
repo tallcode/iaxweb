@@ -85,14 +85,38 @@ const radioSignalSchema = z.object({
   content: z.string().min(1).max(256),
 })
 export const radioSignalsSchema = z.array(radioSignalSchema).max(16).readonly()
+export const AUDIO_QUALITY_GATE_VERSION = 2
+export const AUDIO_INTERFERENCE_REASONS = [
+  'interference_tone',
+  'interference_high_band',
+  'interference_hiss',
+  'interference_transient',
+  'interference_local',
+] as const
+const mainsDiagnosticSchema = z.object({
+  fundamentalHz: z.union([z.literal(50), z.literal(60)]),
+  lines: z.array(z.object({
+    nominalHz: z.number().positive(),
+    frequencyHz: z.number().positive(),
+    medianProminenceDb: z.number(),
+    fractionAtLeast12Db: z.number().min(0).max(1),
+    p50Dbfs: z.number(),
+    relativeVoiceDb: z.number().nullable(),
+  })).readonly(),
+})
 export const audioQualitySchema = z.object({
   status: z.enum(['passed', 'rejected', 'unknown', 'skip']),
   reason: z.string().min(1).max(100).nullable(),
+  gateVersion: z.literal(AUDIO_QUALITY_GATE_VERSION).optional(),
   metrics: z.object({
     highBandFraction: z.number().min(0).max(1),
     toneProminenceDb: z.number().nonnegative(),
     highBandRolloffDb: z.number(),
     highBandDynamicDb: z.number().nonnegative(),
+    noisePersistenceDb: z.number().nullish(),
+    relativeHighFloorDb: z.number().nullish(),
+    highBandSpreadDb: z.number().nullish(),
+    mainsDiagnostics: z.array(mainsDiagnosticSchema).readonly().nullish(),
   }).nullable(),
 })
 export const persistedRecordSchema = z.object({
@@ -163,7 +187,7 @@ export const speakerRecognitionSchema = z.object({
   recordId: nonempty,
   threshold: z.number().min(-1).max(1),
   status: z.enum(['matched', 'no_match', 'unavailable']),
-  reasonCode: z.enum(['record_missing', 'recording_missing', 'recording_invalid', 'insufficient_audio', 'invalid_audio', 'audio_too_long', 'resource_limit', 'interference_tone', 'interference_high_band', 'extraction_timeout', 'extraction_busy', 'extraction_failed', 'search_failed', 'empty_reference_library', 'below_threshold']).nullable(),
+  reasonCode: z.enum(['record_missing', 'recording_missing', 'recording_invalid', 'insufficient_audio', 'invalid_audio', 'audio_too_long', 'resource_limit', ...AUDIO_INTERFERENCE_REASONS, 'extraction_timeout', 'extraction_busy', 'extraction_failed', 'search_failed', 'empty_reference_library', 'below_threshold']).nullable(),
   reason: z.string().nullable(),
   referenceCount: z.number().int().nonnegative().nullable(),
   matches: z.array(speakerMatchSchema),

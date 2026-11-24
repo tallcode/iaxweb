@@ -4,14 +4,17 @@ import { audioQualitySchema } from '@iaxweb/contracts'
 
 interface Job {
   samples: Float32Array
+  gateVersion: AudioQuality['gateVersion']
   resolve: (quality: AudioQuality) => void
   signal: AbortSignal | undefined
   onAbort: () => void
   timeout: ReturnType<typeof setTimeout>
 }
 
-export function unknownAudioQuality(reason: string): AudioQuality {
-  return { status: 'unknown', reason, metrics: null }
+export function unknownAudioQuality(reason: string, gateVersion?: AudioQuality['gateVersion']): AudioQuality {
+  return gateVersion === undefined
+    ? { status: 'unknown', reason, metrics: null }
+    : { status: 'unknown', reason, metrics: null, gateVersion }
 }
 
 // Independent of the native speaker process and model availability. One shared
@@ -22,16 +25,18 @@ export class AudioQualityService {
   private readonly pending: Job[] = []
   private stopped = false
 
-  check(samples: Float32Array, signal?: AbortSignal): Promise<AudioQuality> {
+  // An unversioned recording retains the original rules on explicit retries.
+  check(samples: Float32Array, signal?: AbortSignal, gateVersion?: AudioQuality['gateVersion']): Promise<AudioQuality> {
     if (this.stopped || signal?.aborted)
-      return Promise.resolve(unknownAudioQuality('check_cancelled'))
+      return Promise.resolve(unknownAudioQuality('check_cancelled', gateVersion))
     if (samples.length > 8_000 * 300)
-      return Promise.resolve(unknownAudioQuality('check_audio_too_long'))
+      return Promise.resolve(unknownAudioQuality('check_audio_too_long', gateVersion))
     if (this.pending.length >= 10)
-      return Promise.resolve(unknownAudioQuality('check_busy'))
+      return Promise.resolve(unknownAudioQuality('check_busy', gateVersion))
     return new Promise<AudioQuality>((resolve) => {
       const job: Job = {
         samples: Float32Array.from(samples),
+        gateVersion,
         resolve,
         signal,
         onAbort: () => this.cancel(job, 'check_cancelled'),
@@ -40,7 +45,7 @@ export class AudioQualityService {
       signal?.addEventListener('abort', job.onAbort, { once: true })
       this.pending.push(job)
       this.drain()
-    }).catch(() => unknownAudioQuality('check_failed'))
+    }).catch(() => unknownAudioQuality('check_failed', gateVersion))
   }
 
   stop(): void {
@@ -52,7 +57,7 @@ export class AudioQualityService {
   private settle(job: Job, quality: AudioQuality): void {
     clearTimeout(job.timeout)
     job.signal?.removeEventListener('abort', job.onAbort)
-    job.resolve(quality)
+    job.resolve(job.gateVersion === undefined ? quality : { ...quality, gateVersion: job.gateVersion })
   }
 
   private cancel(job: Job, reason: string): void {
@@ -90,7 +95,7 @@ export class AudioQualityService {
         worker.on('exit', () => this.worker === worker && this.recycle('check_failed'))
       }
       this.worker.ref()
-      this.worker.postMessage(job.samples)
+      this.worker.postMessage({ samples: job.samples, legacy: job.gateVersion === undefined })
     }
     catch { this.recycle('check_failed') }
   }

@@ -2,6 +2,7 @@ import type { SpeakerMatch, SpeakerRecognition, SpeakerRecognitionMeasurements }
 import type { SpeakerReferenceRepository } from '../records/ports.js'
 import type { ReadyVoiceprint, SpeakerReferenceGroup, Voiceprint } from '../records/types.js'
 import { performance } from 'node:perf_hooks'
+import { isInterferenceReason } from '../records/audio-quality.js'
 import { logTimestamp } from './asr-context-files.js'
 import { AudioQualityService, unknownAudioQuality } from './audio-quality.js'
 import { createSpeakerMeasurements } from './speaker-measurements.js'
@@ -156,20 +157,20 @@ export class SpeakerReferenceService {
     catch (error) {
       const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT'
       if (!this.stopped && !abortSignal.aborted)
-        this.options.repository.updateAudioQuality(record.id, unknownAudioQuality(missing ? 'recording_missing' : 'recording_invalid'))
+        this.options.repository.updateAudioQuality(record.id, unknownAudioQuality(missing ? 'recording_missing' : 'recording_invalid', record.audioQuality?.gateVersion))
       return missing
         ? unavailable('recording_missing', '录音文件不存在或已过期，无法进行特征识别。')
         : unavailable('recording_invalid', '录音文件无法读取或格式无效，无法进行特征识别。')
     }
     finally { measurements.audioReadMs = performance.now() - readStarted }
     const qualityStarted = performance.now()
-    const quality = await this.audioQuality.check(samples, abortSignal)
+    const quality = await this.audioQuality.check(samples, abortSignal, record.audioQuality?.gateVersion)
     measurements.qualityCheckMs = performance.now() - qualityStarted
     if (!this.stopped && !abortSignal.aborted)
       this.options.repository.updateAudioQuality(record.id, quality)
     if (quality.status !== 'passed') {
       const reason = quality.reason
-      if (reason === 'interference_tone' || reason === 'interference_high_band')
+      if (isInterferenceReason(reason))
         return unavailable(reason, '无法启动呼号识别。')
       if (quality.status === 'unknown')
         return unavailable('extraction_failed', '暂时无法识别，请稍后手动重试。')
@@ -196,6 +197,9 @@ export class SpeakerReferenceService {
         case SPEAKER_TOO_LONG_REASON: return unavailable('audio_too_long', '录音超过当前安全上限 60 秒，未生成特征。')
         case 'interference_tone': return unavailable('interference_tone', '检测到明显窄带干扰，未生成查询特征。')
         case 'interference_high_band': return unavailable('interference_high_band', '检测到高频能量异常，可能存在弱干扰，未生成查询特征。')
+        case 'interference_hiss': return unavailable('interference_hiss', '检测到持续沙沙底噪，未生成查询特征。')
+        case 'interference_transient': return unavailable('interference_transient', '检测到局部突发干扰，未生成查询特征。')
+        case 'interference_local': return unavailable('interference_local', '检测到明显局部干扰，未生成查询特征。')
         case 'invalid_audio': return unavailable('invalid_audio', '音频采样无效，未生成查询特征。')
         default: return unavailable('insufficient_audio', '有效音频不足 1 秒或没有可用信号，未生成查询特征。')
       }
@@ -325,7 +329,8 @@ export class SpeakerReferenceService {
           const quality = current.audioQuality?.status === 'passed' ? current.audioQuality : await this.audioQuality.check(samples, this.abort.signal)
           if (this.stopped)
             break
-          repository.updateAudioQuality(record.id, quality)
+          if (!current.audioQuality)
+            repository.updateAudioQuality(record.id, quality)
           if (quality.status !== 'passed') {
             repository.updateVoiceprint(record.id, { version: SPEAKER_VERSION, status: 'unavailable' })
             continue

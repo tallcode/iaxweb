@@ -16,12 +16,13 @@ describe('record duration quality', () => {
     wrapper.unmount()
   })
 
-  it('shows rejected duration in gray with quality details on hover and no interactive icon', () => {
+  it('shows rejected duration in gray with a visible quality reason and no interactive icon', () => {
     const wrapper = mount(RecordDuration, { props: { durationMs: 9220, quality: { status: 'rejected', reason: 'interference_high_band', metrics: null } } })
     expect(wrapper.attributes('title')).toBe('语音质量较差：高频噪声较明显。')
     expect(wrapper.classes()).toContain('text-slate-500')
     expect(wrapper.find('svg').exists()).toBe(false)
-    expect(wrapper.text()).toBe('9.2s')
+    expect(wrapper.get('.whitespace-nowrap').text()).toBe('9.2s')
+    expect(wrapper.text()).toContain('高频噪声较明显')
     expect(wrapper.find('button').exists()).toBe(false)
     expect(wrapper.find('[role="tooltip"]').exists()).toBe(false)
     wrapper.unmount()

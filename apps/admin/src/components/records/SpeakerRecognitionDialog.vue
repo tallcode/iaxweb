@@ -2,15 +2,19 @@
 import type { SpeakerMatch } from '@iaxweb/contracts'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useSpeakerRecognitionContext } from '../../composables/records/use-records-context'
+import { audioInterferenceLabels } from '../../utils/records-format'
 
 const recognition = useSpeakerRecognitionContext()
 const { record, loading, result, error } = recognition.state
 const dialog = ref<HTMLDialogElement>()
 const totalMatches = computed(() => result.value?.matches.reduce((sum, match) => sum + match.count, 0) ?? 0)
 const rankedMatches = computed(() => result.value?.matches ?? [])
-const outcomeMessage = computed(() => {
+const interferenceReason = computed(() => {
   const reasonCode = result.value?.reasonCode
-  if (reasonCode === 'interference_tone' || reasonCode === 'interference_high_band')
+  return reasonCode ? audioInterferenceLabels.get(reasonCode) : undefined
+})
+const outcomeMessage = computed(() => {
+  if (interferenceReason.value)
     return '无法启动呼号识别'
   return result.value?.status === 'no_match' ? '没有识别到呼号' : '无法识别呼号'
 })
@@ -109,6 +113,7 @@ function formatReferenceGroups(groups: Readonly<SpeakerMatch['referenceGroups']>
           </div>
           <p v-else class="rounded-lg border border-amber-900/70 bg-amber-950/20 px-4 py-4 text-sm leading-6 text-amber-200">
             {{ outcomeMessage }}
+            <span v-if="interferenceReason" class="mt-1 block">{{ interferenceReason }}</span>
           </p>
         </template>
       </div>

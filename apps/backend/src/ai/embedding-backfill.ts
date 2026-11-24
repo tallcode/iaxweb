@@ -110,7 +110,7 @@ export async function runEmbeddingBackfill(options: EmbeddingBackfillOptions) {
           const filename = speakerWavFile(manifest.recordingsDirectory, record)
           const samples = await readSpeakerWav(filename, options.signal)
           try {
-            const quality = await audioQuality.check(samples, options.signal)
+            const quality = await audioQuality.check(samples, options.signal, current.gateVersion)
             if (options.signal?.aborted)
               break
             store.updateAudioQuality(record.id, quality)

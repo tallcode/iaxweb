@@ -4,7 +4,7 @@ import { closeSync, openSync, readSync } from 'node:fs'
 import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { SPEAKER_DIMENSIONS, SPEAKER_MODEL_SHA256, SPEAKER_VERSION } from './speaker-model.mjs'
-import { checkSpeakerQuality } from './speaker-quality.mjs'
+import { checkLegacySpeakerQuality } from './speaker-quality.mjs'
 import { scoreSpeakerReferences } from './speaker-reference-score.mjs'
 
 // Reuse the model, never the per-record stream. The parent supervises and
@@ -90,7 +90,7 @@ process.on('message', async (message) => {
       return
     }
     if (!message.qualityApproved) {
-      const quality = measure('qualityCheckMs', () => checkSpeakerQuality(samples))
+      const quality = measure('qualityCheckMs', () => checkLegacySpeakerQuality(samples))
       if (!quality.accepted) {
         send({ status: 'unavailable', reason: quality.reason, version: SPEAKER_VERSION })
         return

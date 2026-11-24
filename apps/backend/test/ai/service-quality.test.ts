@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { AUDIO_QUALITY_GATE_VERSION } from '@iaxweb/contracts'
 import { AsrClient } from '../../src/ai/asr-client.js'
 import { AudioQualityService } from '../../src/ai/audio-quality.js'
 import { LlmParser } from '../../src/ai/llm-parser.js'
@@ -18,9 +19,9 @@ test('ASR and history survive rejected/unknown quality while only passed audio s
   const repository = new RecordRepository(':memory:')
   const texts = ['BG5XXX，第一条', 'BG5XXX，第二条', '这里是 BG5ABC']
   const qualities: AudioQuality[] = [
-    { status: 'rejected', reason: 'interference_high_band', metrics: null },
-    { status: 'unknown', reason: 'check_timeout', metrics: null },
-    { status: 'passed', reason: null, metrics: null },
+    { status: 'rejected', reason: 'interference_hiss', metrics: null, gateVersion: AUDIO_QUALITY_GATE_VERSION },
+    { status: 'unknown', reason: 'check_timeout', metrics: null, gateVersion: AUDIO_QUALITY_GATE_VERSION },
+    { status: 'passed', reason: null, metrics: null, gateVersion: AUDIO_QUALITY_GATE_VERSION },
   ]
   let asrCalls = 0
   let qualityCalls = 0
@@ -28,7 +29,8 @@ test('ASR and history survive rejected/unknown quality while only passed audio s
   let spots = 0
   let historySeen: readonly TranscriptTurn[] = []
   t.mock.method(AsrClient.prototype, 'transcribe', async () => texts[asrCalls++]!)
-  t.mock.method(AudioQualityService.prototype, 'check', async () => {
+  t.mock.method(AudioQualityService.prototype, 'check', async (_samples: Float32Array, _signal?: AbortSignal, gateVersion?: AudioQuality['gateVersion']) => {
+    assert.equal(gateVersion, AUDIO_QUALITY_GATE_VERSION)
     assert.equal(asrCalls, qualityCalls + 1)
     return qualities[qualityCalls++]!
   })

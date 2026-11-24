@@ -1,12 +1,16 @@
-import type { AudioQuality } from '@iaxweb/contracts'
+import type { AudioInterferenceReason, AudioQuality } from '@iaxweb/contracts'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Voiceprint } from './types.js'
-import { audioQualitySchema } from '@iaxweb/contracts'
+import { AUDIO_INTERFERENCE_REASONS, audioQualitySchema } from '@iaxweb/contracts'
 
-export const QUALITY_REASONS = ['interference_high_band', 'interference_tone', 'invalid_audio'] as const
+const interferenceReasons = new Set<string>(AUDIO_INTERFERENCE_REASONS)
 
-export function isQualityReason(reason: string | undefined): boolean {
-  return (QUALITY_REASONS as readonly string[]).includes(reason ?? '')
+export function isInterferenceReason(reason: string | null | undefined): reason is AudioInterferenceReason {
+  return reason != null && interferenceReasons.has(reason)
+}
+
+export function isQualityReason(reason: string | undefined): reason is AudioInterferenceReason | 'invalid_audio' {
+  return reason === 'invalid_audio' || isInterferenceReason(reason)
 }
 
 export function parseAudioQuality(value: unknown): AudioQuality | null {
@@ -31,7 +35,7 @@ export function storeAudioQuality(database: DatabaseSync, id: string, quality: A
 // recording. Real pipeline checks save their full metrics before extraction.
 export function voiceprintQuality(voiceprint: Voiceprint): AudioQuality | undefined {
   if (isQualityReason(voiceprint.reason))
-    return { status: 'rejected', reason: voiceprint.reason!, metrics: null }
+    return { status: 'rejected', reason: voiceprint.reason, metrics: null }
   if (voiceprint.status === 'ready')
     return { status: 'passed', reason: null, metrics: null }
   return undefined

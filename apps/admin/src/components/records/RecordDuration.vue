@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import type { AudioQuality } from '@iaxweb/contracts'
 import { computed } from 'vue'
+import { audioInterferenceLabels } from '../../utils/records-format'
 
 const props = defineProps<{ durationMs: number, quality?: AudioQuality | null | undefined }>()
 const duration = computed(() => `${(props.durationMs / 1000).toFixed(1)}s`)
 const reasons: Record<string, string> = {
-  interference_tone: '存在明显的持续单音',
-  interference_high_band: '高频噪声较明显',
   invalid_audio: '音频数据无效',
   insufficient_audio: '有效音频不足或没有可用声音',
   check_timeout: '检查超时，可手动重试',
@@ -17,21 +16,34 @@ const reasons: Record<string, string> = {
   recording_missing: '录音文件不存在或已过期',
   recording_invalid: '录音文件无法读取或格式无效',
 }
-const message = computed(() => {
+const qualityReason = computed(() => {
+  const code = props.quality?.reason
+  return code ? audioInterferenceLabels.get(code) ?? reasons[code] : undefined
+})
+const statusMessage = computed(() => {
   const quality = props.quality
   if (quality?.status === 'passed')
     return '语音质量良好'
-  const reason = quality?.reason ? reasons[quality.reason] : undefined
+  const reason = qualityReason.value
   if (quality?.status === 'skip')
     return `历史记录，未重新检查语音质量${reason ? `；此前记录：${reason}` : ''}。`
   if (quality?.status === 'rejected')
     return `语音质量较差${reason ? `：${reason}` : ''}。`
   return reason ? `语音质量未知：${reason}。` : '暂无质量检查结果'
 })
+const message = computed(() => {
+  const mains = props.quality?.metrics?.mainsDiagnostics
+  if (!mains?.length)
+    return statusMessage.value
+  const frequencies = mains.map(({ fundamentalHz }) => `${fundamentalHz} Hz`).join('、')
+  const status = statusMessage.value.replace(/。$/, '')
+  return `${status}。观察到与 ${frequencies} 工频相符的谱线。`
+})
 </script>
 
 <template>
-  <span :title="message" :data-audio-quality="quality?.status ?? 'unknown'" class="whitespace-nowrap" :class="quality?.status === 'passed' ? 'text-white' : 'text-slate-500'">
-    {{ duration }}
+  <span :title="message" :data-audio-quality="quality?.status ?? 'unknown'" :class="quality?.status === 'passed' ? 'text-white' : 'text-slate-500'">
+    <span class="whitespace-nowrap">{{ duration }}</span>
+    <span v-if="quality?.status === 'rejected'" class="block text-xs leading-snug font-normal whitespace-normal text-slate-400">{{ qualityReason ?? '语音质量较差' }}</span>
   </span>
 </template>

@@ -3,7 +3,7 @@ import type { StatementSync } from 'node:sqlite'
 import type { Voiceprint } from './types.js'
 import { DatabaseSync } from 'node:sqlite'
 import { SPEAKER_DIMENSIONS } from '../ai/speaker-model.mjs'
-import { isQualityReason, storeAudioQuality, voiceprintQuality } from './audio-quality.js'
+import { isQualityReason, parseAudioQuality, storeAudioQuality, voiceprintQuality } from './audio-quality.js'
 import { encodeVoiceprint } from './voiceprint.js'
 
 export type BackfillMode = 'missing' | 'failed' | 'unavailable'
@@ -91,15 +91,21 @@ export class EmbeddingBackfillStore {
     })
   }
 
-  current(id: string): { status: string | null, version: string | null, reviewed: boolean } | undefined {
+  current(id: string): { status: string | null, version: string | null, reviewed: boolean, gateVersion?: AudioQuality['gateVersion'] } | undefined {
     this.currentQuery ??= this.database.prepare(`
-      SELECT e.status, e.version, s.reviewed FROM ai_segments s
+      SELECT e.status, e.version, s.reviewed, s.audio_quality FROM ai_segments s
       LEFT JOIN ai_segment_embeddings e ON e.record_id = s.id WHERE s.id = ?
     `)
     const row = this.currentQuery.get(id)
     if (!row)
       return undefined
-    return { status: typeof row.status === 'string' ? row.status : null, version: typeof row.version === 'string' ? row.version : null, reviewed: row.reviewed === 1 }
+    const gateVersion = parseAudioQuality(row.audio_quality)?.gateVersion
+    return {
+      status: typeof row.status === 'string' ? row.status : null,
+      version: typeof row.version === 'string' ? row.version : null,
+      reviewed: row.reviewed === 1,
+      ...(gateVersion === undefined ? {} : { gateVersion }),
+    }
   }
 
   coverage(ids: readonly string[], version: string) {

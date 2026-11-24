@@ -1,14 +1,27 @@
-// Joint spectral and temporal radio quality gate, checked against 13 user-labeled
-// recordings. These heuristics are not a general interference classifier.
+import { checkLocalInterference, quantile } from './speaker-quality-local.mjs'
+import { detectMainsDiagnostics } from './speaker-quality-mains.mjs'
+
+// Joint spectral and temporal quality checks for 8 kHz radio audio.
 const SAMPLE_RATE = 8000
 const MIN_SAMPLES = SAMPLE_RATE
 const EDGE_SAMPLES = SAMPLE_RATE / 2
+const FRAME_SAMPLES = 256
+const HOP_SAMPLES = 64
+const FFT_SIZE = 1024
+const BLOCK_SAMPLES = SAMPLE_RATE / 10
+const FRAME_POWER_SCALE = 2 / (FFT_SIZE * FRAME_SAMPLES * 3 / 8)
 const TONE_LIMIT_DB = 18
 const HIGH_BAND_LIMIT = 0.014
 // Equal-width 3.0-3.3 kHz and 3.6-3.9 kHz bands. -6 dB is roughly a 4:1 power drop.
 const HIGH_BAND_ROLLOFF_LIMIT_DB = -6
 const TEMPORAL_ROLLOFF_LIMIT_DB = -8.5
 const HIGH_BAND_DYNAMIC_LIMIT_DB = 15
+const HIGH_BAND_PERSISTENCE_LIMIT_DB = -37
+const NOISE_PERSISTENCE_LIMIT_DB = -20.3
+const STRONG_NOISE_PERSISTENCE_LIMIT_DB = -20.8
+const STRONG_HIGH_FLOOR_DB = -21
+const HIGH_FLOOR_LIMIT_DB = -24.5
+const HIGH_SPREAD_LIMIT_DB = 10
 
 function spectrumPlan(size, windowSize) {
   const real = new Float64Array(size)
@@ -57,34 +70,112 @@ function spectrumPlan(size, windowSize) {
   }
 }
 
-const shortSpectrum = spectrumPlan(1024, 256)
+const shortSpectrum = spectrumPlan(FFT_SIZE, FRAME_SAMPLES)
 const longSpectrum = spectrumPlan(2048, 2048)
 
-// Synchronous, bounded workspace; called serially inside the speaker Worker.
-export function checkSpeakerQuality(samples) {
-  for (const value of samples) {
-    if (!Number.isFinite(value) || Math.abs(value) > 1)
-      return { accepted: false, reason: 'invalid_audio' }
+function sumPower(power, from, to) {
+  let sum = 0
+  for (let bin = from; bin < to; bin++) sum += power[bin]
+  return sum
+}
+
+function measureFrame(power, start) {
+  // FFT-bin ranges for 150–2000, 2100–3900, 300–2000, and 300–3900 Hz.
+  const voice = sumPower(power, 20, 256)
+  const floor = sumPower(power, 269, 500)
+  const blockVoice = sumPower(power, 39, 256) * FRAME_POWER_SCALE
+  const broad = sumPower(power, 39, 500) * FRAME_POWER_SCALE
+  const high = sumPower(power, 384, 500) * FRAME_POWER_SCALE
+
+  // Unscaled powers for the local-event test. Its baseline uses the 300–1800
+  // Hz band and its three interference bands span 1800–3900 Hz.
+  const localVoice = sumPower(power, 39, 231)
+  const localBands = [sumPower(power, 231, 308), sumPower(power, 308, 397), sumPower(power, 397, 500)]
+  const localEnergy = localBands[0] + localBands[1] + localBands[2]
+  let logPower = 0
+  for (let bin = 231; bin < 500; bin++) logPower += Math.log(Math.max(power[bin], 1e-25))
+  const localBins = 500 - 231
+  const flatness = Math.exp(logPower / localBins) / Math.max(localEnergy / localBins, 1e-25)
+
+  return { center: start + FRAME_SAMPLES / 2, voice, floor, blockVoice, broad, high, localVoice, localBands, flatness }
+}
+
+function ratioDb(numerator, denominator) {
+  return numerator > 0 && denominator > 0 ? 10 * Math.log10(numerator / denominator) : null
+}
+
+function noisePersistence(frames, sampleCount) {
+  const upperVoice = quantile(frames.map(frame => frame.voice), 0.8)
+  const reference = quantile(frames.filter(frame => frame.voice >= upperVoice).map(frame => frame.voice), 0.5)
+  if (reference <= 0)
+    return null
+
+  const scores = []
+  let from = 0
+  let to = 0
+  for (let start = 0; start + SAMPLE_RATE <= sampleCount; start += EDGE_SAMPLES) {
+    while (frames[from]?.center < start) from++
+    while (frames[to]?.center < start + SAMPLE_RATE) to++
+    const window = frames.slice(from, to)
+    const quietVoice = quantile(window.map(frame => frame.voice), 0.2)
+    const floor = quantile(window.filter(frame => frame.voice <= quietVoice).map(frame => frame.floor), 0.5)
+    scores.push(10 * Math.log10(Math.max(floor / reference, 1e-30)))
   }
-  if (samples.length < MIN_SAMPLES)
-    return { accepted: false, reason: 'insufficient_audio' }
+  return scores.length ? quantile(scores, 0.1) : null
+}
 
-  // Trim 500 ms per edge only when at least one second remains. This view is
-  // used only for the quality gate; the Worker still embeds the full recording.
-  if (samples.length >= MIN_SAMPLES + 2 * EDGE_SAMPLES)
-    samples = samples.subarray(EDGE_SAMPLES, samples.length - EDGE_SAMPLES)
-  let energy = 0
-  for (const value of samples) energy += value * value
-  if (energy === 0)
-    return { accepted: false, reason: 'insufficient_audio' }
+function wholeRecordSpread(frames, sampleCount) {
+  const count = Math.floor(sampleCount / BLOCK_SAMPLES)
+  if (count < 20)
+    return null
+  const blocks = Array.from({ length: count }, () => ({ frames: 0, voice: 0, broad: 0, high: 0 }))
+  for (const frame of frames) {
+    const block = blocks[Math.floor(frame.center / BLOCK_SAMPLES)]
+    if (!block)
+      break
+    block.frames++
+    block.voice += frame.blockVoice
+    block.broad += frame.broad
+    block.high += frame.high
+  }
+  for (const block of blocks) {
+    block.voice /= block.frames
+    block.broad /= block.frames
+    block.high /= block.frames
+  }
+  blocks.sort((a, b) => a.voice - b.voice)
+  const fifth = Math.floor(count / 5)
+  const floor = quantile(blocks.slice(0, fifth).map(block => block.broad), 0.5)
+  const typical = quantile(blocks.slice(fifth, -fifth).map(block => block.broad), 0.5)
+  if (floor <= 0 || typical <= floor)
+    return null
 
+  const high = blocks.map(block => block.high)
+  return ratioDb(quantile(high, 0.9), quantile(high, 0.1))
+}
+
+function noiseMetrics(frames, sampleCount) {
+  const active = frames.filter(frame => frame.broad > 1e-15)
+  if (!active.length)
+    return { noisePersistenceDb: null, relativeHighFloorDb: null, highBandSpreadDb: null }
+  const activeVoice = active.map(frame => frame.blockVoice)
+  const floor = quantile(active.map(frame => frame.high), 0.2)
+  const speech = quantile(activeVoice, 0.8) - quantile(activeVoice, 0.2)
+  return {
+    noisePersistenceDb: noisePersistence(frames, sampleCount),
+    relativeHighFloorDb: ratioDb(floor, speech),
+    highBandSpreadDb: wholeRecordSpread(frames, sampleCount),
+  }
+}
+
+function measureSpectra(samples, frames) {
   let total = 0
   let high = 0
   let lowerHigh = 0
   let upperHigh = 0
   const highFrames = []
   // scipy STFT: periodic Hann256, hop64, FFT1024, no boundary padding.
-  for (let start = 0; start + 256 <= samples.length; start += 64) {
+  for (let start = 0; start + FRAME_SAMPLES <= samples.length; start += HOP_SAMPLES) {
     const power = shortSpectrum(samples, start, false)
     let frameHigh = 0
     for (let i = 20; i <= 499; i++) {
@@ -100,20 +191,14 @@ export function checkSpeakerQuality(samples) {
         upperHigh += value
     }
     highFrames.push(frameHigh)
+    if (frames)
+      frames.push(measureFrame(power, start))
   }
   const highBandFraction = high / total
   const highBandRolloffDb = 10 * Math.log10(Math.max(upperHigh, 1e-30) / Math.max(lowerHigh, 1e-30))
 
-  // Measure time variation without letting a single click or extreme frame
-  // determine the range. At the worker's 60s limit this holds fewer than 7500
-  // frame energies; no extra FFT or inference model is needed.
-  highFrames.sort((a, b) => a - b)
-  const quantile = (q) => {
-    const at = (highFrames.length - 1) * q
-    const index = Math.floor(at)
-    return highFrames[index] + (highFrames[Math.min(index + 1, highFrames.length - 1)] - highFrames[index]) * (at - index)
-  }
-  const highBandDynamicDb = 10 * Math.log10(Math.max(quantile(0.9), 1e-30) / Math.max(quantile(0.1), 1e-30))
+  // Use the interior of the distribution so a click cannot determine the range.
+  const highBandDynamicDb = 10 * Math.log10(Math.max(quantile(highFrames, 0.9), 1e-30) / Math.max(quantile(highFrames, 0.1), 1e-30))
 
   // Welch PSD: periodic Hann2048, 50% overlap, constant detrending.
   // The common density normalization cancels in the peak/background ratio.
@@ -133,14 +218,64 @@ export function checkSpeakerQuality(samples) {
     // A pure tone can have a zero background. Keep the metric finite.
     toneProminenceDb = Math.max(toneProminenceDb, 10 * Math.log10(average[i] / Math.max(median, 1e-30)))
   }
-  const metrics = { highBandFraction, toneProminenceDb, highBandRolloffDb, highBandDynamicDb }
-  if (toneProminenceDb > TONE_LIMIT_DB)
+  return { highBandFraction, toneProminenceDb, highBandRolloffDb, highBandDynamicDb }
+}
+
+function hasHighBandInterference({ highBandFraction, highBandRolloffDb, highBandDynamicDb }) {
+  return highBandFraction > HIGH_BAND_LIMIT && (highBandRolloffDb > HIGH_BAND_ROLLOFF_LIMIT_DB
+    || (highBandRolloffDb > TEMPORAL_ROLLOFF_LIMIT_DB && highBandDynamicDb > HIGH_BAND_DYNAMIC_LIMIT_DB))
+}
+
+function hasHiss({ noisePersistenceDb, relativeHighFloorDb, highBandSpreadDb }) {
+  const strongFloor = relativeHighFloorDb !== null && relativeHighFloorDb >= STRONG_HIGH_FLOOR_DB
+  const limit = strongFloor ? STRONG_NOISE_PERSISTENCE_LIMIT_DB : NOISE_PERSISTENCE_LIMIT_DB
+  return noisePersistenceDb !== null && noisePersistenceDb > limit
+    && ((relativeHighFloorDb !== null && relativeHighFloorDb >= HIGH_FLOOR_LIMIT_DB)
+      || (highBandSpreadDb !== null && highBandSpreadDb <= HIGH_SPREAD_LIMIT_DB))
+}
+
+function checkQuality(original, useLatest) {
+  for (const value of original) {
+    if (!Number.isFinite(value) || Math.abs(value) > 1)
+      return { accepted: false, reason: 'invalid_audio' }
+  }
+  if (original.length < MIN_SAMPLES)
+    return { accepted: false, reason: 'insufficient_audio' }
+
+  // The quality analysis excludes half a second at each edge when it leaves
+  // a full second. Local event times and mains analysis refer to the original.
+  const edge = original.length >= MIN_SAMPLES + 2 * EDGE_SAMPLES ? EDGE_SAMPLES : 0
+  const samples = original.subarray(edge, original.length - edge)
+  let energy = 0
+  for (const value of samples) energy += value * value
+  if (energy === 0)
+    return { accepted: false, reason: 'insufficient_audio' }
+
+  const frames = useLatest ? [] : null
+  const spectral = measureSpectra(samples, frames)
+  const metrics = frames
+    ? { ...spectral, ...noiseMetrics(frames, samples.length), mainsDiagnostics: detectMainsDiagnostics(original) }
+    : spectral
+  if (metrics.toneProminenceDb > TONE_LIMIT_DB)
     return { accepted: false, reason: 'interference_tone', metrics }
-  if (highBandFraction > HIGH_BAND_LIMIT && highBandRolloffDb > HIGH_BAND_ROLLOFF_LIMIT_DB)
+  const persistence = metrics.noisePersistenceDb ?? null
+  if (hasHighBandInterference(metrics) && (persistence === null || persistence > HIGH_BAND_PERSISTENCE_LIMIT_DB))
     return { accepted: false, reason: 'interference_high_band', metrics }
-  // Time variation alone also occurs in clean speech. Require both excessive
-  // high-band energy and limited rolloff before using it to reject audio.
-  if (highBandFraction > HIGH_BAND_LIMIT && highBandRolloffDb > TEMPORAL_ROLLOFF_LIMIT_DB && highBandDynamicDb > HIGH_BAND_DYNAMIC_LIMIT_DB)
-    return { accepted: false, reason: 'interference_high_band', metrics }
+  if (frames) {
+    if (hasHiss(metrics))
+      return { accepted: false, reason: 'interference_hiss', metrics }
+    const reason = checkLocalInterference(original, frames, edge)
+    if (reason)
+      return { accepted: false, reason, metrics }
+  }
   return { accepted: true, metrics }
+}
+
+// Existing historical decisions continue to use the original quality rules.
+export function checkLegacySpeakerQuality(samples) {
+  return checkQuality(samples, false)
+}
+
+export function checkSpeakerQuality(samples) {
+  return checkQuality(samples, true)
 }

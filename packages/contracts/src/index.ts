@@ -3,6 +3,7 @@ import type {
   adminRecordPageSchema,
   adminSessionSchema,
   adminUsersPageSchema,
+  AUDIO_INTERFERENCE_REASONS,
   audioQualitySchema,
   audioStateSchema,
   createUserSchema,
@@ -29,6 +30,7 @@ export type PublicStats = z.output<typeof publicStatsSchema>
 export type StatsDay = PublicStats['today']['day']
 export type AudioState = z.output<typeof audioStateSchema>
 export type AudioQuality = z.output<typeof audioQualitySchema>
+export type AudioInterferenceReason = typeof AUDIO_INTERFERENCE_REASONS[number]
 export type RadioSignal = z.output<typeof radioSignalsSchema>[number]
 export type PersistedRecord = z.output<typeof persistedRecordSchema>
 export type AdminRecord = AdminRecordPage['items'][number]
@@ -58,6 +60,8 @@ export {
   adminRecordPageSchema,
   adminSessionSchema,
   adminUsersPageSchema,
+  AUDIO_INTERFERENCE_REASONS,
+  AUDIO_QUALITY_GATE_VERSION,
   audioQualitySchema,
   audioStateSchema,
   createUserSchema,

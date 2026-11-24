@@ -7,6 +7,7 @@ import type { SegmentRecord, SegmentStore } from './segment-store.js'
 import type { ClosedSegment } from './segmenter.js'
 import type { SpeakerReferenceService } from './speaker-references.js'
 import { randomUUID } from 'node:crypto'
+import { AUDIO_QUALITY_GATE_VERSION } from '@iaxweb/contracts'
 import { saveRecognizedRecording } from '../records/recognition-persistence.js'
 import { RecordingStore } from '../records/recording-store.js'
 import { SignalingService } from '../signaling/service.js'
@@ -116,7 +117,7 @@ export class SegmentRecognition {
       if (text) {
         record.recognition = text
         record.corrected = correctExplanationText(text).text
-        record.audioQuality = await this.audioQuality.check(Float32Array.from(pcm, sample => sample / 32768), this.abort.signal)
+        record.audioQuality = await this.audioQuality.check(Float32Array.from(pcm, sample => sample / 32768), this.abort.signal, AUDIO_QUALITY_GATE_VERSION)
         if (this.abort.signal.aborted)
           return
         if (record.audioQuality.status === 'passed' && speakerReferences && liveAbort) {
