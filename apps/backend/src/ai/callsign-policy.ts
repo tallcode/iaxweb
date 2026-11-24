@@ -126,7 +126,6 @@ export function decide(input: Input): Decision {
     // multiplicity downgrade. Feature evidence cannot then vote for itself.
   }
   result.effectiveSelfConfidence = level
-  const maxDistance = level === 'low' ? 0 : 1
   const eligible = (items: Candidate[]) => items.filter(item => level === 'low' ? item.confidence === 'high' : item.confidence !== 'low')
   const stages: Array<{ source: Step['source'], items: Candidate[] }> = [
     { source: 'spelling', items: eligible(spelling) },
@@ -135,6 +134,9 @@ export function decide(input: Input): Decision {
   ]
   let ambiguity: Set<string> | undefined
   for (const stage of stages) {
+    // Only a compact self-report can be corrected by non-voiceprint evidence.
+    const allowsCompactMismatch = level !== 'low' && origin === 'self' && stage.source !== 'feature'
+    const maxDistance = allowsCompactMismatch && anchors.some(anchor => anchor.kind === 'compact') ? 1 : 0
     const comparisons: Step['comparisons'] = []
     const matches = new Set<string>()
     for (const reference of stage.items) {
@@ -144,7 +146,8 @@ export function decide(input: Input): Decision {
         const editDistance = callDistance(anchor.callsign, reference.callsign)
         const separate = independent(anchor, reference)
         comparisons.push({ self: anchor.callsign, reference: reference.callsign, distance: editDistance, independent: separate })
-        if (separate && editDistance <= maxDistance)
+        const allowedDistance = anchor.kind === 'compact' ? maxDistance : 0
+        if (separate && editDistance <= allowedDistance)
           matches.add(reference.callsign)
       }
     }

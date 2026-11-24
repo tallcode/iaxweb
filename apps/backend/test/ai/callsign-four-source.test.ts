@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { prepareCallsignExtraction, resolveCallsign } from '../../src/ai/callsign-extraction.js'
+import { decide } from '../../src/ai/callsign-policy.js'
 
 const schema = JSON.parse(readFileSync(new URL('../../../../examples/ai/schema.json', import.meta.url), 'utf8')) as Record<string, unknown>
 const A = 'BG5GZX'
@@ -23,9 +24,11 @@ function resolve(extraction: CallsignExtraction, matches: readonly Pick<SpeakerM
   return resolveCallsign(prepared, matches, signals)
 }
 
-test('LLM self corroborated by a feature is still stage 1', () => {
-  const result = resolve({ selfCallsigns: [compact()], spelledCallsigns: [] }, [feature(B, 'medium')])
-  assert.equal(result.callsign, B)
+test('a feature corroborates an LLM self only when the callsign matches exactly', () => {
+  const raw = { selfCallsigns: [compact()], spelledCallsigns: [] }
+  assert.equal(resolve(raw, [feature(B, 'medium')]).callsign, undefined)
+  const result = resolve(raw, [feature(A, 'medium')])
+  assert.equal(result.callsign, A)
   assert.equal(result.algorithm, 'stage1_text')
 })
 
@@ -33,6 +36,13 @@ test('feature substitution for a truly missing self is stage 2', () => {
   const result = resolve({ selfCallsigns: [], spelledCallsigns: [] }, [feature()], [tail(`${A}-7/P`, 'APRS')])
   assert.equal(result.callsign, A)
   assert.equal(result.algorithm, 'stage2_feature')
+})
+
+test('a feature substitute requires an exact match with spelling or tail', () => {
+  const raw = { selfCallsigns: [], spelledCallsigns: [spelled(B)] }
+  assert.equal(resolve(raw, [feature()]).callsign, undefined)
+  assert.equal(resolve({ ...raw, spelledCallsigns: [] }, [feature()], [tail(B)]).callsign, undefined)
+  assert.equal(resolve(raw, [feature(B)]).callsign, B)
 })
 
 test('unique complete high-confidence spelled self is stage 1 without another source', () => {
@@ -63,6 +73,32 @@ test('an independent historical spelling can corroborate medium spelled self', (
   assert.equal(result.algorithm, 'stage1_text')
 })
 
+test('a medium spelled self requires exact spelling or tail corroboration', () => {
+  const raw: CallsignExtraction = {
+    selfCallsigns: [{ identityEvidence: '这里是', quote: words, type: 'spelling', callsign: A, confidence: 'medium' }],
+    spelledCallsigns: [spelled(A, 'medium', 'current')],
+  }
+  assert.equal(resolve({ ...raw, spelledCallsigns: [...raw.spelledCallsigns, spelled(B)] }).callsign, undefined)
+  assert.equal(resolve(raw, [], [tail(B)]).callsign, undefined)
+  assert.equal(resolve(raw, [], [tail()]).callsign, A)
+})
+
+test('a tied spelled self cannot borrow the compact self distance allowance', () => {
+  const result = decide({
+    eligible: true,
+    hadSelf: true,
+    selves: [
+      { callsign: A, confidence: 'medium', kind: 'compact', spans: [{ sourceId: 'current', start: 10, end: 16 }] },
+      { callsign: A, confidence: 'medium', kind: 'spelling', spans: [{ sourceId: 'current', start: 30, end: 60 }] },
+    ],
+    // The independent self evidence is a spelling, since the compact span overlaps the reference.
+    spellings: [{ callsign: B, confidence: 'high', kind: 'spelling', spans: [{ sourceId: 'current', start: 12, end: 24 }] }],
+    features: [],
+    signals: [],
+  })
+  assert.equal(result.callsign, null)
+})
+
 test('same introduction compact and spelling views do not count as two self reports', () => {
   const result = resolve({ selfCallsigns: [compact(), { identityEvidence: '这里是', quote: words, type: 'spelling', callsign: A, confidence: 'medium' }], spelledCallsigns: [spelled(A, 'medium', 'current')] })
   assert.equal(result.callsign, A)
@@ -73,15 +109,17 @@ test('the highest feature tier is selected before distance matching', () => {
   assert.equal(result.callsign, undefined)
 })
 
-test('an ambiguous spelling set can only be narrowed by later sources', () => {
+test('an ambiguous spelling set can only be narrowed within both candidate sets', () => {
   const raw = { selfCallsigns: [compact()], spelledCallsigns: [spelled(), spelled(B)] }
   assert.equal(resolve(raw, [feature(C)]).callsign, undefined)
-  assert.equal(resolve(raw, [feature(B)]).callsign, B)
+  assert.equal(resolve(raw, [feature(B)]).callsign, undefined)
+  assert.equal(resolve(raw, [feature(A)]).callsign, A)
+  assert.equal(resolve(raw, [], [tail(B)]).callsign, B)
 })
 
 test('unique spelling corroboration takes priority over feature and tail', () => {
-  const result = resolve({ selfCallsigns: [compact()], spelledCallsigns: [spelled()] }, [feature(B)], [tail(C)])
-  assert.equal(result.callsign, A)
+  const result = resolve({ selfCallsigns: [compact()], spelledCallsigns: [spelled(B)] }, [feature(A)], [tail(C)])
+  assert.equal(result.callsign, B)
 })
 
 test('multiple self calls are downgraded only once and require exact high evidence', () => {

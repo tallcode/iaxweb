@@ -139,7 +139,8 @@ test('an LLM self corroborated by features or a tail remains algorithm stage 1',
   const { parser, calls } = makeParser(JSON.stringify(compact('BG5BUD')))
   const parsed = await parser.parse('这里是 BG5BUD')
   assert.equal(parsed?.callsign, undefined)
-  assert.deepEqual(parser.resolve(parsed!, [medium]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
+  assert.equal(parser.resolve(parsed!, [medium]), undefined)
+  assert.deepEqual(parser.resolve(parsed!, [{ ...medium, callsign: 'BG5BUD' }]), { callsign: 'BG5BUD', algorithm: 'stage1_text' })
   assert.deepEqual(parser.resolve(parsed!, [], [{ type: 'BSS', content: 'BG5BUT/P' }]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
   assert.equal(calls.length, 1)
 })
@@ -167,13 +168,13 @@ test('only genuinely missing self can use a downgraded feature substitute and be
   assert.equal(invalid.parser.resolve(invalidParsed!, [high]), undefined)
 })
 
-test('highest tier is selected before matching and ambiguity is not broken by an exact-match preference', async () => {
+test('highest feature tier is selected before exact matching', async () => {
   const { parser } = makeParser(JSON.stringify(compact('BG5BUT')))
   const parsed = await parser.parse('这里是 BG5BUT')
   const far = { callsign: 'BG5XYZ', confidence: 'high' } as const
   const close = { callsign: 'BG5BUV', confidence: 'high' } as const
   assert.equal(parser.resolve(parsed!, [far, medium]), undefined)
-  assert.equal(parser.resolve(parsed!, [close, high]), undefined)
+  assert.deepEqual(parser.resolve(parsed!, [close, high]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
   assert.deepEqual(parser.resolve(parsed!, [far, high, high]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
 })
 
