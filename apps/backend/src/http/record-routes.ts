@@ -5,7 +5,7 @@ import type { SpeakerReferenceService } from '../ai/speaker-references.js'
 import type { RecordListRepository } from '../records/ports.js'
 import type { SpotStore } from '../spots/spot-store.js'
 import { performance } from 'node:perf_hooks'
-import { MANUAL_CALLSIGN_PATTERN, manualCallsignSchema, manualRecognitionSchema, reviewSchema } from '@iaxweb/contracts'
+import { manualCallsignSchema, manualRecognitionSchema, RECORD_CALLSIGN_FILTER_PATTERN, reviewSchema } from '@iaxweb/contracts'
 import { RecordingStore } from '../records/recording-store.js'
 import { RecordReviewError, RecordReviewService } from '../records/review-service.js'
 
@@ -38,8 +38,9 @@ export async function registerRecordRoutes(app: FastifyInstance, options: Record
   app.get<{ Querystring: RecordQuery }>('/records', { preHandler: requireAuthentication }, async (request, reply) => {
     const page = parsePage(request.query.page, 1)
     const pageSize = parsePage(request.query.pageSize, 50)
-    const callsign = request.query.callsign?.trim().toUpperCase()
-    if (callsign !== undefined && !MANUAL_CALLSIGN_PATTERN.test(callsign))
+    const filter = request.query.callsign
+    const callsign = typeof filter === 'string' ? filter.trim().toUpperCase() : undefined
+    if (filter !== undefined && (callsign === undefined || !RECORD_CALLSIGN_FILTER_PATTERN.test(callsign)))
       return reply.code(400).send('Invalid callsign')
     let result
     const queryStarted = performance.now()

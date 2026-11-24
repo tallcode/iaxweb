@@ -1,3 +1,4 @@
+import type { AdminRecordPage } from '@iaxweb/contracts'
 import type { SegmentRecord } from '../../src/ai/segment-store.js'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -172,6 +173,37 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   })
   assert.equal(partialSearch.statusCode, 200)
   assert.equal(partialSearch.json().total, 0)
+
+  await context.test('filters the effective caller by a single leading-percent suffix', async () => {
+    repository.updateManualReview(segment.id, { callsign: 'BA3XAA' })
+    const search = (callsign: string, page = 1) => {
+      const query = new URLSearchParams({ callsign, page: String(page), pageSize: '1' })
+      return app.inject({ headers, url: `/api/admin/records?${query}` })
+    }
+
+    const first = await search('%aa')
+    const second = await search('%aa', 2)
+    assert.equal(first.statusCode, 200)
+    assert.equal(second.statusCode, 200)
+    const firstPage = first.json<AdminRecordPage>()
+    const secondPage = second.json<AdminRecordPage>()
+    assert.deepEqual([firstPage.total, secondPage.total], [2, 2])
+    assert.deepEqual(firstPage.items.map(item => [item.id, item.callsign, item.effectiveCallsign]), [[segment.id, 'BG5AAA', 'BA3XAA']])
+    assert.deepEqual(secondPage.items.map(item => [item.id, item.effectiveCallsign]), [[emptyCaller.id, 'BG5AAA']])
+
+    const original = await search('%aaa')
+    assert.equal(original.statusCode, 200)
+    assert.equal(original.json<AdminRecordPage>().total, 1)
+    assert.equal(original.json<AdminRecordPage>().items[0]?.id, emptyCaller.id)
+    for (const callsign of ['%5a', '%bbb']) {
+      const response = await search(callsign)
+      assert.equal(response.statusCode, 200)
+      assert.equal(response.json<AdminRecordPage>().total, 0)
+    }
+    for (const callsign of ['%A', 'A%', '%%AA', '%AA%', '_', '%A_', '%éa']) {
+      assert.equal((await search(callsign)).statusCode, 400, callsign)
+    }
+  })
 
   const malformed = await app.inject({
     headers: { cookie: 'broken=%; admin_token=invalid' },

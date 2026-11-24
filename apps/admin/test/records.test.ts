@@ -605,7 +605,10 @@ describe('record callsign editing', () => {
     wrapper.unmount()
   })
 
-  it('applies edit and review filters immediately without a callsign and combines them with search', async () => {
+  it.each([
+    ['BG5AAA', 'BG5AAA'],
+    ['%aa', '%25AA'],
+  ])('applies edit and review filters immediately and combines them with callsign search %s', async (callsign, encodedCallsign) => {
     vi.stubGlobal('Audio', class extends EventTarget {
       src = ''
 
@@ -631,16 +634,16 @@ describe('record callsign editing', () => {
     await flushPromises()
     expect(fetchMock.mock.calls[2]?.[0]).toContain('editedOnly=true')
     expect(fetchMock.mock.calls[2]?.[0]).toContain('reviewedOnly=true')
-    await wrapper.get('input[aria-label="呼号搜索"]').setValue('BG5AAA')
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue(callsign)
     await wrapper.get('form[role="search"]').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock.mock.calls[3]?.[0]).toContain('callsign=BG5AAA')
+    expect(fetchMock.mock.calls[3]?.[0]).toContain(`callsign=${encodedCallsign}`)
     expect(fetchMock.mock.calls[3]?.[0]).toContain('editedOnly=true')
     expect(fetchMock.mock.calls[3]?.[0]).toContain('reviewedOnly=true')
     await wrapper.get('input[aria-label="筛选已编辑"]').setValue(false)
     await flushPromises()
-    expect(fetchMock.mock.calls[4]?.[0]).toContain('callsign=BG5AAA')
+    expect(fetchMock.mock.calls[4]?.[0]).toContain(`callsign=${encodedCallsign}`)
     expect(fetchMock.mock.calls[4]?.[0]).not.toContain('editedOnly=')
     expect(fetchMock.mock.calls[4]?.[0]).toContain('reviewedOnly=true')
     await wrapper.findAll('button').find(button => button.text() === '清除')!.trigger('click')

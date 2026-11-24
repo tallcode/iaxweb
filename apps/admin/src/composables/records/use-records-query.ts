@@ -1,11 +1,11 @@
 import type { AdminRecord, PersistedRecord } from '@iaxweb/contracts'
 import type { RecordsQuery } from '../../api/records'
 import type { RecordsFeedback, RecordsQueryController } from './types'
-import { MANUAL_CALLSIGN_PATTERN } from '@iaxweb/contracts'
+import { RECORD_CALLSIGN_FILTER_PATTERN } from '@iaxweb/contracts'
 import { computed, onBeforeUnmount, onMounted, readonly, ref, shallowRef } from 'vue'
 import { ApiError, apiErrorMessage } from '../../api/client'
 import { recordsApi } from '../../api/records'
-import { CALLSIGN_HINT } from '../../utils/callsign'
+import { RECORD_CALLSIGN_FILTER_HINT } from '../../utils/callsign'
 import { useConditionalAutoRefresh } from '../use-conditional-auto-refresh'
 
 const PAGE_SIZE = 50
@@ -140,8 +140,8 @@ export function useRecordsQuery(options: QueryOptions): RecordsQueryController {
       return
     const callsign = searchInput.value.trim().toUpperCase()
     searchInput.value = callsign
-    if (callsign && !MANUAL_CALLSIGN_PATTERN.test(callsign)) {
-      options.feedback.showError(`搜索失败：${CALLSIGN_HINT}`)
+    if (callsign && !RECORD_CALLSIGN_FILTER_PATTERN.test(callsign)) {
+      options.feedback.showError(`搜索失败：${RECORD_CALLSIGN_FILTER_HINT}`)
       return
     }
     callsignFilter.value = callsign
@@ -170,8 +170,10 @@ export function useRecordsQuery(options: QueryOptions): RecordsQueryController {
     abort()
     const edited = updated.manualRecognition !== null || updated.manualCallsign !== null || updated.calleeCallsign !== null
     const applied = appliedQuery.value
-    const matches = (!applied.callsign || updated.effectiveCallsign === applied.callsign)
-      && (!applied.editedOnly || edited) && (!applied.reviewedOnly || updated.reviewed)
+    const matchesCallsign = !applied.callsign || (applied.callsign.startsWith('%')
+      ? updated.effectiveCallsign?.toUpperCase().endsWith(applied.callsign.slice(1))
+      : updated.effectiveCallsign === applied.callsign)
+    const matches = matchesCallsign && (!applied.editedOnly || edited) && (!applied.reviewedOnly || updated.reviewed)
     if (matches) {
       records.value = records.value.map(row => row.id === updated.id ? { ...row, ...updated } : row)
     }

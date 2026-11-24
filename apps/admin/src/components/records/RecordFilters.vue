@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { MANUAL_CALLSIGN_PATTERN as CALLSIGN_PATTERN } from '@iaxweb/contracts'
+import { RECORD_CALLSIGN_FILTER_PATTERN } from '@iaxweb/contracts'
 import { computed, ref } from 'vue'
 import { useRecordsFeedbackContext, useRecordsQueryContext } from '../../composables/records/use-records-context'
 import { useToolbarHeight } from '../../composables/use-toolbar-height'
-import { CALLSIGN_HINT } from '../../utils/callsign'
+import { RECORD_CALLSIGN_FILTER_HINT } from '../../utils/callsign'
 
 const { state, actions } = useRecordsQueryContext()
 const { total, callsignFilter, isLoading, disabled } = state
@@ -23,7 +23,7 @@ function normalizeSearchInput(event: Event): void {
   const field = event.currentTarget as HTMLInputElement
   field.value = field.value.toUpperCase().replaceAll(/\s+/g, '')
   searchInput.value = field.value
-  field.setCustomValidity(field.value.length === 0 || CALLSIGN_PATTERN.test(field.value) ? '' : CALLSIGN_HINT)
+  field.setCustomValidity(field.value.length === 0 || RECORD_CALLSIGN_FILTER_PATTERN.test(field.value) ? '' : RECORD_CALLSIGN_FILTER_HINT)
 }
 defineExpose({ focusSearch: () => searchField.value?.focus() })
 </script>
@@ -41,7 +41,7 @@ defineExpose({ focusSearch: () => searchField.value?.focus() })
           <label class="flex min-h-10 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap text-sm text-slate-300"><input v-model="reviewedOnly" type="checkbox" :disabled="disabled" class="size-3.5 shrink-0 accent-cyan-500" aria-label="筛选已标注" @change="applyFilters">已标注</label>
         </div>
         <div class="flex items-center gap-2">
-          <input ref="searchField" v-model="searchInput" :disabled="disabled" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="w-[calc(8ch+1.5rem+2px)] flex-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 sm:w-[calc(16ch+1.5rem+2px)]" inputmode="text" :pattern="CALLSIGN_PATTERN.source" placeholder="呼号" aria-label="呼号搜索" spellcheck="false" @input="normalizeSearchInput">
+          <input ref="searchField" v-model="searchInput" :disabled="disabled" lang="en" autocapitalize="characters" autocomplete="off" autocorrect="off" class="w-[calc(8ch+1.5rem+2px)] flex-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm uppercase outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 sm:w-[calc(16ch+1.5rem+2px)]" inputmode="text" :pattern="RECORD_CALLSIGN_FILTER_PATTERN.source" placeholder="呼号/%ER" aria-label="呼号搜索" :title="RECORD_CALLSIGN_FILTER_HINT" spellcheck="false" @input="normalizeSearchInput">
           <button v-if="searchInput || callsignFilter || editedOnly || reviewedOnly" type="button" aria-label="清除" :disabled="disabled" title="清除搜索和筛选" class="hidden shrink-0 items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 focus:outline-none sm:inline-flex" @click="clearCallsignSearch">
             清除
           </button>

@@ -156,7 +156,12 @@ export class SqliteRecordStore {
       conditions.push('(manual_recognition IS NOT NULL OR manual_callsign IS NOT NULL OR callee_callsign IS NOT NULL)')
     if (reviewedOnly)
       conditions.push('reviewed = 1')
-    if (callsign !== undefined) {
+    if (callsign?.startsWith('%')) {
+      const suffix = callsign.slice(1)
+      conditions.push('substr(effective_callsign, -length(?)) = ? COLLATE NOCASE')
+      parameters.push(suffix, suffix)
+    }
+    else if (callsign !== undefined) {
       conditions.push('effective_callsign = ? COLLATE NOCASE')
       parameters.push(callsign)
     }
