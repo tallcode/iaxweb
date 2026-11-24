@@ -16,15 +16,12 @@ const reasons: Record<string, string> = {
   recording_missing: '录音文件不存在或已过期',
   recording_invalid: '录音文件无法读取或格式无效',
 }
-const qualityReason = computed(() => {
-  const code = props.quality?.reason
-  return code ? audioInterferenceLabels.get(code) ?? reasons[code] : undefined
-})
 const statusMessage = computed(() => {
   const quality = props.quality
   if (quality?.status === 'passed')
     return '语音质量良好'
-  const reason = qualityReason.value
+  const code = quality?.reason
+  const reason = code ? audioInterferenceLabels.get(code) ?? reasons[code] : undefined
   if (quality?.status === 'skip')
     return `历史记录，未重新检查语音质量${reason ? `；此前记录：${reason}` : ''}。`
   if (quality?.status === 'rejected')
@@ -42,8 +39,7 @@ const message = computed(() => {
 </script>
 
 <template>
-  <span :title="message" :data-audio-quality="quality?.status ?? 'unknown'" :class="quality?.status === 'passed' ? 'text-white' : 'text-slate-500'">
-    <span class="whitespace-nowrap">{{ duration }}</span>
-    <span v-if="quality?.status === 'rejected'" class="block text-xs leading-snug font-normal whitespace-normal text-slate-400">{{ qualityReason ?? '语音质量较差' }}</span>
+  <span :title="message" :data-audio-quality="quality?.status ?? 'unknown'" class="whitespace-nowrap" :class="quality?.status === 'passed' ? 'text-white' : 'text-slate-500'">
+    {{ duration }}
   </span>
 </template>

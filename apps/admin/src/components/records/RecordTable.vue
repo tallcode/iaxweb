@@ -13,7 +13,7 @@ const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback,
 <template>
   <div class="overflow-clip rounded-xl border border-slate-800 bg-slate-900/70 shadow-xl shadow-black/20" :class="activeEditor?.view === 'table' ? 'block' : activeEditor?.view === 'card' ? 'hidden' : 'hidden lg:block'">
     <table class="w-full table-fixed divide-y divide-slate-800 text-left text-sm leading-6" :class="isAdministrator ? 'min-w-[55rem]' : 'min-w-[49rem]'">
-      <colgroup><col class="w-44"><col class="w-28"><col><col class="hidden w-32 min-[1200px]:table-column"><col class="w-32"><col class="w-24"><col v-if="isAdministrator" class="w-32"></colgroup><thead class="sticky top-[calc(4rem+var(--records-toolbar-height,4rem))] z-10 bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
+      <colgroup><col class="w-44"><col class="w-16"><col><col class="hidden w-32 min-[1200px]:table-column"><col class="w-32"><col class="w-24"><col v-if="isAdministrator" class="w-32"></colgroup><thead class="sticky top-[calc(4rem+var(--records-toolbar-height,4rem))] z-10 bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
         <tr>
           <th class="whitespace-nowrap px-4 py-3">
             时间
