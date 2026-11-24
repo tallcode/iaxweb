@@ -2,19 +2,19 @@
 import { computed, ref } from 'vue'
 
 const props = defineProps<{
-  average?: boolean
   points: { highlighted?: boolean, label: string, tick?: string, value: number }[]
+  startAtPeak?: boolean
 }>()
 
 const plot = ref<HTMLElement>()
 const activeIndex = ref<number>()
 const peakIndex = computed(() => props.points.reduce((peak, point, index) =>
   point.value > props.points[peak]!.value ? index : peak, 0))
-const currentIndex = computed(() => activeIndex.value ?? (props.average ? peakIndex.value : props.points.length - 1))
+const currentIndex = computed(() => activeIndex.value ?? (props.startAtPeak ? peakIndex.value : props.points.length - 1))
 const currentPoint = computed(() => props.points[currentIndex.value])
 const step = computed(() => {
   const maximum = props.points[peakIndex.value]?.value ?? 0
-  const target = Math.max(maximum / 4, props.average ? 0.01 : 1)
+  const target = Math.max(maximum / 4, 1)
   const magnitude = 10 ** Math.floor(Math.log10(target))
   return magnitude * ([1, 2, 5, 10].find(factor => factor * magnitude >= target) ?? 10)
 })
@@ -28,7 +28,7 @@ function focusPoint(index: number): void {
 <template>
   <div v-if="currentPoint" class="stats-chart">
     <p class="stats-chart-reading">
-      {{ currentPoint.label }} <strong>{{ average ? '平均 ' : '' }}{{ formatNumber(currentPoint.value) }} 条</strong>
+      {{ currentPoint.label }} <strong>{{ formatNumber(currentPoint.value) }} 条</strong>
     </p>
     <div class="stats-chart-grid" :style="{ '--bars': points.length }">
       <div class="stats-chart-scale" aria-hidden="true">
@@ -42,7 +42,7 @@ function focusPoint(index: number): void {
           v-for="(point, index) in points"
           :key="point.label"
           type="button"
-          :aria-label="`${point.label}，${average ? '平均 ' : ''}${formatNumber(point.value)} 条`"
+          :aria-label="`${point.label}，${formatNumber(point.value)} 条`"
           :class="{ 'is-active': index === currentIndex, 'is-highlighted': point.highlighted }"
           :style="{ '--value': `${point.value / (4 * step) * 100}%` }"
           :tabindex="index === currentIndex ? 0 : -1"

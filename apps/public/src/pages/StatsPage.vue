@@ -17,11 +17,12 @@ const view = computed(() => {
     return undefined
   const { history, today } = stats.value
   const recentDays = [...history.days, today.day]
+  const activityDays = history.days.slice(-28)
   const hourlyCounts = Array.from<number>({ length: 24 }).fill(0)
   const weekdayCounts = Array.from<number>({ length: 7 }).fill(0)
   const heatmap = Array.from({ length: 7 }, () => Array.from<number>({ length: 24 }).fill(0))
 
-  for (const day of history.days) {
+  for (const day of activityDays) {
     const weekday = (new Date(`${day.date}T00:00:00Z`).getUTCDay() + 6) % 7
     const row = heatmap[weekday]!
     weekdayCounts[weekday]! += 1
@@ -32,6 +33,7 @@ const view = computed(() => {
   }
 
   return {
+    activityRange: `${shortDate(activityDays[0]!.date)} – ${shortDate(activityDays.at(-1)!.date)}`,
     daily: recentDays.map((day, index) => ({
       highlighted: day === today.day,
       label: day.date,
@@ -40,11 +42,10 @@ const view = computed(() => {
     })),
     duration: formatDuration(recentDays.reduce((total, day) => total + day.voicedMs, 0)),
     heatmap: heatmap.map((row, weekday) => row.map(count => count / weekdayCounts[weekday]!)),
-    historyRange: `${shortDate(history.days[0]!.date)} – ${shortDate(history.days.at(-1)!.date)}`,
     hourly: hourlyCounts.map((count, hour) => ({
       label: `${hourLabel(hour)}–${hourLabel(hour + 1)}`,
       tick: hour % 6 === 0 || hour === 23 ? hourLabel(hour) : '',
-      value: count / history.days.length,
+      value: count,
     })),
     recentRange: `${shortDate(recentDays[0]!.date)} – ${shortDate(today.day.date)}`,
     todayCutoff: timeFormat.format(new Date(today.updatedAt)),
@@ -138,30 +139,31 @@ function formatDuration(milliseconds: number): string {
         </p>
         <div class="stats-panels">
           <section class="stats-panel" aria-labelledby="stats-daily-title">
-            <h2 id="stats-daily-title">
-              每日语音条数
-            </h2>
-            <p class="stats-panel-meta">
-              {{ view.recentRange }} · 截至 {{ view.todayCutoff }}
-            </p>
+            <div class="stats-panel-heading">
+              <h2 id="stats-daily-title">
+                每日语音条数
+              </h2>
+              <span class="stats-panel-meta">{{ view.recentRange }}</span>
+              <span class="stats-panel-meta">截至 {{ view.todayCutoff }}</span>
+            </div>
             <StatsBarChart :points="view.daily" />
           </section>
           <section class="stats-panel" aria-labelledby="stats-hourly-title">
-            <h2 id="stats-hourly-title">
-              24 小时活跃分布
-            </h2>
-            <p class="stats-panel-meta">
-              {{ view.historyRange }}
-            </p>
-            <StatsBarChart average :points="view.hourly" />
+            <div class="stats-panel-heading">
+              <h2 id="stats-hourly-title">
+                24 小时活跃分布
+              </h2>
+              <span class="stats-panel-meta">{{ view.activityRange }}</span>
+            </div>
+            <StatsBarChart :points="view.hourly" start-at-peak />
           </section>
           <section class="stats-panel stats-panel-wide" aria-labelledby="stats-heatmap-title">
-            <h2 id="stats-heatmap-title">
-              星期 × 小时热力图
-            </h2>
-            <p class="stats-panel-meta">
-              {{ view.historyRange }}
-            </p>
+            <div class="stats-panel-heading">
+              <h2 id="stats-heatmap-title">
+                星期 × 小时热力图
+              </h2>
+              <span class="stats-panel-meta">{{ view.activityRange }}</span>
+            </div>
             <StatsHeatmap :rows="view.heatmap" />
           </section>
         </div>

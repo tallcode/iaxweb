@@ -114,14 +114,23 @@
   grid-column: 1 / -1;
 }
 
-.stats-panel h2 {
+.stats-panel-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.65rem;
+  margin-bottom: 0.9rem;
+}
+
+.stats-panel-heading h2 {
   font-size: 1.05rem;
   font-weight: 650;
 }
 
 .stats-panel-meta {
-  margin: 0.23rem 0 0.9rem;
+  font-variant-numeric: tabular-nums;
   line-height: 1.55;
+  white-space: nowrap;
 }
 
 .stats-notice {
