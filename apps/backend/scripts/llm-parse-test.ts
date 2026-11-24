@@ -38,8 +38,9 @@ try {
     process.exit(1)
   }
   console.log(JSON.stringify({
-    ...(parsed.extraction ?? { selfCallsignEvidence: null, spelledCallsignEvidence: [], selfCallsign: null, spelledCallsigns: [] }),
+    ...(parsed.extraction ?? { selfCallsigns: [], spelledCallsigns: [] }),
     matchedCallsign: parsed.callsign ?? null,
+    callsignAlgorithm: parsed.algorithm ?? null,
   }, null, 2))
 }
 catch (error) {

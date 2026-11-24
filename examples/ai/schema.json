@@ -1,55 +1,123 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "selfCallsignEvidence",
-    "spelledCallsignEvidence",
-    "selfCallsign",
+    "selfCallsigns",
     "spelledCallsigns"
   ],
   "properties": {
-    "selfCallsignEvidence": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "minLength": 1
-    },
-    "spelledCallsignEvidence": {
+    "selfCallsigns": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "identityEvidence",
           "quote",
-          "callsign"
+          "type",
+          "callsign",
+          "confidence"
         ],
         "properties": {
+          "identityEvidence": {
+            "type": "string",
+            "minLength": 1
+          },
           "quote": {
             "type": "string",
             "minLength": 1
           },
-          "callsign": {
+          "type": {
             "type": "string",
-            "pattern": "^B[ABDEGHIY][0-9][A-Z]{2,3}$"
+            "enum": [
+              "compact",
+              "spelling"
+            ],
+            "description": "字母是原文直接写出的BB/BE/FSB或单独B/G等才可compact；Bravo/Golf/India等是解释词，不能当裸字母。数字词One/Two/Five不决定类型：直接字母夹数字词仍compact；解释词夹数字词则完整spelling，不拆前缀。"
+          },
+          "callsign": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z0-9]{1,10}$"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "compact"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "confidence": {
+                  "enum": [
+                    "medium",
+                    "low"
+                  ]
+                }
+              }
+            }
+          }
+        ]
       }
-    },
-    "selfCallsign": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "pattern": "^[A-Z0-9]{2,8}$"
     },
     "spelledCallsigns": {
       "type": "array",
-      "uniqueItems": true,
       "items": {
-        "type": "string",
-        "pattern": "^B[ABDEGHIY][0-9][A-Z]{2,3}$"
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sourceId",
+          "quote",
+          "correctedSpelling",
+          "callsign",
+          "confidence"
+        ],
+        "properties": {
+          "sourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1
+          },
+          "correctedSpelling": {
+            "type": "string"
+          },
+          "callsign": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^B[ABDEGHIY][0-9][A-Z]{2,3}$",
+            "description": "逐词提取完整字符，与是否本人无关。若correctedSpelling构成完整呼号就输出；null只表示残缺或没有有依据的完整解码，不代表非本人、不同于self或冲突。"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          }
+        }
       }
     }
   }

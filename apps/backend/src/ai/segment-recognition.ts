@@ -1,4 +1,4 @@
-import type { SpeakerMatch } from '@iaxweb/contracts'
+import type { RadioSignal, SpeakerMatch } from '@iaxweb/contracts'
 import type { AiConfig } from '../config.js'
 import type { RecognitionRepository } from '../records/ports.js'
 import type { ReadyVoiceprint } from '../records/types.js'
@@ -53,7 +53,7 @@ export class SegmentRecognition {
     this.repository = options.repository
     this.audioQuality = options.audioQuality ?? new AudioQualityService()
     this.ownsAudioQuality = !options.audioQuality
-    this.signaling = options.repository?.updateSignaling ? new SignalingService() : undefined
+    this.signaling = options.repository?.updateSignaling || config.llm.enabled ? new SignalingService() : undefined
     this.recordings = config.persistenceEnabled ? new RecordingStore(config.recordingsDirectory) : undefined
     this.speakerReferences = config.llm.stage2Enabled && config.llm.enabled && this.recordings ? options.speakerReferences : undefined
     this.onSpot = options.onSpot
@@ -97,9 +97,13 @@ export class SegmentRecognition {
     const pcm = decodeMuLaw(concatenate(segment.payloads))
     const wav = encodeWav(pcm)
     const signaling = this.signaling?.decode(pcm)
+    const signalingEvidence = this.llm && signaling
+      ? optionalEvidence(signaling, null, AbortSignal.any([this.abort.signal, AbortSignal.timeout(LIVE_SPEAKER_TIMEOUT_MS)]))
+      : undefined
     const speakerReferences = this.speakerReferences
     const liveAbort = speakerReferences && new AbortController()
     let live: ReturnType<SpeakerReferenceService['startLiveRecognition']> | undefined
+    let featureMatches: Promise<SpeakerMatch[]> | undefined
     try {
       const text = (await this.asr.transcribe(wav, {
         background: this.asrContextFiles.readBackground(),
@@ -119,6 +123,7 @@ export class SegmentRecognition {
           try {
             const signal = AbortSignal.any([this.abort.signal, liveAbort.signal, AbortSignal.timeout(LIVE_SPEAKER_TIMEOUT_MS)])
             live = speakerReferences.startLiveRecognition(record.id, pcm, record.voicedMs, signal, true)
+            featureMatches = optionalEvidence(live.matches, [], signal)
           }
           catch (error) {
             console.warn(`${logTimestamp()} [${nodeId}]: 自动特征提取启动失败 ${shortId}: ${errorMessage(error)}`)
@@ -129,7 +134,7 @@ export class SegmentRecognition {
       if (text) {
         const persisted = this.persist(nodeId, record, wav, signaling, live?.voiceprint)
         if (record.audioQuality?.status === 'passed')
-          await this.recognizeCallsign(nodeId, store, record, text, persisted, live?.matches)
+          await this.recognizeCallsign(nodeId, store, record, text, persisted, featureMatches, signalingEvidence)
         else
           console.log(`${logTimestamp()} [${nodeId}]: ${shortId} ${(record.durationMs / 1000).toFixed(1)}s | ${text}`)
       }
@@ -143,8 +148,16 @@ export class SegmentRecognition {
     }
   }
 
-  // 从原始转写和历史轮次提取呼号，必要时用录音特征补证。
-  private async recognizeCallsign(nodeId: string, store: SegmentStore, record: SegmentRecord, text: string, persisted: boolean, featureMatches?: Promise<SpeakerMatch[]>): Promise<void> {
+  // 一次 LLM 提取后，由代码按证据来源判断；特征和尾音不进入 LLM。
+  private async recognizeCallsign(
+    nodeId: string,
+    store: SegmentStore,
+    record: SegmentRecord,
+    text: string,
+    persisted: boolean,
+    featureMatches?: Promise<SpeakerMatch[]>,
+    signaling?: Promise<readonly RadioSignal[] | null>,
+  ): Promise<void> {
     const shortId = record.id.slice(0, 8)
     const seconds = (record.durationMs / 1000).toFixed(1)
     // 未启用 LLM 解析时，原始识别文本是唯一的输出。
@@ -169,20 +182,18 @@ export class SegmentRecognition {
         return
       }
       record.callsign = parsed.callsign
-      if (record.callsign) {
-        record.callsignAlgorithm = 'stage1_text'
-      }
-      else if (parsed.extraction && featureMatches) {
-        try {
-          const matches = await featureMatches
-          if (!this.abort.signal.aborted && matches.length > 0) {
-            record.callsign = this.llm.parseStage2(parsed, matches)
-            if (record.callsign)
-              record.callsignAlgorithm = 'stage2_feature'
-          }
-        }
-        catch (error) {
-          console.warn(`${logTimestamp()} [${nodeId}]: 第二阶段呼号识别失败 ${shortId}: ${errorMessage(error)}`)
+      record.callsignAlgorithm = parsed.algorithm
+      if (!record.callsign && parsed.prepared) {
+        // Resolve both sources together: an earlier feature source must not be
+        // bypassed merely because the lower-priority tail finishes first.
+        const [matches, signals] = await Promise.all([
+          featureMatches ?? Promise.resolve([]),
+          signaling ?? Promise.resolve(null),
+        ])
+        if (!this.abort.signal.aborted) {
+          const resolved = this.llm.resolve(parsed, matches, signals ?? [])
+          record.callsign = resolved?.callsign
+          record.callsignAlgorithm = resolved?.algorithm
         }
       }
       if (this.abort.signal.aborted)
@@ -239,10 +250,14 @@ export class SegmentRecognition {
       catch (error) {
         console.warn(`${logTimestamp()} [${nodeId}]: 信令保存失败 ${shortId}: ${errorMessage(error)}`)
       }
+    }).catch((error) => {
+      console.warn(`${logTimestamp()} [${nodeId}]: 信令保存失败 ${shortId}: ${errorMessage(error)}`)
     })
     void voiceprint?.then((result) => {
       if (result && !this.abort.signal.aborted)
         this.speakerReferences?.cacheQueryVoiceprint(record.id, result)
+    }).catch((error) => {
+      console.warn(`${logTimestamp()} [${nodeId}]: 特征缓存失败 ${shortId}: ${errorMessage(error)}`)
     })
     return true
   }
@@ -250,6 +265,26 @@ export class SegmentRecognition {
   private mayPublish(id: string, persisted: boolean): boolean {
     return !this.repository || (persisted && this.repository.find(id)?.manualCallsign === null)
   }
+}
+
+// Supporting evidence may fail independently. Consume rejection immediately,
+// and keep the AI queue responsive when a decoder or extractor is cancelled.
+function optionalEvidence<T>(pending: Promise<T>, fallback: T, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort)
+      resolve(fallback)
+    }
+    const finish = (value: T) => {
+      signal.removeEventListener('abort', onAbort)
+      resolve(value)
+    }
+    if (signal.aborted)
+      finish(fallback)
+    else
+      signal.addEventListener('abort', onAbort, { once: true })
+    void pending.then(finish, () => finish(fallback))
+  })
 }
 
 function concatenate(payloads: Uint8Array[]): Uint8Array {

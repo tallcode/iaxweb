@@ -7,7 +7,7 @@ import { compileSchema } from '../../src/ai/schema-validator.js'
 test('validates the shipped draft-2020 schema and advanced constraints', () => {
   const schema = JSON.parse(readFileSync(new URL('../../../../examples/ai/schema.json', import.meta.url), 'utf8'))
   const validate = compileSchema(schema)
-  const empty = { selfCallsignEvidence: null, spelledCallsignEvidence: [], selfCallsign: null, spelledCallsigns: [] }
+  const empty = { selfCallsigns: [], spelledCallsigns: [] }
   assert.equal(validate(empty), undefined)
   assert.ok(validate({ speaker: 'other' }))
   assert.ok(validate({ ...empty, matchedCallsign: 'BG5AAA' }))

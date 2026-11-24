@@ -1,10 +1,9 @@
-import type { SpeakerMatch } from '@iaxweb/contracts'
+import type { RadioSignal, SpeakerMatch } from '@iaxweb/contracts'
 import type { TranscriptTurn } from './callsign-evidence.js'
-import type { CallsignExtraction } from './callsign-extraction.js'
+import type { CallsignExtraction, PreparedCallsignExtraction } from './callsign-extraction.js'
 import type { LlmClientOptions } from './llm-client.js'
 import type { LlmConfigFilePaths } from './llm-config-files.js'
-import { cleanCallsignExtraction, matchExtractedCallsign } from './callsign-extraction.js'
-import { matchFeatureCallsign } from './callsign-stage2.js'
+import { isCallsignExtractionSchema, prepareCallsignExtraction, resolveCallsign } from './callsign-extraction.js'
 import { LlmClient } from './llm-client.js'
 import { LlmConfigFiles } from './llm-config-files.js'
 import { correctExplanationText } from './phonetic-corrector.js'
@@ -14,7 +13,9 @@ export { validateAgainstSchema } from './schema-validator.js'
 
 export interface ParsedTranscript {
   callsign?: string | undefined
+  algorithm?: 'stage1_text' | 'stage2_feature'
   extraction?: CallsignExtraction
+  prepared?: PreparedCallsignExtraction
 }
 
 export interface LlmParserOptions extends LlmClientOptions, LlmConfigFilePaths {
@@ -45,7 +46,7 @@ export class LlmParser {
   ): Promise<ParsedTranscript | undefined> {
     const prompt = this.files.loadPrompt()
     const schema = this.files.loadSchema()
-    if (!prompt || !schema)
+    if (!prompt || !schema || !isCallsignExtractionSchema(schema.object))
       return undefined
     if (!TRIGGER.test(transcript) && !TRIGGER.test(correctExplanationText(transcript).text))
       return {}
@@ -55,24 +56,32 @@ export class LlmParser {
       ...this.thinkingParams(),
       model: this.options.model,
       temperature: 0.1,
+      max_tokens: 6500,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: `${prompt}\n\n严格按以下 JSON Schema 输出\n${JSON.stringify(schema.object)}` },
-        { role: 'user', content: JSON.stringify({ history: turns, current: { ...metadata, text: transcript } }) },
+        { role: 'system', content: `${prompt}\n\n只输出符合以下schema的JSON：\n${JSON.stringify(schema.object)}` },
+        { role: 'user', content: JSON.stringify({ current: { ...metadata, text: transcript }, history: turns }) },
       ],
     }
     const raw = parseJsonObject(await this.client.requestWithRetry(body))
-    const extraction = raw && cleanCallsignExtraction(raw, transcript, turns)
-    if (!extraction || schema.validate(extraction))
+    const prepared = raw && prepareCallsignExtraction(raw, { ...metadata, text: transcript }, turns, schema.object)
+    if (!prepared || schema.validate(prepared.extraction))
       return {}
-    const callsign = matchExtractedCallsign(extraction)
-    return { extraction, ...(callsign ? { callsign } : {}) }
+    const { callsign, algorithm } = resolveCallsign(prepared)
+    return { extraction: prepared.extraction, prepared, ...(callsign && algorithm ? { callsign, algorithm } : {}) }
   }
 
-  // A missing extraction means Stage 1 was skipped or failed. Never re-parse
-  // the transcript, reload prompts, or send a second model request here.
-  parseStage2(parsed: ParsedTranscript, matches: readonly Pick<SpeakerMatch, 'callsign' | 'confidence'>[]): string | undefined {
-    return parsed.extraction ? matchFeatureCallsign(parsed.extraction, matches) : undefined
+  // Supporting sources are matched against the same validated extraction.
+  // Algorithm identity follows the self-report source, not the supporting one.
+  resolve(
+    parsed: ParsedTranscript,
+    matches: readonly Pick<SpeakerMatch, 'callsign' | 'confidence'>[] = [],
+    signals: readonly RadioSignal[] = [],
+  ): Pick<ParsedTranscript, 'callsign' | 'algorithm'> | undefined {
+    if (!parsed.prepared)
+      return undefined
+    const { callsign, algorithm } = resolveCallsign(parsed.prepared, matches, signals)
+    return callsign && algorithm ? { callsign, algorithm } : undefined
   }
 
   private thinkingParams(): Record<string, unknown> {

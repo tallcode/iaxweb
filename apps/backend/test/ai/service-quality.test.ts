@@ -34,7 +34,7 @@ test('ASR and history survive rejected/unknown quality while only passed audio s
   })
   const llm = t.mock.method(LlmParser.prototype, 'parse', async (_text: string, history?: string | readonly TranscriptTurn[]) => {
     historySeen = Array.isArray(history) ? history : []
-    return { callsign: 'BG5ABC' }
+    return { callsign: 'BG5ABC', algorithm: 'stage1_text' as const }
   })
   const config = loadAiConfig({ AI_PERSISTENCE_ENABLED: 'true', AI_LLM_ENABLED: 'true', AI_LLM_STAGE2_ENABLED: 'true', AI_RECORDINGS_DIR: directory })
   const recognition = new SegmentRecognition({

@@ -1,5 +1,5 @@
 import type { CallsignExtraction } from '../../src/ai/callsign-extraction.js'
-import type { LlmParserOptions, ParsedTranscript } from '../../src/ai/llm-parser.js'
+import type { LlmParserOptions } from '../../src/ai/llm-parser.js'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,12 +15,11 @@ writeFileSync(promptFile, '只提取自报与完整拼读，输出JSON。')
 writeFileSync(schemaFile, JSON.stringify(schema))
 after(() => rmSync(dir, { recursive: true, force: true }))
 
-const TEXT = '这里是 Bravo Delta Five X-ray X-ray X-ray'
+const SPELLING = 'Bravo Delta Five X-ray X-ray X-ray'
+const TEXT = `这里是 ${SPELLING}`
 const extraction: CallsignExtraction = {
-  selfCallsignEvidence: TEXT,
-  spelledCallsignEvidence: [{ quote: 'Bravo Delta Five X-ray X-ray X-ray', callsign: 'BD5XXX' }],
-  selfCallsign: 'BD5XXX',
-  spelledCallsigns: ['BD5XXX'],
+  selfCallsigns: [{ identityEvidence: '这里是', quote: SPELLING, type: 'spelling', callsign: 'BD5XXX', confidence: 'high' }],
+  spelledCallsigns: [{ sourceId: 'current', quote: SPELLING, correctedSpelling: SPELLING, callsign: 'BD5XXX', confidence: 'high' }],
 }
 function completion(content: string): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 })
@@ -51,26 +50,23 @@ function makeParser(content: string | (() => Response), options: Partial<LlmPars
   })
   return { parser, calls }
 }
-function partial(self: string | null, spelled: string[] = []): ParsedTranscript {
-  return { extraction: {
-    selfCallsignEvidence: self ? `这里是 ${self}` : null,
-    selfCallsign: self,
-    spelledCallsignEvidence: spelled.map(callsign => ({ quote: '已校验的原文证据', callsign })),
-    spelledCallsigns: spelled,
-  } }
+function compact(callsign: string): CallsignExtraction {
+  return { selfCallsigns: [{ identityEvidence: '这里是', quote: callsign, type: 'compact', callsign, confidence: 'medium' }], spelledCallsigns: [] }
 }
 const high = { callsign: 'BG5BUT', confidence: 'high' } as const
 const medium = { ...high, confidence: 'medium' } as const
+const but = 'Bravo Golf Five Bravo Uniform Tango'
+const pastBut = { sourceId: 'past', quote: but, correctedSpelling: but, callsign: 'BG5BUT', confidence: 'high' } as const
 
-test('extracts four model fields and computes the final call without candidate parsing', async () => {
+test('extracts two arrays and computes a text result in one model call', async () => {
   const { parser, calls } = makeParser(JSON.stringify(extraction))
   const result = await parser.parse(TEXT)
   assert.equal(result?.callsign, 'BD5XXX')
+  assert.equal(result?.algorithm, 'stage1_text')
   assert.deepEqual(result?.extraction, extraction)
   assert.equal(calls.length, 1)
   const call = calls[0]!
-  const payload = JSON.parse(call.body.messages[1]!.content)
-  assert.deepEqual(payload, { history: [], current: { id: 'current', text: TEXT } })
+  assert.deepEqual(JSON.parse(call.body.messages[1]!.content), { current: { id: 'current', text: TEXT }, history: [] })
   assert.equal(call.url, 'https://api.deepseek.com/chat/completions')
   assert.equal(call.body.messages[0]!.content.includes('matchedCallsign'), false)
   assert.deepEqual(call.body.thinking, { type: 'disabled' })
@@ -78,26 +74,24 @@ test('extracts four model fields and computes the final call without candidate p
 
 test('B, 布 and 补 trigger extraction without requiring pre-parsed spelling', async () => {
   for (const text of ['这里是 BG5BUT', '这里是 布拉沃高尔夫五', '这里是 补拉窝高尔夫五']) {
-    const value = { ...extraction, selfCallsignEvidence: text, spelledCallsignEvidence: [], spelledCallsigns: [] }
-    const { parser, calls } = makeParser(JSON.stringify(value))
+    const { parser, calls } = makeParser(JSON.stringify({ selfCallsigns: [], spelledCallsigns: [] }))
     assert.equal((await parser.parse(text))?.callsign, undefined)
     assert.equal(calls.length, 1)
   }
 })
 
-test('no current trigger skips both stages even with historical spelling and a high feature match', async () => {
+test('no current trigger skips all decisions even with historical spelling and high features', async () => {
   const { parser, calls } = makeParser(JSON.stringify(extraction))
   const parsed = await parser.parse('收到，您的信号很清楚。', [{ id: 'past', text: TEXT }])
   assert.deepEqual(parsed, {})
-  assert.equal(parser.parseStage2(parsed!, [high]), undefined)
+  assert.equal(parser.resolve(parsed!, [high]), undefined)
   assert.equal(calls.length, 0)
 })
 
-test('Flower correction opens only the gate and is never sent as corrected input', async () => {
+test('Flower correction opens only the gate and raw text is sent unchanged', async () => {
   const raw = 'Flower Golf Five Hotel Echo Zulu，这里 Flower Hotel Four Hotel Yankee X-ray，是否能够抄收？'
-  const value = { selfCallsignEvidence: '这里 Flower Hotel Four Hotel Yankee X-ray', selfCallsign: 'BH4HYX', spelledCallsignEvidence: [{ quote: 'Flower Hotel Four Hotel Yankee X-ray', callsign: 'BH4HYX' }], spelledCallsigns: ['BH4HYX'] }
-  const { parser, calls } = makeParser(JSON.stringify(value))
-  assert.equal((await parser.parse(raw))?.callsign, 'BH4HYX')
+  const { parser, calls } = makeParser(JSON.stringify({ selfCallsigns: [], spelledCallsigns: [] }))
+  await parser.parse(raw)
   const payload = JSON.parse(calls[0]!.body.messages[1]!.content)
   assert.equal(payload.current.text, raw)
   assert.equal(payload.corrected, undefined)
@@ -105,92 +99,94 @@ test('Flower correction opens only the gate and is never sent as corrected input
   assert.equal(payload.featureMatches, undefined)
 })
 
-test('matches a self suffix to complete historical spelling while excluding the current record', async () => {
+test('matches a three-character self suffix to independent historical spelling and excludes the current record', async () => {
   const current = '这里是 XXX，BG5EBE 收到吗？'
-  const value = { ...extraction, selfCallsignEvidence: current, selfCallsign: 'XXX' }
+  const value = { ...compact('XXX'), spelledCallsigns: [{ ...extraction.spelledCallsigns[0]!, sourceId: 'past' }] }
   const { parser, calls } = makeParser(JSON.stringify(value))
   const history = [{ id: 'past', text: TEXT }, { id: 'current', text: current }]
   const metadata = { id: 'current', transmissionId: 'transmission', partIndex: 2 }
-  assert.equal((await parser.parse(current, history, metadata))?.callsign, 'BD5XXX')
-  assert.deepEqual(JSON.parse(calls[0]!.body.messages[1]!.content), { history: [history[0]], current: { ...metadata, text: current } })
+  const parsed = await parser.parse(current, history, metadata)
+  assert.equal(parsed?.callsign, 'BD5XXX')
+  assert.equal(parsed?.algorithm, 'stage1_text')
+  assert.deepEqual(JSON.parse(calls[0]!.body.messages[1]!.content), { current: { ...metadata, text: current }, history: [history[0]] })
 })
 
-test('cleans duplicate, nonverbatim and malformed spelling without changing the self decision', async () => {
-  const value = { ...extraction, spelledCallsignEvidence: [...extraction.spelledCallsignEvidence, ...extraction.spelledCallsignEvidence, { quote: '不存在的原文', callsign: 'BG5BUT' }, { quote: TEXT, callsign: 'BD5X' }], spelledCallsigns: ['BD5XXX', 'BG5BUT', 'BD5X'] }
+test('filters invalid spelling candidates without losing valid evidence', async () => {
+  const value = { ...extraction, spelledCallsigns: [...extraction.spelledCallsigns, { ...extraction.spelledCallsigns[0]!, callsign: 'BG5FGBR' }, { ...extraction.spelledCallsigns[0]!, quote: '不存在的原文', callsign: 'BG5BUT' }] }
   const { parser } = makeParser(JSON.stringify(value))
-  assert.deepEqual((await parser.parse(TEXT))?.extraction, extraction)
+  const parsed = await parser.parse(TEXT)
+  assert.equal(parsed?.callsign, 'BD5XXX')
+  assert.equal(parsed?.extraction?.spelledCallsigns.some(item => item.callsign === 'BG5FGBR'), false)
+  assert.equal(parsed?.prepared?.input.spellings.some(item => item.callsign === 'BG5BUT'), false)
 })
 
-test('rejects non-extraction fields and evidence violations even with a permissive schema', async () => {
-  const permissiveSchema = join(dir, 'permissive-schema.json')
-  writeFileSync(permissiveSchema, JSON.stringify({ ...schema, additionalProperties: true }))
+test('rejects malformed model structure and extra conclusion fields', async () => {
   for (const content of [
-    { ...extraction, selfCallsignEvidence: '这里是模型编造的呼号' },
-    { ...extraction, selfCallsign: null },
-    { ...extraction, selfCallsignEvidence: ' ' },
-    { speaker: 'self', callsign: 'BD5XXX' },
+    { selfCallsigns: null, spelledCallsigns: [] },
     { ...extraction, matchedCallsign: 'BG5BUT' },
-    { ...extraction, message: '规范化文本', risk: { level: 1, reason: '正常' } },
-    { ...extraction, extra: true },
+    { ...extraction, selfCallsigns: [{ ...extraction.selfCallsigns[0], confidence: 'certain' }] },
+    { selfCallsign: 'BG5BUT', spelledCallsigns: [] },
   ]) {
-    const { parser, calls } = makeParser(JSON.stringify(content), { schemaFile: permissiveSchema })
+    const { parser, calls } = makeParser(JSON.stringify(content))
     const result = await parser.parse(TEXT)
     assert.deepEqual(result, {})
-    assert.equal(parser.parseStage2(result!, [high]), undefined)
+    assert.equal(parser.resolve(result!, [high]), undefined)
     assert.equal(calls.length, 1)
   }
 })
 
-test('no spelling requires high confidence and a suffix of at least three characters within one edit', () => {
-  const { parser, calls } = makeParser('{}')
-  for (const self of ['BUT', 'BUD', '5BUD', 'BD5BUD'])
-    assert.equal(parser.parseStage2(partial(self), [high]), 'BG5BUT')
-  for (const self of ['UT', 'BG5G', 'XYZ', 'BAD'])
-    assert.equal(parser.parseStage2(partial(self), [high]), undefined)
-  assert.equal(parser.parseStage2(partial('BUT'), [medium]), undefined)
-  assert.equal(parser.parseStage2(partial(null), [high]), undefined)
-  assert.equal(calls.length, 0)
+test('an LLM self corroborated by features or a tail remains algorithm stage 1', async () => {
+  const { parser, calls } = makeParser(JSON.stringify(compact('BG5BUD')))
+  const parsed = await parser.parse('这里是 BG5BUD')
+  assert.equal(parsed?.callsign, undefined)
+  assert.deepEqual(parser.resolve(parsed!, [medium]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
+  assert.deepEqual(parser.resolve(parsed!, [], [{ type: 'BSS', content: 'BG5BUT/P' }]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
+  assert.equal(calls.length, 1)
 })
 
-test('conflicts require exact full spelling intersection as well as a close self suffix', () => {
-  const { parser } = makeParser('{}')
-  assert.equal(parser.parseStage2(partial('BUD', ['BG5BUT']), [medium]), 'BG5BUT')
-  assert.equal(parser.parseStage2(partial('XYZ', ['BG5BUT']), [high]), undefined)
-  assert.equal(parser.parseStage2(partial('UT', ['BG5BUT']), [high]), undefined)
-  assert.equal(parser.parseStage2(partial('BUD', ['BG5BUV']), [high]), undefined)
-  assert.equal(parser.parseStage2(partial('BUD', ['BD5BUT']), [high]), undefined)
+test('an incomplete self is downgraded and must match exactly when effective confidence is low', async () => {
+  for (const [self, expected] of [['BUT', 'BG5BUT'], ['BUD', undefined], ['UT', undefined]]) {
+    const { parser } = makeParser(JSON.stringify(compact(self!)))
+    const parsed = await parser.parse(`这里是 ${self}，B`)
+    assert.equal(parser.resolve(parsed!, [high])?.callsign, expected)
+    assert.equal(parser.resolve(parsed!, [medium]), undefined)
+  }
 })
 
-test('no-self fallback uses exact spelling with the highest medium/high tier', () => {
-  const { parser } = makeParser('{}')
-  assert.equal(parser.parseStage2(partial(null, ['BG5BUT']), [medium]), 'BG5BUT')
-  assert.equal(parser.parseStage2(partial(null, ['BG5BUD']), [high]), undefined)
-  assert.equal(parser.parseStage2(partial(null, ['BD5BUT']), [high]), undefined)
-  assert.equal(parser.parseStage2(partial(null, ['BG5BUT']), [{ ...high, confidence: 'low' }]), undefined)
+test('only genuinely missing self can use a downgraded feature substitute and becomes stage 2', async () => {
+  const value: CallsignExtraction = { selfCallsigns: [], spelledCallsigns: [pastBut] }
+  const { parser, calls } = makeParser(JSON.stringify(value))
+  const parsed = await parser.parse('BG5EBE收到', [{ id: 'past', text: but }])
+  assert.deepEqual(parser.resolve(parsed!, [high]), { callsign: 'BG5BUT', algorithm: 'stage2_feature' })
+  assert.deepEqual(parser.resolve(parsed!, [medium]), { callsign: 'BG5BUT', algorithm: 'stage2_feature' })
+  assert.equal(parser.resolve(parsed!, [{ ...high, confidence: 'low' }]), undefined)
+  assert.equal(calls.length, 1)
+
+  const invalid = makeParser(JSON.stringify({ ...value, selfCallsigns: [{ ...compact('BG5G1').selfCallsigns[0]! }] }))
+  const invalidParsed = await invalid.parser.parse('这里是 BG5G1', [{ id: 'past', text: but }])
+  assert.equal(invalid.parser.resolve(invalidParsed!, [high]), undefined)
 })
 
-test('never falls back to medium after high fails and requires a unique full call after filtering', () => {
-  const { parser } = makeParser('{}')
-  const close = { callsign: 'BG5BUV', confidence: 'high' } as const
+test('highest tier is selected before matching and ambiguity is not broken by an exact-match preference', async () => {
+  const { parser } = makeParser(JSON.stringify(compact('BG5BUT')))
+  const parsed = await parser.parse('这里是 BG5BUT')
   const far = { callsign: 'BG5XYZ', confidence: 'high' } as const
-  assert.equal(parser.parseStage2(partial('BUD'), [far, medium]), undefined)
-  assert.equal(parser.parseStage2(partial('BUD'), [close, high]), undefined)
-  assert.equal(parser.parseStage2(partial('BUD'), [far, high, high]), 'BG5BUT')
-  assert.equal(parser.parseStage2(partial('BUD', ['BG5BUT', 'BG5XYZ']), [far, high]), 'BG5BUT')
-  assert.equal(parser.parseStage2(partial(null, ['BG5BUT', 'BG5XYZ']), [far, high]), undefined)
-  assert.equal(parser.parseStage2(partial(null, ['BG5BUT']), [far, medium]), undefined)
+  const close = { callsign: 'BG5BUV', confidence: 'high' } as const
+  assert.equal(parser.resolve(parsed!, [far, medium]), undefined)
+  assert.equal(parser.resolve(parsed!, [close, high]), undefined)
+  assert.deepEqual(parser.resolve(parsed!, [far, high, high]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
 })
 
-test('Stage 2 preserves a first-stage match and performs no model requests', async () => {
+test('resolve preserves a direct spelled self and makes no further model requests', async () => {
   const { parser, calls } = makeParser(JSON.stringify(extraction))
   const parsed = await parser.parse(TEXT)
-  assert.equal(parser.parseStage2(parsed!, [high]), 'BD5XXX')
+  assert.deepEqual(parser.resolve(parsed!, [high]), { callsign: 'BD5XXX', algorithm: 'stage1_text' })
   assert.equal(calls.length, 1)
 })
 
 test.todo('known deferred counterexample: no-self intersection can accept an explicit repetition of the other station (TODO.md)')
 
-test('prompt/schema hot reload fails closed instead of using stale or default configuration', async () => {
+test('prompt/schema reload fails closed, including a valid legacy scalar schema', async () => {
   const own = mkdtempSync(join(tmpdir(), 'iaxweb-prompt-reload-'))
   const prompt = join(own, 'prompt.txt')
   const modelSchema = join(own, 'schema.json')
@@ -202,7 +198,9 @@ test('prompt/schema hot reload fails closed instead of using stale or default co
     writeFileSync(prompt, '第二版JSON')
     assert.equal((await parser.parse(TEXT))?.callsign, 'BD5XXX')
     assert.ok(calls[1]!.body.messages[0]!.content.includes('第二版JSON'))
-    for (const invalid of ['', '{', '[]']) {
+    const incompatible = structuredClone(schema)
+    incompatible.properties.selfCallsigns.items.properties.quote = { type: 'number' }
+    for (const invalid of ['', '{', '[]', JSON.stringify({ type: 'object', properties: { selfCallsign: { type: 'string' } } }), JSON.stringify(incompatible)]) {
       writeFileSync(modelSchema, invalid)
       assert.equal(await parser.parse(TEXT), undefined)
     }
@@ -243,8 +241,8 @@ test('sends configurable provider-specific thinking settings with thinking disab
   assert.equal(deepseek.calls[0]!.body.thinking_budget, undefined)
 })
 
-test('schema contains four required extraction fields and forbids a model-provided matchedCallsign', () => {
-  assert.deepEqual(schema.required, ['selfCallsignEvidence', 'spelledCallsignEvidence', 'selfCallsign', 'spelledCallsigns'])
+test('schema contains only the two evidence arrays and no model-provided conclusion', () => {
+  assert.deepEqual(schema.required, ['selfCallsigns', 'spelledCallsigns'])
   assert.equal(schema.properties.matchedCallsign, undefined)
   assert.equal(validateAgainstSchema(extraction, schema), undefined)
   assert.ok(validateAgainstSchema({ ...extraction, matchedCallsign: 'BD5XXX' }, schema))
