@@ -35,9 +35,9 @@ export function publicStatusSnapshot(
   listeners: ReadonlyMap<string, number> = new Map(),
   spotPublishingEnabled?: boolean,
 ): PublicStatusSnapshot {
-  return Object.fromEntries(Object.entries(snapshot).map(([node, status]) => [
+  return Object.fromEntries(Object.keys(snapshot).sort().map(node => [
     node,
-    publicNodeStatus(status, listeners.get(node), spotPublishingEnabled),
+    publicNodeStatus(snapshot[node]!, listeners.get(node), spotPublishingEnabled),
   ]))
 }
 
@@ -92,9 +92,10 @@ function publicNodeStatus(status: NodeStatus, listeners?: number, spotPublishing
 }
 
 function publicConnections(connections: NodeStatusFields['CONNS']): Record<string, PublicConnectionStatus> {
-  return Object.fromEntries(Object.entries(isRecord(connections) ? connections : {})
-    .filter(([, connection]) => isRecord(connection) && connection.CSTATE === 'ESTABLISHED')
-    .map(([node]) => [node, { CSTATE: 'ESTABLISHED' }]))
+  const peers = isRecord(connections) ? connections : {}
+  return Object.fromEntries(Object.keys(peers).sort()
+    .filter(node => isRecord(peers[node]) && peers[node].CSTATE === 'ESTABLISHED')
+    .map(node => [node, { CSTATE: 'ESTABLISHED' }]))
 }
 
 function defaultNodeStatus(node: string, definition?: NodeDefinition): NodeStatus {

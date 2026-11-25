@@ -33,7 +33,7 @@ export class Allmon3StatusService {
     this.expectedNodes = new Set(Object.keys(options.nodes))
     this.refreshIntervalMs = options.refreshIntervalMs
     this.requestTimeoutMs = options.requestTimeoutMs
-    this.notifier = new SnapshotNotifier(options.onChange)
+    this.notifier = new SnapshotNotifier(snapshot => options.onChange(this.snapshot ?? snapshot))
     this.api = new Allmon3ApiClient(options.baseUrl, options.requestTimeoutMs)
   }
 

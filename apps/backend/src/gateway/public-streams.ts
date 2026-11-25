@@ -1,4 +1,4 @@
-import type { AudioState } from '@iaxweb/contracts'
+import type { AudioState, PublicNodeStatus, PublicStatusRuntimeSnapshot, StatusStreamMessage } from '@iaxweb/contracts'
 import type { WebSocket } from 'ws'
 import type { StatusSnapshot } from '../allmon3/index.js'
 import type { SpotEvent } from '../spots/spot-store.js'
@@ -15,9 +15,15 @@ interface PublicStreamsOptions {
   spotPublishingEnabled?: boolean
 }
 
+interface StatusFrames {
+  metadata: string
+  snapshot: string
+  state: string
+}
+
 export class PublicStreams {
   private readonly audioClients = new Map<string, Set<WebSocket>>()
-  private readonly statusClients = new Set<WebSocket>()
+  private readonly statusClients = new Map<WebSocket, StatusFrames | undefined>()
   private readonly audioListeners = new Map<string, number>()
 
   constructor(private readonly options: PublicStreamsOptions) {}
@@ -50,10 +56,10 @@ export class PublicStreams {
   }
 
   listenToStatus(client: WebSocket, snapshot: StatusSnapshot | undefined): void {
-    this.statusClients.add(client)
+    this.statusClients.set(client, undefined)
     client.once('close', () => this.statusClients.delete(client))
     if (snapshot)
-      client.send(this.serializeSnapshot(snapshot))
+      this.sendStatusSnapshot(client, this.statusFrames(snapshot))
   }
 
   publishAudio(nodeId: string, data: Uint8Array | string, binary: boolean): void {
@@ -83,22 +89,49 @@ export class PublicStreams {
   }
 
   publishSnapshot(snapshot: StatusSnapshot): void {
-    this.sendStatus(this.serializeSnapshot(snapshot))
+    if (this.statusClients.size === 0)
+      return
+
+    const frames = this.statusFrames(snapshot)
+    for (const [client, previous] of this.statusClients)
+      this.sendStatusSnapshot(client, frames, previous)
   }
 
   publishSpot(spot: SpotEvent): void {
-    this.sendStatus(JSON.stringify({ type: 'spot', ...spot }))
-  }
-
-  private serializeSnapshot(snapshot: StatusSnapshot): string {
-    return JSON.stringify(publicStatusSnapshot(snapshot, this.audioListeners, this.options.spotPublishingEnabled))
-  }
-
-  private sendStatus(message: string): void {
-    for (const client of this.statusClients) {
+    const message = JSON.stringify({ type: 'spot', ...spot })
+    for (const client of this.statusClients.keys()) {
       if (client.readyState === client.OPEN)
         client.send(message)
     }
+  }
+
+  private statusFrames(snapshot: StatusSnapshot): StatusFrames {
+    const nodes = publicStatusSnapshot(snapshot, this.audioListeners, this.options.spotPublishingEnabled)
+    const metadata: Record<string, Omit<PublicNodeStatus, keyof PublicStatusRuntimeSnapshot[string]>> = {}
+    const runtime: PublicStatusRuntimeSnapshot = {}
+    for (const [nodeId, status] of Object.entries(nodes)) {
+      const { CONNS, LAST_TX_AT, LISTENERS, ONLINE, TX_SOURCE, ...properties } = status
+      metadata[nodeId] = properties
+      runtime[nodeId] = { CONNS, LAST_TX_AT, LISTENERS, ONLINE, TX_SOURCE }
+    }
+
+    return {
+      metadata: JSON.stringify(metadata),
+      snapshot: JSON.stringify({ type: 'snapshot', nodes } satisfies StatusStreamMessage),
+      state: JSON.stringify({ type: 'state', nodes: runtime } satisfies StatusStreamMessage),
+    }
+  }
+
+  private sendStatusSnapshot(client: WebSocket, frames: StatusFrames, previous?: StatusFrames): void {
+    if (client.readyState !== client.OPEN)
+      return
+
+    // A new connection can see a change before the scheduled broadcast delivers it.
+    if (previous?.snapshot === frames.snapshot)
+      return
+
+    client.send(previous?.metadata === frames.metadata ? frames.state : frames.snapshot)
+    this.statusClients.set(client, frames)
   }
 
   private updateListenerCount(nodeId: string, source: AudioSource, clients: ReadonlySet<WebSocket>): void {

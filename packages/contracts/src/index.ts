@@ -10,10 +10,12 @@ import type {
   loginSchema,
   persistedRecordSchema,
   publicStatsSchema,
+  publicStatusRuntimeSnapshotSchema,
   publicStatusSnapshotSchema,
   radioSignalsSchema,
   speakerRecognitionSchema,
   spotEventSchema,
+  statusStreamMessageSchema,
   updateUserSchema,
 } from './schemas.js'
 
@@ -25,6 +27,9 @@ export type AdminUsersPage = z.output<typeof adminUsersPageSchema>
 export type PublicConnectionStatus = NonNullable<PublicNodeStatus['CONNS']>[string]
 export type PublicNodeStatus = PublicStatusSnapshot[string]
 export type PublicStatusSnapshot = z.output<typeof publicStatusSnapshotSchema>
+export type PublicNodeRuntimeStatus = PublicStatusRuntimeSnapshot[string]
+export type PublicStatusRuntimeSnapshot = z.output<typeof publicStatusRuntimeSnapshotSchema>
+export type StatusStreamMessage = z.output<typeof statusStreamMessageSchema>
 export type SpotEvent = z.output<typeof spotEventSchema>
 export type PublicStats = z.output<typeof publicStatsSchema>
 export type StatsDay = PublicStats['today']['day']
@@ -78,5 +83,6 @@ export {
   speakerRecognitionSchema,
   spotEventSchema,
   spotHistorySchema,
+  statusStreamMessageSchema,
   updateUserSchema,
 } from './schemas.js'

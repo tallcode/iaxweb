@@ -77,7 +77,20 @@ const publicNodeStatusSchema = z.object({
   TX_SOURCE: transmitSourceSchema.optional(),
   TYPE: nodeTypeSchema.optional(),
 })
-export const publicStatusSnapshotSchema = z.record(z.string().regex(/^\d+$/), publicNodeStatusSchema)
+const publicNodeIdSchema = z.string().regex(/^\d+$/)
+export const publicStatusSnapshotSchema = z.record(publicNodeIdSchema, publicNodeStatusSchema)
+const publicNodeRuntimeStatusSchema = publicNodeStatusSchema.pick({
+  CONNS: true,
+  LAST_TX_AT: true,
+  LISTENERS: true,
+  ONLINE: true,
+  TX_SOURCE: true,
+}).strict()
+export const publicStatusRuntimeSnapshotSchema = z.record(publicNodeIdSchema, publicNodeRuntimeStatusSchema)
+export const statusStreamMessageSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('snapshot'), nodes: publicStatusSnapshotSchema }),
+  z.object({ type: z.literal('state'), nodes: publicStatusRuntimeSnapshotSchema }),
+])
 const callsign = z.string().regex(CALLSIGN_PATTERN).nullable()
 const manualCallsign = z.string().regex(MANUAL_CALLSIGN_PATTERN).nullable()
 const radioSignalSchema = z.object({

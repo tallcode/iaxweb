@@ -1,5 +1,5 @@
-import type { PublicStatusSnapshot, SpotEvent } from '@iaxweb/contracts'
-import { publicStatusSnapshotSchema, spotEventSchema } from '@iaxweb/contracts'
+import type { PublicStatusRuntimeSnapshot, PublicStatusSnapshot, SpotEvent } from '@iaxweb/contracts'
+import { spotEventSchema, statusStreamMessageSchema } from '@iaxweb/contracts'
 import { ReconnectingWebSocket } from './reconnecting-websocket'
 
 interface StatusStreamOptions {
@@ -14,11 +14,13 @@ interface StatusStreamOptions {
 export class StatusStreamClient {
   private readonly connection: ReconnectingWebSocket
   private expired = false
+  private fullSnapshot: PublicStatusSnapshot | undefined
 
   constructor(options: StatusStreamOptions) {
     this.connection = new ReconnectingWebSocket('/status', {
       delays: [1_000, 2_000, 4_000, 8_000, 16_000, 30_000],
       onDisconnect: (failures) => {
+        this.fullSnapshot = undefined
         options.onConnecting()
         if (failures >= 5 && !this.expired) {
           this.expired = true
@@ -35,6 +37,7 @@ export class StatusStreamClient {
   }
 
   stop(): void {
+    this.fullSnapshot = undefined
     this.connection.stop()
   }
 
@@ -52,19 +55,31 @@ export class StatusStreamClient {
       return
     }
 
-    if (isSpot(parsed)) {
-      this.connection.markHealthy()
-      this.expired = false
-      options.onSpot?.(parsed)
+    const spot = spotEventSchema.safeParse(parsed)
+    if (spot.success && spot.data.type === 'spot') {
+      this.markHealthy()
+      options.onSpot?.(spot.data)
+      return
     }
-    else if (isSnapshot(parsed)) {
-      this.connection.markHealthy()
-      this.expired = false
-      options.onSnapshot(parsed)
-    }
-    else {
+
+    const message = statusStreamMessageSchema.safeParse(parsed).data
+    if (message?.type === 'snapshot')
+      this.fullSnapshot = message.nodes
+    const snapshot = message?.type === 'state'
+      ? this.fullSnapshot && mergeRuntimeSnapshot(this.fullSnapshot, message.nodes)
+      : message?.nodes
+    if (!snapshot) {
       options.onInvalidMessage()
+      return
     }
+
+    this.markHealthy()
+    options.onSnapshot(snapshot)
+  }
+
+  private markHealthy(): void {
+    this.connection.markHealthy()
+    this.expired = false
   }
 }
 
@@ -81,10 +96,18 @@ export function markSnapshotOffline(snapshot: PublicStatusSnapshot): PublicStatu
   ]))
 }
 
-function isSnapshot(value: unknown): value is PublicStatusSnapshot {
-  return publicStatusSnapshotSchema.safeParse(value).success
-}
+function mergeRuntimeSnapshot(snapshot: PublicStatusSnapshot, runtime: PublicStatusRuntimeSnapshot): PublicStatusSnapshot | undefined {
+  if (Object.keys(snapshot).length !== Object.keys(runtime).length)
+    return
 
-function isSpot(value: unknown): value is SpotEvent {
-  return spotEventSchema.safeParse(value).success && (value as SpotEvent).type === 'spot'
+  const merged: PublicStatusSnapshot = {}
+  for (const [nodeId, node] of Object.entries(snapshot)) {
+    const state = runtime[nodeId]
+    if (!state)
+      return
+
+    const { CONNS, LAST_TX_AT, LISTENERS, ONLINE, TX_SOURCE, ...metadata } = node
+    merged[nodeId] = { ...metadata, ...state }
+  }
+  return merged
 }

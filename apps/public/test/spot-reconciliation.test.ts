@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { SpotEvent } from '@iaxweb/contracts'
+import type { SpotEvent, StatusStreamMessage } from '@iaxweb/contracts'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, expect, it, vi } from 'vitest'
 import { useStatusStore } from '../src/stores/status-store'
@@ -28,25 +28,35 @@ it('reconciles on reconnect and replays corrections received during a stale hist
   vi.stubGlobal('fetch', fetchMock)
   setActivePinia(createPinia())
   const store = useStatusStore()
-  const snapshot = () => new MessageEvent('message', { data: JSON.stringify({ 1900: { AI: true } }) })
-  const send = (spot: SpotEvent) => sockets.at(-1)!.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ ...spot, type: 'spot' }) }))
+  const snapshot: StatusStreamMessage = {
+    type: 'snapshot',
+    nodes: { 1900: { AI: true, NAME: 'Hub', ONLINE: false, LISTENERS: 2 } },
+  }
+  const runtime: StatusStreamMessage = { type: 'state', nodes: { 1900: { ONLINE: true } } }
+  const send = (message: SpotEvent | StatusStreamMessage) => sockets.at(-1)!.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(message) }))
+  const sendSpot = (spot: SpotEvent) => send({ ...spot, type: 'spot' })
   try {
     store.startStatusStream()
     sockets[0]!.dispatchEvent(new Event('open'))
-    sockets[0]!.dispatchEvent(snapshot())
+    send(snapshot)
+    send(runtime)
+    expect(store.statusSnapshot).toEqual({ 1900: { AI: true, NAME: 'Hub', ONLINE: true } })
     await vi.waitFor(() => expect(store.recentSpots).toHaveLength(1))
     sockets[0]!.dispatchEvent(new Event('close'))
     await vi.advanceTimersByTimeAsync(1000)
     sockets[1]!.dispatchEvent(new Event('open'))
-    sockets[1]!.dispatchEvent(snapshot())
+    send(runtime)
+    expect(store.connectionState).toBe('invalid-data')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    send(snapshot)
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    send({ ...first, callsign: 'N0CALL' })
-    send({ ...first, id: 'second', callsign: 'BG5BBB' })
+    sendSpot({ ...first, callsign: 'N0CALL' })
+    sendSpot({ ...first, id: 'second', callsign: 'BG5BBB' })
     resolveHistory(Response.json([first]))
     await vi.waitFor(() => expect(store.recentSpots.map(spot => spot.callsign)).toEqual(['BG5BBB']))
 
-    sockets[1]!.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ 1900: { AI: true, AI_SPOT: false } }) }))
-    send(first)
+    send({ type: 'snapshot', nodes: { 1900: { AI: true, AI_SPOT: false } } })
+    sendSpot(first)
     expect(store.aiSpotEnabled).toBe(false)
     expect(store.recentSpots).toHaveLength(0)
     expect(fetchMock).toHaveBeenCalledTimes(2)
