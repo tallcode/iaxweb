@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 export function recordingPath(directory: string, id: string, capturedAt: string): string {
   const recordedAt = new Date(capturedAt)
   if (Number.isNaN(recordedAt.getTime()))
-    throw new Error(`Invalid segment timestamp: ${capturedAt}`)
+    throw new RangeError(`Invalid segment timestamp: ${capturedAt}`)
   if (!validSegmentId(id))
     throw new Error(`Invalid segment id: ${id}`)
   const day = recordedAt.toISOString().slice(0, 10).replaceAll('-', '')

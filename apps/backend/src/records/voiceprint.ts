@@ -9,7 +9,7 @@ export function decodeVoiceprint(bytes: unknown): Float32Array {
   let norm = 0
   for (const value of embedding) {
     if (!Number.isFinite(value))
-      throw new Error('Non-finite stored voiceprint')
+      throw new RangeError('Non-finite stored voiceprint')
     norm += value * value
   }
   if (!(norm > 0))
@@ -29,7 +29,7 @@ export function encodeVoiceprint(voiceprint: Voiceprint): Uint8Array | null {
   for (let i = 0; i < SPEAKER_DIMENSIONS; i++) {
     const value = voiceprint.embedding[i]!
     if (!Number.isFinite(value))
-      throw new Error('Non-finite voiceprint value')
+      throw new RangeError('Non-finite voiceprint value')
     norm += value * value
     view.setFloat32(i * 4, value, true)
   }

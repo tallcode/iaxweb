@@ -6,6 +6,8 @@ export default antfu({
   typescript: true,
   vue: true,
   rules: {
+    // Keep the repository's existing line-break style.
+    'antfu/reasonable-newline': 'off',
     'no-console': 'off',
     'test/no-import-node-test': 'off',
   },

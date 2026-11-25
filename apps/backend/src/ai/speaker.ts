@@ -51,7 +51,7 @@ export class SpeakerExtractor {
       return Promise.resolve({ status: 'unavailable', version: SPEAKER_VERSION, reason: SPEAKER_TOO_LONG_REASON })
     return this.enqueue({ operation: 'extract', samples, qualityApproved }, signal, measurements).then((result) => {
       if (Array.isArray(result))
-        throw new Error('Invalid speaker extraction response')
+        throw new TypeError('Invalid speaker extraction response')
       return result
     })
   }
@@ -68,7 +68,7 @@ export class SpeakerExtractor {
     }
     return this.enqueue(request, signal).then((result) => {
       if (!Array.isArray(result))
-        throw new Error('Invalid speaker reference response')
+        throw new TypeError('Invalid speaker reference response')
       return result
     })
   }
