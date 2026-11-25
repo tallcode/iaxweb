@@ -1,7 +1,7 @@
 import type { PublicStatusSnapshot } from '@iaxweb/contracts'
 import { describe, expect, it } from 'vitest'
 import { isFaviconTransmission } from '../src/composables/use-transmission-favicon'
-import { mapStates } from '../src/services/map-county-status'
+import { mapRepeaterMarkers } from '../src/services/map-county-status'
 import { MAP_MAX_ZOOM, mapViewBox, panMapViewport, zoomMapViewport, zoomMapViewportTowardCenter } from '../src/services/map-viewport'
 import { ReconnectingWebSocket } from '../src/services/reconnecting-websocket'
 import { repeaterSummaryDots } from '../src/services/status-presentation'
@@ -189,23 +189,31 @@ describe('transmission favicon', () => {
   })
 })
 
-describe('map county states', () => {
-  it('marks only repeater counties and gives transmitting repeaters priority', () => {
-    const states = mapStates({
+describe('map county markers', () => {
+  it('uses the callsign and state of the highest-priority repeater in each county', () => {
+    const markers = mapRepeaterMarkers({
       1801: { GB: '156330481', ONLINE: true, TX_SOURCE: 'remote', TYPE: 'REPEATER' },
-      1802: { GB: '156330424', ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
-      1803: { GB: '156330482', ONLINE: true, TX_SOURCE: 'system', TYPE: 'REPEATER' },
+      1802: { GB: '156330424', NAME: 'BR5AO', ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+      1803: { GB: '156330482', NAME: 'BR5AR', ONLINE: false, TYPE: 'REPEATER' },
       1901: { GB: '156330106', ONLINE: true, TX_SOURCE: null, TYPE: 'REPEATER' },
       1902: { GB: '156330203', ONLINE: false, TX_SOURCE: 'system', TYPE: 'REPEATER' },
       1903: { GB: '156330481', ONLINE: true, TX_SOURCE: 'local', TYPE: 'HUB' },
-      1904: { GB: '156330424', ONLINE: true, TX_SOURCE: null, TYPE: 'REPEATER' },
-    })
+      1904: { GB: '156330424', NAME: 'BR5ZZ', ONLINE: true, TX_SOURCE: 'system', TYPE: 'REPEATER' },
+    }, [
+      { gb: '156330481', name: '海宁市', center: [0, 0], path: '' },
+      { gb: '156330424', name: '海盐县', center: [1, 0], path: '' },
+      { gb: '156330482', name: '平湖市', center: [2, 0], path: '' },
+      { gb: '156330499', name: '无中继区县', center: [3, 0], path: '' },
+      { gb: '156330106', name: '西湖区', center: [4, 0], path: '' },
+      { gb: '156330203', name: '海曙区', center: [5, 0], path: '' },
+    ])
 
-    expect(states.get('156330481')).toBe('remote')
-    expect(states.get('156330424')).toBe('local')
-    expect(states.get('156330482')).toBe('system')
-    expect(states.has('156330499')).toBe(false)
-    expect(states.get('156330106')).toBe('online')
-    expect(states.get('156330203')).toBe('offline')
+    expect(markers.map(({ name, state }) => [name, state])).toEqual([
+      ['海宁市', 'remote'],
+      ['BR5AO', 'local'],
+      ['BR5AR', 'offline'],
+      ['西湖区', 'online'],
+      ['海曙区', 'offline'],
+    ])
   })
 })

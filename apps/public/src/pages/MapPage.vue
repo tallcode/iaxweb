@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { Geometry } from '../services/map-geometry'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref, shallowReactive, watch } from 'vue'
+import { computed, onMounted, shallowReactive } from 'vue'
 import zhejiangUrl from '../../assets/zhejiang.geojson?url'
+import MapCoverageNotice from '../components/MapCoverageNotice.vue'
 import { useCountyMap } from '../composables/use-county-map'
 import { useMapInteraction } from '../composables/use-map-interaction'
 import { mapRepeaterMarkers } from '../services/map-county-status'
@@ -21,32 +22,21 @@ const visibleSixDigitGridLabels = computed(() => showSixDigitGridLabels.value ? 
 const sixDigitGridPaths = computed(() => createGridPaths(gridContext.value, SIX_DIGIT_LONGITUDE_STEP, SIX_DIGIT_LATITUDE_STEP))
 const gridPaths = computed(() => createGridPaths(gridContext.value))
 const gridLabels = computed(() => createGridLabels(gridContext.value))
-const repeaterMarkers = computed(() => mapRepeaterMarkers(statusSnapshot.value, countyShapes.value))
+const repeaterMarkers = computed(() => mapRepeaterMarkers(statusSnapshot.value, countyShapes.value).map(marker => ({
+  ...marker,
+  coverage: coverageTarget(marker.name, marker.key),
+})))
 const markerRadius = computed(() => 6.5 * canvasSize.value.width / (renderedSize.value.width * viewport.value.zoom))
-const coverageCallsigns = ['BR5AI', 'BR5BB', 'BR5AF', 'BR5AO'] as const
-const COVERAGE_LOADING_DELAY_MS = 300
-const COVERAGE_LOADING_MINIMUM_MS = 1_000
-type CoverageCallsign = (typeof coverageCallsigns)[number]
+const coverageButtons = ['BR5AI', 'BR5BB', 'BR5AF', 'BR5AO'].map(callsign => coverageTarget(callsign))
+interface CoverageTarget { key: string, name: string, callsign: string | undefined }
 interface CoverageBand { dbm: number, fillOpacity: number, opacity: number, path: string }
-type CoverageLayer = { state: 'loading' | 'failed' } | { state: 'ready', bands: CoverageBand[] }
+type CoverageLayer = { name: string } & ({ state: 'loading' | 'unavailable' | 'failed' } | { state: 'ready', bands: CoverageBand[] })
 
-const activeCoverage = shallowReactive(new Set<CoverageCallsign>())
-const coverageLayers = shallowReactive<Partial<Record<CoverageCallsign, CoverageLayer>>>({})
-const visibleCoverage = computed(() => coverageCallsigns.flatMap((callsign) => {
-  const layer = coverageLayers[callsign]
-  return activeCoverage.has(callsign) && layer?.state === 'ready' ? [{ callsign, bands: layer.bands }] : []
-}))
-const coverageLoadingNotices = coverageCallsigns.map(callsign => ({
-  callsign,
-  visible: useCoverageLoadingNotice(() => activeCoverage.has(callsign) && coverageLayers[callsign]?.state === 'loading'),
-}))
-const coverageNotices = computed(() => coverageLoadingNotices.flatMap(({ callsign, visible }) => {
-  if (visible.value)
-    return [{ callsign, message: '正在加载覆盖图层…' }]
-  if (activeCoverage.has(callsign) && coverageLayers[callsign]?.state === 'failed')
-    return [{ callsign, message: '覆盖图层加载失败' }]
-  return []
-}))
+const activeCoverage = shallowReactive(new Set<string>())
+const coverageLayers = shallowReactive(new Map<string, CoverageLayer>())
+const visibleCoverage = computed(() => [...coverageLayers].flatMap(([key, layer]) =>
+  activeCoverage.has(key) && layer.state === 'ready' ? [{ callsign: key, bands: layer.bands }] : [],
+))
 const coverageScale = computed(() => visibleCoverage.value[0]?.bands)
 
 onMounted(async () => {
@@ -54,36 +44,30 @@ onMounted(async () => {
   emit('pageReady')
 })
 
-function useCoverageLoadingNotice(isLoading: () => boolean) {
-  const visible = ref(false)
-  let shownAt = 0
-
-  watch(isLoading, (loading, _, onCleanup) => {
-    if (loading === visible.value)
-      return
-    const delay = loading
-      ? COVERAGE_LOADING_DELAY_MS
-      : Math.max(0, Math.ceil(shownAt + COVERAGE_LOADING_MINIMUM_MS - performance.now()))
-    const timer = setTimeout(() => {
-      if (loading)
-        shownAt = performance.now()
-      visible.value = loading
-    }, delay)
-    onCleanup(() => clearTimeout(timer))
-  })
-  return visible
+function coverageTarget(name: string, fallbackKey = name): CoverageTarget {
+  const normalized = name.trim().toUpperCase()
+  const callsign = /^[A-Z0-9][\w-]{0,31}$/.test(normalized) ? normalized : undefined
+  return { key: callsign ?? fallbackKey, name, callsign }
 }
 
-async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
-  if (activeCoverage.delete(callsign))
+async function toggleCoverage({ key, name, callsign }: CoverageTarget): Promise<void> {
+  if (activeCoverage.delete(key))
     return
-  activeCoverage.add(callsign)
-  const state = coverageLayers[callsign]?.state
+  activeCoverage.add(key)
+  if (!callsign) {
+    coverageLayers.set(key, { name, state: 'unavailable' })
+    return
+  }
+  const state = coverageLayers.get(key)?.state
   if (state === 'ready' || state === 'loading')
     return
-  coverageLayers[callsign] = { state: 'loading' }
+  coverageLayers.set(key, { name, state: 'loading' })
   try {
     const response = await fetch(`/api/coverage/${callsign}.geojson`)
+    if (response.status === 404) {
+      coverageLayers.set(key, { name, state: 'unavailable' })
+      return
+    }
     if (!response.ok)
       throw new Error(`Unable to load coverage: ${response.status}`)
     const data = await response.json() as { features: { geometry: Geometry, properties: { dbm: number } }[] }
@@ -99,10 +83,10 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
         previousOpacity = opacity
         return { dbm: properties.dbm, fillOpacity, opacity, path: geometryPath(geometry) }
       })
-    coverageLayers[callsign] = { state: 'ready', bands }
+    coverageLayers.set(key, { name, state: 'ready', bands })
   }
   catch {
-    coverageLayers[callsign] = { state: 'failed' }
+    coverageLayers.set(key, { name, state: 'failed' })
   }
 }
 </script>
@@ -114,11 +98,12 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
       class="zhejiang-map"
       :class="{ 'has-coverage': visibleCoverage.length > 0, 'is-dragging': isDragging, 'is-zoomed': viewport.zoom > 1 }"
       :viewBox="viewportViewBox"
-      role="img"
+      role="group"
       aria-label="浙江省县级行政区划地图，可使用鼠标滚轮缩放，放大后可拖动"
-      @lostpointercapture="handlePointerEnd"
+      @lostpointercapture.self="handlePointerEnd"
       @pointercancel="handlePointerEnd"
       @pointerdown="handlePointerDown"
+      @pointerleave="handlePointerEnd"
       @pointermove="handlePointerMove"
       @pointerup="handlePointerEnd"
       @wheel="handleMapWheel"
@@ -163,6 +148,10 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
           :cx="marker.center[0]"
           :cy="marker.center[1]"
           :r="markerRadius"
+          role="button"
+          :aria-label="`${marker.name} · ${repeaterStateLabels[marker.state]} · 覆盖预测`"
+          :aria-pressed="activeCoverage.has(marker.coverage.key)"
+          @click="toggleCoverage(marker.coverage)"
         >
           <title>{{ marker.name }} · {{ repeaterStateLabels[marker.state] }}</title>
         </circle>
@@ -172,14 +161,14 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
       <div class="map-coverage-buttons" role="group" aria-label="中继覆盖预测">
         <span class="map-coverage-label" aria-hidden="true">覆盖预测</span>
         <button
-          v-for="callsign in coverageCallsigns"
-          :key="callsign"
+          v-for="button in coverageButtons"
+          :key="button.key"
           type="button"
-          :aria-label="`${callsign} 覆盖预测`"
-          :aria-pressed="activeCoverage.has(callsign)"
-          @click="toggleCoverage(callsign)"
+          :aria-label="`${button.name} 覆盖预测`"
+          :aria-pressed="activeCoverage.has(button.key)"
+          @click="toggleCoverage(button)"
         >
-          {{ callsign }}
+          {{ button.name }}
         </button>
       </div>
       <div v-if="coverageScale" class="map-coverage-scale" aria-label="预测信号强度">
@@ -189,9 +178,12 @@ async function toggleCoverage(callsign: CoverageCallsign): Promise<void> {
         </div>
         <span>{{ coverageScale.at(-1)?.dbm }} dBm</span>
       </div>
-      <p v-for="{ callsign, message } in coverageNotices" :key="callsign" role="status">
-        {{ activeCoverage.size > 1 || !activeCoverage.has(callsign) ? `${callsign} · ` : '' }}{{ message }}
-      </p>
+      <MapCoverageNotice
+        v-for="[key, layer] in coverageLayers"
+        :key="key"
+        :name="layer.name"
+        :state="activeCoverage.has(key) ? layer.state : 'inactive'"
+      />
     </div>
   </main>
 </template>

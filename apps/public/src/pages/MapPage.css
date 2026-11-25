@@ -190,11 +190,17 @@
   stroke: var(--marker-color);
   stroke-opacity: 0.4;
   stroke-width: 4;
+  outline: none;
   filter: drop-shadow(0 1px 1px rgb(66 39 8 / 75%));
+  cursor: pointer;
   vector-effect: non-scaling-stroke;
   transition:
     fill 160ms ease,
     stroke 160ms ease;
+}
+
+.is-dragging .repeater-marker {
+  cursor: grabbing;
 }
 
 .repeater-marker.online {

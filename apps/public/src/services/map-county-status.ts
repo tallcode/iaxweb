@@ -11,6 +11,11 @@ interface RepeaterMarker {
   state: RepeaterState
 }
 
+interface CountyRepeaterStatus {
+  name: string | undefined
+  state: RepeaterState
+}
+
 const statePriority: Record<RepeaterState, number> = {
   offline: 0,
   online: 1,
@@ -19,26 +24,26 @@ const statePriority: Record<RepeaterState, number> = {
   local: 4,
 }
 
-export function mapStates(snapshot: PublicStatusSnapshot): ReadonlyMap<string, RepeaterState> {
-  const states = new Map<string, RepeaterState>()
+function mapCountyStatuses(snapshot: PublicStatusSnapshot): ReadonlyMap<string, CountyRepeaterStatus> {
+  const statuses = new Map<string, CountyRepeaterStatus>()
   for (const node of Object.values(snapshot)) {
     if (node.TYPE !== 'REPEATER' || !node.GB || node.LOCATION)
       continue
     const state = repeaterState(node)
-    const current = states.get(node.GB)
-    if (!current || statePriority[state] > statePriority[current])
-      states.set(node.GB, state)
+    const current = statuses.get(node.GB)
+    if (!current || statePriority[state] > statePriority[current.state])
+      statuses.set(node.GB, { name: node.NAME, state })
   }
-  return states
+  return statuses
 }
 
 export function mapRepeaterMarkers(snapshot: PublicStatusSnapshot, counties: readonly CountyShape[]): RepeaterMarker[] {
-  const countyStates = mapStates(snapshot)
+  const countyStatuses = mapCountyStatuses(snapshot)
   const markers: RepeaterMarker[] = []
   for (const { center, gb, name } of counties) {
-    const state = countyStates.get(gb)
-    if (center && state)
-      markers.push({ center, key: `county-${gb}`, name, state })
+    const status = countyStatuses.get(gb)
+    if (center && status)
+      markers.push({ center, key: `county-${gb}`, name: status.name ?? name, state: status.state })
   }
   for (const [id, node] of Object.entries(snapshot)) {
     if (node.TYPE !== 'REPEATER' || !node.LOCATION)

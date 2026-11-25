@@ -5,6 +5,7 @@ import { mapViewBox, panMapViewport, zoomMapViewport, zoomMapViewportTowardCente
 
 interface DragState { clientX: number, clientY: number, pointerId: number }
 const WHEEL_ZOOM_SENSITIVITY = 0.00225
+const MARKER_DRAG_THRESHOLD_PX = 5
 
 export function useMapInteraction() {
   const canvasSize = ref<MapCanvasSize>({ height: MAP_HEIGHT, width: MAP_WIDTH })
@@ -59,9 +60,12 @@ export function useMapInteraction() {
     const element = mapElement.value
     if (!element)
       return
+    dragState = { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId }
+    // Keep the marker as the click target until movement confirms a drag.
+    if (event.target instanceof Element && event.target.closest('.repeater-marker'))
+      return
     event.preventDefault()
     element.setPointerCapture(event.pointerId)
-    dragState = { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId }
     isDragging.value = true
   }
 
@@ -71,6 +75,12 @@ export function useMapInteraction() {
     const screenMatrix = element?.getScreenCTM()
     if (!previous || previous.pointerId !== event.pointerId || !element || !screenMatrix)
       return
+    if (!isDragging.value) {
+      if (Math.hypot(event.clientX - previous.clientX, event.clientY - previous.clientY) < MARKER_DRAG_THRESHOLD_PX)
+        return
+      element.setPointerCapture(event.pointerId)
+      isDragging.value = true
+    }
     event.preventDefault()
     const inverseMatrix = screenMatrix.inverse()
     const previousPoint = element.createSVGPoint()
