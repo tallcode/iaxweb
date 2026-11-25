@@ -509,11 +509,11 @@ describe('record callsign editing', () => {
     const wrapper = mount(RecordsPage)
     await flushPromises()
     expect(wrapper.findAll('thead th').map(header => header.text()).slice(3, 5)).toEqual(['来源中继', '主叫'])
-    expect(wrapper.findAll('tbody tr').map(row => row.findAll('td')[3]?.text())).toEqual(['BR5AI', '1902', '未知'])
+    expect(wrapper.findAll('tbody tr').map(row => row.findAll('td')[3]?.text())).toEqual(['BR5AI', '1902', '-'])
     expect(wrapper.findAll('article').map((card) => {
       const label = card.findAll('span').find(span => span.text() === '来源中继')
       return label?.element.nextElementSibling?.textContent
-    })).toEqual(['BR5AI', '1902', '未知'])
+    })).toEqual(['BR5AI', '1902', '-'])
     expect(wrapper.find('button[aria-label="编辑被叫呼号"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('BG5BBB')
     wrapper.unmount()

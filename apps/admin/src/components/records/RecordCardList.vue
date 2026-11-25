@@ -5,6 +5,7 @@ import RecognitionEditor from './RecognitionEditor.vue'
 import RecordCallsign from './RecordCallsign.vue'
 import RecordDuration from './RecordDuration.vue'
 import ReviewStar from './ReviewStar.vue'
+import SourceRepeater from './SourceRepeater.vue'
 import SpeakerRecognitionButton from './SpeakerRecognitionButton.vue'
 
 const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback, requestSpeakerRecognition, actionsDisabled, recognitionProps, callsignProps, reviewProps } = useRecordRows('card')
@@ -31,7 +32,7 @@ const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback,
       </div>
       <div class="mt-4 flex gap-4 text-sm">
         <div class="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <span class="shrink-0 self-start text-xs leading-8 text-slate-500">来源中继</span><span class="wrap-anywhere text-slate-200">{{ record.sourceRepeaterName ?? record.sourceRepeaterId ?? '未知' }}</span>
+          <span class="shrink-0 self-start text-xs leading-8 text-slate-500">来源中继</span><SourceRepeater :value="record.sourceRepeaterName ?? record.sourceRepeaterId" />
         </div>
         <div class="flex min-w-0 flex-1 items-center gap-2 text-left">
           <span class="shrink-0 self-start text-xs leading-8 text-slate-500">主叫</span><RecordCallsign v-bind="callsignProps(record, 'caller')" />

@@ -5,6 +5,7 @@ import RecognitionEditor from './RecognitionEditor.vue'
 import RecordCallsign from './RecordCallsign.vue'
 import RecordDuration from './RecordDuration.vue'
 import ReviewStar from './ReviewStar.vue'
+import SourceRepeater from './SourceRepeater.vue'
 import SpeakerRecognitionButton from './SpeakerRecognitionButton.vue'
 
 const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback, requestSpeakerRecognition, requestDeletion, actionsDisabled, recognitionProps, callsignProps, reviewProps } = useRecordRows('table')
@@ -39,8 +40,8 @@ const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback,
             <RecordDuration :duration-ms="record.durationMs" :quality="record.audioQuality" />
           </td><td class="px-4 py-4">
             <RecognitionEditor v-bind="recognitionProps(record)" />
-          </td><td class="px-4 py-4 wrap-anywhere text-slate-200">
-            {{ record.sourceRepeaterName ?? record.sourceRepeaterId ?? '未知' }}
+          </td><td class="px-4 py-4">
+            <SourceRepeater :value="record.sourceRepeaterName ?? record.sourceRepeaterId" />
           </td><td class="px-4 py-3">
             <RecordCallsign v-bind="callsignProps(record, 'caller')" />
           </td><td class="px-4 py-3">
