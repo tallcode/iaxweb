@@ -60,21 +60,10 @@ export function createApplication({ config, aiConfig, nodeDefinitions, repositor
         subjectPrefix: config.nats.subjectRoot,
       })
     : undefined
-  const aiService = aiNodeIds.length > 0
-    ? new AiService({
-        config: aiConfig,
-        audioQuality,
-        nodeIds: aiNodeIds,
-        ...(spotStore ? { onSpot: (spot: SpotEvent) => spotStore.publish(spot) } : {}),
-        ...(recordRepository ? { repository: recordRepository } : {}),
-        ...(speakerReferences ? { speakerReferences } : {}),
-      })
-    : undefined
-
   const natsAudio = new Map<string, NatsAudioService>()
   const streams = new PublicStreams({
     audioSources: natsAudio,
-    hasAiListener: nodeId => aiService?.hasNode(nodeId) ?? false,
+    hasAiListener: nodeId => aiNodeIds.includes(nodeId),
     spotPublishingEnabled,
   })
   const allmon3 = new Allmon3StatusService({
@@ -82,6 +71,18 @@ export function createApplication({ config, aiConfig, nodeDefinitions, repositor
     nodes: nodeDefinitions,
     onChange: snapshot => streams.publishSnapshot(snapshot),
   })
+
+  const aiService = aiNodeIds.length > 0
+    ? new AiService({
+        config: aiConfig,
+        audioQuality,
+        getSourceRepeaterId: nodeId => allmon3.sourceRepeaterId(nodeId),
+        nodeIds: aiNodeIds,
+        ...(spotStore ? { onSpot: (spot: SpotEvent) => spotStore.publish(spot) } : {}),
+        ...(recordRepository ? { repository: recordRepository } : {}),
+        ...(speakerReferences ? { speakerReferences } : {}),
+      })
+    : undefined
 
   for (const [nodeId, definition] of Object.entries(nodeDefinitions)) {
     if (definition.AUDIO !== true)
@@ -133,6 +134,7 @@ export function createApplication({ config, aiConfig, nodeDefinitions, repositor
   app.register(registerAdminRoutes, {
     adminAuth,
     loginRateLimiter: new LoginRateLimiter(),
+    nodeDefinitions,
     prefix: '/api/admin',
     recordingsDirectory: aiConfig.recordingsDirectory,
     recordRepository,

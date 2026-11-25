@@ -10,6 +10,7 @@ const SELECT_EFFECTIVE = `
   SELECT
     id,
     node_id,
+    source_repeater_id,
     captured_at,
     duration_ms,
     voiced_ms,
@@ -41,11 +42,12 @@ export class SqliteRecordStore {
 
     this.database.prepare(`
       INSERT INTO ai_segments (
-        id, node_id, captured_at, duration_ms, voiced_ms, recognition, corrected, audio_quality
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, node_id, source_repeater_id, captured_at, duration_ms, voiced_ms, recognition, corrected, audio_quality
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       nodeId,
+      record.sourceRepeaterId ?? null,
       record.timestamp,
       record.durationMs,
       record.voicedMs,
@@ -202,6 +204,7 @@ function mapRow(row: Record<string, unknown>): PersistedRecord {
     nodeId: requiredString(row.node_id),
     recognition: requiredString(row.recognition),
     reviewed: requiredNumber(row.reviewed) === 1,
+    sourceRepeaterId: nullableString(row.source_repeater_id),
     voicedMs: requiredNumber(row.voiced_ms),
   }
 }

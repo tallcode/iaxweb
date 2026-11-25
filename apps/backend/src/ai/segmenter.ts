@@ -1,7 +1,7 @@
 import type { Frame, TimedFrame } from './segment-audio.js'
 import { randomUUID } from 'node:crypto'
 import { parseAudioFrame, signedMediaTimestampDifference } from '@iaxweb/audio-protocol'
-import { decodeFrame, insertTimedFrame, renderTimeline, SAMPLES_PER_MS, segmentDuration, sliceFrame, splitTimeline, trimSilence, voicedDuration } from './segment-audio.js'
+import { decodeFrame, dominantSourceRepeaterId, insertTimedFrame, renderTimeline, SAMPLES_PER_MS, segmentDuration, sliceFrame, splitTimeline, trimSilence, voicedDuration } from './segment-audio.js'
 
 export { findCutIndex, VOICE_DBFS_THRESHOLD } from './segment-audio.js'
 
@@ -9,6 +9,7 @@ export interface ClosedSegment {
   capturedAt: string
   durationMs: number
   payloads: Uint8Array[]
+  sourceRepeaterId?: string | null
   voicedMs: number
   transmissionId?: string | undefined
   partIndex?: number | undefined
@@ -23,6 +24,7 @@ export interface SegmenterOptions {
   coldMinMs: number
   hotMinMs: number
   maxMs: number
+  getSourceRepeaterId?: () => string | null
   now?: () => number
   onSegment: (segment: ClosedSegment) => void
   onDiscard?: (reason: DiscardReason, durationMs: number, minMs?: number) => void
@@ -68,7 +70,7 @@ export class NodeSegmenter {
     if (!audio)
       return
     const { payload, timestamp } = audio
-    const frame = decodeFrame(payload.slice(), this.now())
+    const frame = decodeFrame(payload.slice(), this.now(), this.sourceRepeaterId())
     if (this.recording)
       this.recordFrame(timestamp, frame)
     else
@@ -162,6 +164,16 @@ export class NodeSegmenter {
     this.pendingSamples = 0
   }
 
+  private sourceRepeaterId(): string | null {
+    try {
+      return this.options.getSourceRepeaterId?.() ?? null
+    }
+    catch {
+      // Source attribution is optional metadata. Keep the audio frame.
+      return null
+    }
+  }
+
   private bufferFrame(timestamp: number, frame: Frame): void {
     const receivedAt = this.now()
     this.pendingFrames.push({ timestamp, frame, receivedAt })
@@ -237,6 +249,7 @@ export class NodeSegmenter {
         capturedAt: new Date(trimmed[0]!.receivedAt ?? this.now()).toISOString(),
         durationMs: segmentDuration(trimmed),
         payloads: trimmed.map(frame => frame.payload),
+        sourceRepeaterId: dominantSourceRepeaterId(trimmed),
         voicedMs: voicedDuration(trimmed),
         transmissionId: this.transmissionId,
         partIndex: this.partIndex,

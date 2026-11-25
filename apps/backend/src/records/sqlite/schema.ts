@@ -9,6 +9,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS ai_segments (
     id                TEXT PRIMARY KEY,
     node_id           TEXT NOT NULL,
+    source_repeater_id TEXT,
     captured_at       TEXT NOT NULL,
     duration_ms       INTEGER NOT NULL CHECK (duration_ms >= 0),
     voiced_ms         INTEGER NOT NULL CHECK (voiced_ms >= 0),
@@ -60,6 +61,8 @@ export function initializeRecordSchema(database: DatabaseSync): void {
     database.exec('ALTER TABLE ai_segments ADD COLUMN callsign_algorithm TEXT')
   if (!columns.has('signaling'))
     database.exec('ALTER TABLE ai_segments ADD COLUMN signaling TEXT')
+  if (!columns.has('source_repeater_id'))
+    database.exec('ALTER TABLE ai_segments ADD COLUMN source_repeater_id TEXT')
   database.exec(INDEXES)
   database.exec(`
     CREATE TABLE IF NOT EXISTS ai_segment_embeddings (

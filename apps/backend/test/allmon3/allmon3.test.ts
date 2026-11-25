@@ -13,11 +13,84 @@ import {
   TransmissionTracker,
   transmitSource,
 } from '../../src/allmon3/index.js'
+import { findSourceRepeaterId } from '../../src/allmon3/source-repeater.js'
 
 const definitions: NodeDefinitions = {
   1900: { AUDIO: true, LINK: ['1901'], TYPE: 'HUB' },
   1901: { FREQ: '145.400MHz/-0.6MHz/TSQ88.5Hz', GB: '156330106', NAME: 'BR5AI', TYPE: 'REPEATER' },
 }
+
+test('attributes audio to the sole local transmitter reachable through established links', () => {
+  const established = { CSTATE: 'ESTABLISHED' }
+  const snapshot: StatusSnapshot = {
+    1800: { CONNS: { 1802: established, 1900: established }, ONLINE: true, TYPE: 'HUB' },
+    1801: { CONNS: { 1800: established }, ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    1802: { CONNS: { 1800: established }, ONLINE: true, TX_SOURCE: 'remote', TYPE: 'REPEATER' },
+    1900: {
+      CONNS: { 1800: established, 1902: { CSTATE: 'CONNECTING' }, 1905: established },
+      LINK: ['1902', '1903'],
+      ONLINE: true,
+      TYPE: 'HUB',
+    },
+    1902: { ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    1903: { ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    1904: { CONNS: { 1900: established }, ONLINE: false, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    1905: { CONNS: { 1900: { CSTATE: 'CONNECTING' } }, ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+  }
+
+  assert.equal(findSourceRepeaterId(snapshot, '1900'), '1801')
+  assert.equal(findSourceRepeaterId(snapshot, '1801'), null)
+
+  snapshot['1800']!.ONLINE = false
+  assert.equal(findSourceRepeaterId(snapshot, '1900'), null)
+})
+
+test('leaves the source unknown when a connected node loses its status', () => {
+  const established = { CSTATE: 'ESTABLISHED', MODE: 'Transceive' }
+  const connections = { 1901: established, 1902: { CSTATE: 'CONNECTING', MODE: 'Connecting' }, 1999: established }
+  const snapshot: StatusSnapshot = {
+    1900: { CONNS: connections, ONLINE: true, TYPE: 'HUB' },
+    1901: { ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    1902: { ERROR: 'Allmon3 status WebSocket disconnected', ONLINE: false, TYPE: 'REPEATER' },
+  }
+
+  assert.equal(findSourceRepeaterId(snapshot, '1900'), '1901')
+
+  connections['1902'] = established
+  assert.equal(findSourceRepeaterId(snapshot, '1900'), null)
+
+  snapshot['1902'] = { ONLINE: true, TX_SOURCE: 'remote', TYPE: 'REPEATER' }
+  assert.equal(findSourceRepeaterId(snapshot, '1900'), '1901')
+})
+
+test('leaves the source unknown when reachable transmitters are ambiguous or idle', () => {
+  const established = { CSTATE: 'ESTABLISHED' }
+  const snapshot: StatusSnapshot = {
+    1900: { CONNS: { 1901: established, 1902: established }, ONLINE: true, TYPE: 'HUB' },
+    1901: { ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    1902: { ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+  }
+
+  assert.equal(findSourceRepeaterId(snapshot, '1900'), null)
+
+  snapshot['1901']!.TX_SOURCE = 'system'
+  snapshot['1902']!.TX_SOURCE = null
+  assert.equal(findSourceRepeaterId(snapshot, '1900'), null)
+})
+
+test('follows monitor links in the direction audio can flow', () => {
+  const monitor = { CSTATE: 'ESTABLISHED', MODE: 'Monitor' }
+  const transceive = { CSTATE: 'ESTABLISHED', MODE: 'Transceive' }
+  const unset = { CSTATE: 'ESTABLISHED', MODE: 'UNSET' }
+  const snapshot: StatusSnapshot = {
+    1900: { CONNS: { 1901: monitor, 1902: transceive, 1903: transceive }, ONLINE: true, TYPE: 'HUB' },
+    1901: { ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    1902: { CONNS: { 1900: monitor }, ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+    1903: { CONNS: { 1900: unset }, ONLINE: true, TX_SOURCE: 'local', TYPE: 'REPEATER' },
+  }
+
+  assert.equal(findSourceRepeaterId(snapshot, '1900'), '1901')
+})
 
 test('builds defaults immediately when live details are missing', () => {
   const details = new Map<string, NodeStatus>([

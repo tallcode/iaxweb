@@ -89,6 +89,7 @@ export class SegmentRecognition {
       durationMs: segment.durationMs,
       id: randomUUID(),
       payloads: segment.payloads,
+      sourceRepeaterId: segment.sourceRepeaterId ?? null,
       timestamp: segment.capturedAt,
       voicedMs: segment.voicedMs,
       transmissionId: segment.transmissionId,

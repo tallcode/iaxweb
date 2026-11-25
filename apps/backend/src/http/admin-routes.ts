@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
 import type { LoginRateLimiter } from '../admin/login-rate-limiter.js'
 import type { SpeakerReferenceService } from '../ai/speaker-references.js'
+import type { NodeDefinitions } from '../allmon3/types.js'
 import type { RecordListRepository } from '../records/ports.js'
 import type { SpotStore } from '../spots/spot-store.js'
 import { loginSchema } from '@iaxweb/contracts'
@@ -14,6 +15,7 @@ const ADMIN_COOKIE = 'admin_token'
 interface AdminRoutesOptions {
   adminAuth: AdminAuth | undefined
   loginRateLimiter: LoginRateLimiter
+  nodeDefinitions?: NodeDefinitions
   recordingsDirectory: string
   recordRepository: RecordListRepository | undefined
   speakerReferences?: Pick<SpeakerReferenceService, 'recognizeRecord'> | undefined
@@ -86,6 +88,7 @@ export async function registerAdminRoutes(app: FastifyInstance, options: AdminRo
   app.register(registerRecordRoutes, {
     adminAuth,
     recordRepository,
+    ...(options.nodeDefinitions ? { nodeDefinitions: options.nodeDefinitions } : {}),
     ...(options.speakerReferences ? { speakerReferences: options.speakerReferences } : {}),
     recordingsDirectory: options.recordingsDirectory,
     ...(options.spotStore ? { spotStore: options.spotStore } : {}),

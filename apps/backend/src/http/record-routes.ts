@@ -2,6 +2,7 @@ import type { AdminRecordPage } from '@iaxweb/contracts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AdminAuth } from '../admin/auth.js'
 import type { SpeakerReferenceService } from '../ai/speaker-references.js'
+import type { NodeDefinitions } from '../allmon3/types.js'
 import type { RecordListRepository } from '../records/ports.js'
 import type { SpotStore } from '../spots/spot-store.js'
 import { performance } from 'node:perf_hooks'
@@ -14,6 +15,7 @@ interface RecordQuery { callsign?: string, editedOnly?: string, reviewedOnly?: s
 type Guard = (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | undefined>
 interface RecordRoutesOptions {
   adminAuth: AdminAuth
+  nodeDefinitions?: NodeDefinitions
   recordRepository: RecordListRepository
   speakerReferences?: Pick<SpeakerReferenceService, 'recognizeRecord'>
   recordingsDirectory: string
@@ -24,7 +26,7 @@ interface RecordRoutesOptions {
 }
 
 export async function registerRecordRoutes(app: FastifyInstance, options: RecordRoutesOptions): Promise<void> {
-  const { recordRepository, requireAuthentication, requireEditor, requireAdministrator } = options
+  const { nodeDefinitions, recordRepository, requireAuthentication, requireEditor, requireAdministrator } = options
   const recordings = new RecordingStore(options.recordingsDirectory)
   const reviews = new RecordReviewService(recordRepository, recordings, options.spotStore)
   app.setErrorHandler((error, request, reply) => {
@@ -55,6 +57,7 @@ export async function registerRecordRoutes(app: FastifyInstance, options: Record
     const items = await Promise.all(result.items.map(async item => ({
       ...item,
       hasAudio: await recordings.has(item.id, item.capturedAt),
+      sourceRepeaterName: item.sourceRepeaterId ? nodeDefinitions?.[item.sourceRepeaterId]?.NAME?.trim() || null : null,
     })))
     const recordingDuration = performance.now() - recordingStarted
     const response: AdminRecordPage = {

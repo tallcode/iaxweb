@@ -31,7 +31,7 @@ const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback,
       </div>
       <div class="mt-4 flex gap-4 text-sm">
         <div class="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <span class="shrink-0 self-start text-xs leading-8 text-slate-500">被叫</span><RecordCallsign v-bind="callsignProps(record, 'callee')" />
+          <span class="shrink-0 self-start text-xs leading-8 text-slate-500">来源中继</span><span class="wrap-anywhere text-slate-200">{{ record.sourceRepeaterName ?? record.sourceRepeaterId ?? '未知' }}</span>
         </div>
         <div class="flex min-w-0 flex-1 items-center gap-2 text-left">
           <span class="shrink-0 self-start text-xs leading-8 text-slate-500">主叫</span><RecordCallsign v-bind="callsignProps(record, 'caller')" />

@@ -250,7 +250,7 @@ function record(overrides: Partial<SegmentRecord> = {}): SegmentRecord {
 
 test('persists ASR and the later automatic callsign in one row', () => {
   const repository = new RecordRepository(':memory:')
-  const segment = record()
+  const segment = record({ sourceRepeaterId: '1901' })
   repository.insert('1900', segment)
 
   assert.deepEqual(repository.find(segment.id), {
@@ -271,6 +271,7 @@ test('persists ASR and the later automatic callsign in one row', () => {
     nodeId: '1900',
     recognition: segment.recognition,
     reviewed: false,
+    sourceRepeaterId: '1901',
     voicedMs: 5_500,
   })
 
@@ -282,6 +283,7 @@ test('persists ASR and the later automatic callsign in one row', () => {
   assert.equal(persisted?.callsign, 'BG5XXX')
   assert.equal(persisted?.callsignAlgorithm, 'stage2_feature')
   assert.equal(persisted?.effectiveCallsign, 'BG5XXX')
+  assert.equal(repository.list(1, 1).items[0]?.sourceRepeaterId, '1901')
   repository.close()
 })
 
@@ -352,6 +354,7 @@ test('keeps old SQLite evidence and only exposes current record fields', (t) => 
   assert.equal(repository.find('old')?.effectiveCallsign, 'BG5BBB')
   assert.equal(repository.find('old')?.manualRecognition, null)
   assert.equal(repository.find('old')?.reviewed, false)
+  assert.equal(repository.find('old')?.sourceRepeaterId, null)
   assert.equal(Object.hasOwn(repository.find('old')!, 'revise'), false)
   assert.equal(repository.updateAutomaticCallsign(record({ id: 'old', callsign: 'BG5CCC' })), true)
   repository.updateManualReview('old', { recognition: '人工文本', reviewed: true })
@@ -396,6 +399,7 @@ test('persists data across repository instances and indexes ordered history quer
 
   const second = new RecordRepository(databaseFile)
   assert.equal(second.find('segment-1')?.nodeId, '1999')
+  assert.equal(second.find('segment-1')?.sourceRepeaterId, null)
   second.close()
 
   const database = new DatabaseSync(databaseFile, { readOnly: true })

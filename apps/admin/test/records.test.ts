@@ -44,7 +44,7 @@ describe('record callsign editing', () => {
     await flushPromises()
     await wrapper.get('button[aria-label="编辑识别文本"]').trigger('click')
     expect(wrapper.findAll('textarea')).toHaveLength(1)
-    for (const button of wrapper.findAll('button[aria-label="编辑主叫呼号"], button[aria-label="编辑被叫呼号"]'))
+    for (const button of wrapper.findAll('button[aria-label="编辑主叫呼号"]'))
       expect(button.attributes('disabled')).toBeDefined()
     expect(wrapper.get('input[aria-label="筛选已编辑"]').attributes('disabled')).toBeDefined()
     await wrapper.get('textarea').trigger('keydown', { key: 'Escape' })
@@ -85,15 +85,15 @@ describe('record callsign editing', () => {
     await wrapper.get('input[aria-label="编辑主叫呼号"]').setValue('BG5ATV')
     await wrapper.get('button[aria-label="保存主叫呼号"]').trigger('click')
     expect(wrapper.get('button[aria-label="取消编辑主叫呼号"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('button[aria-label="编辑被叫呼号"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button[aria-label="编辑识别文本"]').attributes('disabled')).toBeDefined()
     resolveSave(new Response('failed', { status: 500 }))
     await flushPromises()
     expect(wrapper.get<HTMLInputElement>('input[aria-label="编辑主叫呼号"]').element.value).toBe('BG5ATV')
-    expect(wrapper.get('button[aria-label="编辑被叫呼号"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button[aria-label="编辑识别文本"]').attributes('disabled')).toBeDefined()
     await wrapper.get('button[aria-label="保存主叫呼号"]').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('input[aria-label="编辑主叫呼号"]')).toHaveLength(0)
-    expect(wrapper.get('button[aria-label="编辑被叫呼号"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('button[aria-label="编辑识别文本"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -253,10 +253,8 @@ describe('record callsign editing', () => {
     await flushPromises()
     const rows = wrapper.findAll('tbody tr')
     expect(rows[0]!.find('button[aria-label="编辑识别文本"]').exists()).toBe(role === 'admin')
-    for (const label of ['编辑主叫呼号', '编辑被叫呼号']) {
-      expect(rows[0]!.get(`button[aria-label="${label}"]`).attributes('disabled') !== undefined).toBe(role !== 'admin')
-      expect(rows[1]!.get(`button[aria-label="${label}"]`).attributes('disabled')).toBeUndefined()
-    }
+    expect(rows[0]!.get('button[aria-label="编辑主叫呼号"]').attributes('disabled') !== undefined).toBe(role !== 'admin')
+    expect(rows[1]!.get('button[aria-label="编辑主叫呼号"]').attributes('disabled')).toBeUndefined()
     expect(rows[1]!.find('button[aria-label="编辑识别文本"]').exists()).toBe(true)
     wrapper.unmount()
   })
@@ -491,7 +489,7 @@ describe('record callsign editing', () => {
     wrapper.unmount()
   })
 
-  it('saves a manually reviewed callee callsign', async () => {
+  it('shows the source repeater in place of the callee in the table and cards', async () => {
     vi.stubGlobal('Audio', class extends EventTarget {
       src = ''
 
@@ -500,26 +498,24 @@ describe('record callsign editing', () => {
       play(): Promise<void> { return Promise.resolve() }
       removeAttribute(): void {}
     })
-    const aiRecord = record()
-    const reviewedRecord = { ...aiRecord, calleeCallsign: 'BG5BBB' }
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [aiRecord], page: 1, pageSize: 50, total: 1 }))
-      .mockResolvedValueOnce(jsonResponse(reviewedRecord))
-    vi.stubGlobal('fetch', fetchMock)
+    const items: AdminRecord[] = [
+      { ...record(), calleeCallsign: 'BG5BBB', sourceRepeaterId: '1901', sourceRepeaterName: 'BR5AI' },
+      { ...record(), id: 'unconfigured-source', sourceRepeaterId: '1902' },
+      { ...record(), id: 'unknown-source' },
+    ]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({ items, page: 1, pageSize: 50, total: items.length })))
     const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
 
     const wrapper = mount(RecordsPage)
     await flushPromises()
-    const callee = wrapper.findAll('button').find(button => button.text() === '—')
-    await callee!.trigger('click')
-    const editor = wrapper.get<HTMLInputElement>('input[aria-label="编辑被叫呼号"]')
-    await editor.setValue('BG5BBB')
-    await editor.trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('BG5BBB')
-    expect(fetchMock.mock.calls[1]?.[0]).toContain('/manual-callee-callsign')
-    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ body: JSON.stringify({ callsign: 'BG5BBB' }), method: 'PATCH' })
+    expect(wrapper.findAll('thead th').map(header => header.text()).slice(3, 5)).toEqual(['来源中继', '主叫'])
+    expect(wrapper.findAll('tbody tr').map(row => row.findAll('td')[3]?.text())).toEqual(['BR5AI', '1902', '未知'])
+    expect(wrapper.findAll('article').map((card) => {
+      const label = card.findAll('span').find(span => span.text() === '来源中继')
+      return label?.element.nextElementSibling?.textContent
+    })).toEqual(['BR5AI', '1902', '未知'])
+    expect(wrapper.find('button[aria-label="编辑被叫呼号"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('BG5BBB')
     wrapper.unmount()
   })
 

@@ -17,6 +17,7 @@ interface NodeAiRuntime {
 }
 
 export interface AiServiceOptions extends SegmentRecognitionOptions {
+  getSourceRepeaterId?: (nodeId: string) => string | null
   nodeIds: string[]
 }
 
@@ -27,7 +28,7 @@ export class AiService {
   private stopped = false
 
   constructor(options: AiServiceOptions) {
-    const { config, nodeIds } = options
+    const { config, getSourceRepeaterId, nodeIds } = options
     this.recognition = new SegmentRecognition(options)
     for (const nodeId of nodeIds) {
       this.nodes.set(nodeId, {
@@ -39,6 +40,7 @@ export class AiService {
           coldMinMs: config.coldMinSegmentMs,
           hotMinMs: config.hotMinSegmentMs,
           maxMs: config.maxSegmentMs,
+          getSourceRepeaterId: () => getSourceRepeaterId?.(nodeId) ?? null,
           onDiscard: (reason, durationMs, minMs) => this.logDiscard(nodeId, reason, durationMs, minMs),
           onSegment: segment => this.enqueue(nodeId, segment),
         }),

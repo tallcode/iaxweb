@@ -16,6 +16,8 @@ export const SAMPLES_PER_MS = SAMPLE_RATE / 1000
 const CUT_SEARCH_MS = 10_000
 const CUT_WINDOW_MS = 100
 
+const MIN_SOURCE_SHARE_PERCENT = 70
+
 const voiceRmsThreshold = 10 ** (VOICE_DBFS_THRESHOLD / 20)
 const trimRmsThreshold = 10 ** (TRIM_DBFS_THRESHOLD / 20)
 
@@ -24,6 +26,7 @@ export interface Frame {
   payload: Uint8Array
   receivedAt?: number | undefined
   rms: number
+  sourceRepeaterId?: string | null | undefined
 }
 
 export interface TimedFrame extends Frame {
@@ -71,18 +74,19 @@ export function splitTimeline(frames: TimedFrame[], maxMs: number, minMs: number
   return { chunk, cutAt, remaining }
 }
 
-export function decodeFrame(payload: Uint8Array, receivedAt?: number): Frame {
+export function decodeFrame(payload: Uint8Array, receivedAt?: number, sourceRepeaterId?: string | null): Frame {
   return {
     ms: (payload.length * 1000) / SAMPLE_RATE,
     payload,
     receivedAt,
     rms: rmsOfPcm(decodeMuLaw(payload)),
+    sourceRepeaterId,
   }
 }
 
 export function sliceFrame(frame: Frame, offset: number, end?: number): Frame {
   const receivedAt = frame.receivedAt === undefined ? undefined : frame.receivedAt + offset / SAMPLES_PER_MS
-  return decodeFrame(frame.payload.subarray(offset, end), receivedAt)
+  return decodeFrame(frame.payload.subarray(offset, end), receivedAt, frame.sourceRepeaterId)
 }
 
 // Preserve media-clock gaps and merge overlapping sample ranges so that
@@ -145,6 +149,29 @@ export function trimSilence(frames: Frame[]): Frame[] {
     end--
   }
   return frames.slice(start, end)
+}
+
+// Count the audio samples retained from each frame so split frames contribute
+// in proportion to their duration. Speech with an unknown source still counts
+// toward the total, while silence and reconstructed gaps are excluded.
+export function dominantSourceRepeaterId(frames: Frame[]): string | null {
+  const samplesBySource = new Map<string, number>()
+  let speechSamples = 0
+  for (const frame of frames) {
+    if (frame.rms < trimRmsThreshold)
+      continue
+    const samples = frame.payload.length
+    speechSamples += samples
+    const sourceId = frame.sourceRepeaterId
+    if (sourceId != null)
+      samplesBySource.set(sourceId, (samplesBySource.get(sourceId) ?? 0) + samples)
+  }
+
+  for (const [sourceId, samples] of samplesBySource) {
+    if (samples * 100 >= speechSamples * MIN_SOURCE_SHARE_PERCENT)
+      return sourceId
+  }
+  return null
 }
 
 // Chooses where to cut an overlong segment. Prefers the quietest 100 ms window

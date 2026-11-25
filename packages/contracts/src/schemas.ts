@@ -135,6 +135,7 @@ export const audioQualitySchema = z.object({
 export const persistedRecordSchema = z.object({
   id: nonempty,
   nodeId: nonempty,
+  sourceRepeaterId: publicNodeIdSchema.nullable().optional(),
   capturedAt: timestamp,
   createdAt: timestamp,
   durationMs: z.number().nonnegative(),
@@ -152,7 +153,10 @@ export const persistedRecordSchema = z.object({
   manualNote: z.string().nullable(),
   reviewed: z.boolean(),
 })
-const adminRecordSchema = persistedRecordSchema.extend({ hasAudio: z.boolean() })
+const adminRecordSchema = persistedRecordSchema.extend({
+  hasAudio: z.boolean(),
+  sourceRepeaterName: nonempty.nullable().optional(),
+})
 export const adminRecordPageSchema = z.object({
   items: z.array(adminRecordSchema),
   page: z.number().int().positive(),

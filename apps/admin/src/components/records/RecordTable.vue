@@ -13,7 +13,7 @@ const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback,
 <template>
   <div class="overflow-clip rounded-xl border border-slate-800 bg-slate-900/70 shadow-xl shadow-black/20" :class="activeEditor?.view === 'table' ? 'block' : activeEditor?.view === 'card' ? 'hidden' : 'hidden lg:block'">
     <table class="w-full table-fixed divide-y divide-slate-800 text-left text-sm leading-6" :class="isAdministrator ? 'min-w-[55rem]' : 'min-w-[49rem]'">
-      <colgroup><col class="w-44"><col class="w-16"><col><col class="hidden w-32 min-[1200px]:table-column"><col class="w-32"><col class="w-24"><col v-if="isAdministrator" class="w-32"></colgroup><thead class="sticky top-[calc(4rem+var(--records-toolbar-height,4rem))] z-10 bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
+      <colgroup><col class="w-44"><col class="w-16"><col><col class="w-24"><col class="w-32"><col class="w-24"><col v-if="isAdministrator" class="w-32"></colgroup><thead class="sticky top-[calc(4rem+var(--records-toolbar-height,4rem))] z-10 bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
         <tr>
           <th class="whitespace-nowrap px-4 py-3">
             时间
@@ -21,8 +21,8 @@ const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback,
             时长
           </th><th class="px-4 py-3">
             识别文本
-          </th><th class="hidden whitespace-nowrap px-4 py-3 min-[1200px]:table-cell">
-            被叫
+          </th><th class="whitespace-nowrap px-4 py-3">
+            来源中继
           </th><th class="whitespace-nowrap px-4 py-3">
             主叫
           </th><th class="whitespace-nowrap px-4 py-3">
@@ -39,8 +39,8 @@ const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback,
             <RecordDuration :duration-ms="record.durationMs" :quality="record.audioQuality" />
           </td><td class="px-4 py-4">
             <RecognitionEditor v-bind="recognitionProps(record)" />
-          </td><td class="hidden px-4 py-3 min-[1200px]:table-cell">
-            <RecordCallsign v-bind="callsignProps(record, 'callee')" />
+          </td><td class="px-4 py-4 wrap-anywhere text-slate-200">
+            {{ record.sourceRepeaterName ?? record.sourceRepeaterId ?? '未知' }}
           </td><td class="px-4 py-3">
             <RecordCallsign v-bind="callsignProps(record, 'caller')" />
           </td><td class="px-4 py-3">

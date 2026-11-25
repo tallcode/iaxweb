@@ -27,6 +27,7 @@ interface Capture {
 interface SegmenterTestOptions {
   activityWindowMs?: number
   coldMinMs?: number
+  getSourceRepeaterId?: () => string | null
   hotMinMs?: number
   maxMs?: number
   now?: () => number
@@ -39,6 +40,7 @@ function makeSegmenter(options: SegmenterTestOptions = {}): { capture: Capture, 
     coldMinMs: options.coldMinMs ?? 5_000,
     hotMinMs: options.hotMinMs ?? options.coldMinMs ?? 5_000,
     maxMs: options.maxMs ?? 120_000,
+    ...(options.getSourceRepeaterId ? { getSourceRepeaterId: options.getSourceRepeaterId } : {}),
     ...(options.now ? { now: options.now } : {}),
     onDiscard: (reason, durationMs, minMs) => {
       capture.discards.push({ durationMs, reason, ...(minMs !== undefined ? { minMs } : {}) })
@@ -243,6 +245,66 @@ test('keeps all unclaimed audio while waiting for a speaking snapshot', () => {
   const segment = capture.segments[0]
   assert.ok(segment)
   assert.equal(segment.durationMs, 6_100)
+})
+
+test('attributes a segment at 70 percent even if its midpoint source was unknown', () => {
+  let source: string | null = '1901'
+  const { capture, segmenter } = makeSegmenter({ coldMinMs: 1, getSourceRepeaterId: () => source })
+  pushVoice(segmenter, 4, 1_000)
+  source = null
+  pushVoice(segmenter, 3, 1_080)
+  segmenter.start(1_000)
+  source = '1901'
+  pushVoice(segmenter, 3, 1_140)
+  source = '1902'
+  segmenter.stop(200, 1_680)
+
+  assert.equal(capture.segments[0]?.sourceRepeaterId, '1901')
+})
+
+test('counts speech with unknown and other sources against the 70 percent threshold', () => {
+  let source: string | null = '1901'
+  const { capture, segmenter } = makeSegmenter({ coldMinMs: 1, getSourceRepeaterId: () => source })
+  segmenter.start(1_000)
+  pushVoice(segmenter, 69, 1_000)
+  source = null
+  pushVoice(segmenter, 30, 2_380)
+  source = '1902'
+  pushVoice(segmenter, 1, 2_980)
+  segmenter.stop(2_000, 3_480)
+
+  assert.equal(capture.segments[0]?.sourceRepeaterId, null)
+})
+
+test('preserves all audio when the source repeater lookup fails', () => {
+  const { capture, segmenter } = makeSegmenter({
+    coldMinMs: 1,
+    getSourceRepeaterId() {
+      throw new Error('Source repeater status unavailable')
+    },
+  })
+  segmenter.start(1_000)
+  pushVoice(segmenter, 3, 1_000)
+  segmenter.stop(60, 1_060)
+
+  assert.equal(capture.discards.length, 0)
+  assert.equal(capture.segments.length, 1)
+  const segment = capture.segments[0]!
+  assert.equal(segment.sourceRepeaterId, null)
+  assert.deepEqual(Buffer.concat(segment.payloads), Buffer.alloc(3 * FRAME_SAMPLES, VOICE))
+})
+
+test('weights source votes by speech duration and excludes silent gaps', () => {
+  let source: string | null = null
+  const { capture, segmenter } = makeSegmenter({ coldMinMs: 1, getSourceRepeaterId: () => source })
+  segmenter.start(1_000)
+  pushVoice(segmenter, 2, 1_000)
+  source = '1901'
+  segmenter.pushFrame(makeFrame(LOW_VOICE, 1_240, 5 * FRAME_SAMPLES))
+  segmenter.stop(340, 1_820)
+
+  assert.equal(capture.segments[0]?.durationMs, 340)
+  assert.equal(capture.segments[0]?.sourceRepeaterId, '1901')
 })
 
 test('drops the partial segment when the media clock jumps backwards', () => {

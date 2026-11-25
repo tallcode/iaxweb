@@ -68,7 +68,7 @@ defineExpose({ open, close })
         </div>
       </label>
       <p class="text-xs leading-5 text-slate-500">
-        {{ draft.role === 'admin' ? '可编辑、标注、删除记录，并管理用户。' : draft.role === 'editor' ? '仅可编辑识别文本、主叫和被叫。' : '仅可浏览、搜索、筛选及播放录音。' }}
+        {{ draft.role === 'admin' ? '可编辑、标注、删除记录，并管理用户。' : draft.role === 'editor' ? '仅可编辑识别文本和主叫。' : '仅可浏览、搜索、筛选及播放录音。' }}
       </p>
       <label class="flex flex-col gap-2 text-sm text-slate-300">
         <span>{{ editorTarget === null ? '密码' : '新密码' }}</span>

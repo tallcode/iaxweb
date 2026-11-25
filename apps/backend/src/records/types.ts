@@ -58,6 +58,7 @@ export type ReadyVoiceprint = Extract<Voiceprint, { status: 'ready' }>
 export interface RecognitionRecord {
   id: string
   timestamp: string
+  sourceRepeaterId?: string | null | undefined
   durationMs: number
   voicedMs: number
   recognition?: string | undefined

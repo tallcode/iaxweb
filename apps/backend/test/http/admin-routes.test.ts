@@ -31,6 +31,7 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   await app.register(registerAdminRoutes, {
     adminAuth: new AdminAuth(usersFile, sessionsFile),
     loginRateLimiter: new LoginRateLimiter(),
+    nodeDefinitions: { 1901: { NAME: 'BR5AI', TYPE: 'REPEATER' } },
     prefix: '/api/admin',
     recordingsDirectory: directory,
     recordRepository: repository,
@@ -82,6 +83,7 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
     id: 'matching-segment',
     payloads: [],
     recognition: '这里是 BG5AAA',
+    sourceRepeaterId: '1901',
     timestamp: '2026-08-14T12:00:00.000Z',
     voicedMs: 900,
   }
@@ -92,7 +94,12 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
     url: '/api/admin/records?callsign=bg5aaa',
   })
   assert.equal(exactSearch.statusCode, 200)
-  assert.equal(exactSearch.json().items[0].hasAudio, false)
+  const listed = exactSearch.json<AdminRecordPage>().items[0]
+  assert.ok(listed)
+  assert.equal(listed.hasAudio, false)
+  assert.equal(listed.nodeId, '1900')
+  assert.equal(listed.sourceRepeaterId, '1901')
+  assert.equal(listed.sourceRepeaterName, 'BR5AI')
   assert.equal(Object.hasOwn(exactSearch.json(), 'recordingDates'), false)
   assert.equal(Object.hasOwn(exactSearch.json(), 'user'), false)
   assert.equal(exactSearch.json().total, 1)
@@ -147,7 +154,7 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   assert.equal(unauthenticated.statusCode, 401)
   const missing = await app.inject({ headers, method: 'PATCH', payload: { reviewed: true }, url: '/api/admin/records/missing/manual-review' })
   assert.equal(missing.statusCode, 404)
-  const emptyCaller = { ...segment, id: 'empty-caller' }
+  const emptyCaller = { ...segment, id: 'empty-caller', sourceRepeaterId: '1902' }
   repository.insert('1900', emptyCaller)
   const callerUrl = '/api/admin/records/empty-caller/manual-callsign'
   const reviewUrl = '/api/admin/records/empty-caller/manual-review'
@@ -190,6 +197,8 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
     assert.deepEqual([firstPage.total, secondPage.total], [2, 2])
     assert.deepEqual(firstPage.items.map(item => [item.id, item.callsign, item.effectiveCallsign]), [[segment.id, 'BG5AAA', 'BA3XAA']])
     assert.deepEqual(secondPage.items.map(item => [item.id, item.effectiveCallsign]), [[emptyCaller.id, 'BG5AAA']])
+    assert.equal(secondPage.items[0]?.sourceRepeaterId, '1902')
+    assert.equal(secondPage.items[0]?.sourceRepeaterName, null)
 
     const original = await search('%aaa')
     assert.equal(original.statusCode, 200)
