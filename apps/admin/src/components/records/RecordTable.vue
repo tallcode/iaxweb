@@ -23,7 +23,7 @@ const { records, isAdministrator, activeEditor, playingRecordId, togglePlayback,
           </th><th class="px-4 py-3">
             识别文本
           </th><th class="whitespace-nowrap px-4 py-3">
-            来源中继
+            来源
           </th><th class="whitespace-nowrap px-4 py-3">
             主叫
           </th><th class="whitespace-nowrap px-4 py-3">
