@@ -86,7 +86,12 @@ function relativeTime(iso: string): string {
     </div>
     <ul v-if="spots.length" ref="spotListElement" class="spot-list">
       <li v-for="spot in visibleSpots" :key="spotKey(spot)" class="spot-item" :class="{ 'is-new': highlightedSpotKeys.has(spotKey(spot)) }" @animationend="highlightedSpotKeys.delete(spotKey(spot))">
-        <span class="spot-callsign">{{ spot.callsign }}</span>
+        <a
+          class="spot-callsign"
+          :href="`https://www.qrz.com/db/${encodeURIComponent(spot.callsign)}`"
+          target="_blank"
+          rel="noopener noreferrer"
+        >{{ spot.callsign }}</a>
         <time class="spot-time" :datetime="spot.at">{{ relativeTime(spot.at) }}</time>
       </li>
     </ul>
