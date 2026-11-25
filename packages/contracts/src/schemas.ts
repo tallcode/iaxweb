@@ -3,6 +3,7 @@ import { CALLSIGN_PATTERN, MANUAL_CALLSIGN_PATTERN, MAX_RECOGNITION_LENGTH } fro
 
 const nonempty = z.string().min(1)
 const timestamp = z.iso.datetime()
+const publicNodeIdSchema = z.string().regex(/^\d+$/)
 const transmitSourceSchema = z.enum(['local', 'remote', 'system']).nullable()
 const nodeTypeSchema = z.enum(['HUB', 'REPEATER'])
 const adminRoleSchema = z.enum(['admin', 'editor', 'viewer'])
@@ -36,6 +37,7 @@ export const spotEventSchema = z.object({
   callsign: z.string().regex(MANUAL_CALLSIGN_PATTERN),
   id: nonempty,
   node: nonempty,
+  source: publicNodeIdSchema.nullable().optional(),
   type: z.literal('spot').optional(),
 })
 export const spotHistorySchema = z.array(spotEventSchema)
@@ -77,7 +79,6 @@ const publicNodeStatusSchema = z.object({
   TX_SOURCE: transmitSourceSchema.optional(),
   TYPE: nodeTypeSchema.optional(),
 })
-const publicNodeIdSchema = z.string().regex(/^\d+$/)
 export const publicStatusSnapshotSchema = z.record(publicNodeIdSchema, publicNodeStatusSchema)
 const publicNodeRuntimeStatusSchema = publicNodeStatusSchema.pick({
   CONNS: true,

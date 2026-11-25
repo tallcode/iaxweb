@@ -1,4 +1,4 @@
-import type { AudioQuality } from '@iaxweb/contracts'
+import type { AudioQuality, SpotEvent } from '@iaxweb/contracts'
 import type { TranscriptTurn } from '../../src/ai/callsign-evidence.js'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -26,7 +26,7 @@ test('ASR and history survive rejected/unknown quality while only passed audio s
   let asrCalls = 0
   let qualityCalls = 0
   let featureCalls = 0
-  let spots = 0
+  const spots: SpotEvent[] = []
   let historySeen: readonly TranscriptTurn[] = []
   t.mock.method(AsrClient.prototype, 'transcribe', async () => texts[asrCalls++]!)
   t.mock.method(AudioQualityService.prototype, 'check', async (_samples: Float32Array, _signal?: AbortSignal, gateVersion?: AudioQuality['gateVersion']) => {
@@ -41,7 +41,7 @@ test('ASR and history survive rejected/unknown quality while only passed audio s
   const config = loadAiConfig({ AI_PERSISTENCE_ENABLED: 'true', AI_LLM_ENABLED: 'true', AI_LLM_STAGE2_ENABLED: 'true', AI_RECORDINGS_DIR: directory })
   const recognition = new SegmentRecognition({
     config,
-    onSpot: () => { spots++ },
+    onSpot: (spot) => { spots.push(spot) },
     repository: { insert: repository.insert.bind(repository), updateAutomaticCallsign: repository.updateAutomaticCallsign.bind(repository), find: repository.find.bind(repository) },
     speakerReferences: {
       startLiveRecognition: () => {
@@ -60,7 +60,7 @@ test('ASR and history survive rejected/unknown quality while only passed audio s
   // or dependence on segmentation timing. Recognition/quality are mocked here;
   // waveform quality behavior has its own recording replay and unit coverage.
   const store = new SegmentStore(config.contextWindowMs)
-  const segment = { capturedAt: '2026-11-22T01:00:00.000Z', durationMs: 2000, voicedMs: 1500, payloads: [new Uint8Array(16_000).fill(255)] }
+  const segment = { capturedAt: '2026-11-22T01:00:00.000Z', durationMs: 2000, voicedMs: 1500, payloads: [new Uint8Array(16_000).fill(255)], sourceRepeaterId: '1901' }
   for (let index = 0; index < 3; index++) {
     await recognition.process('1900', store, segment)
     assert.equal(llm.mock.callCount(), index < 2 ? 0 : 1)
@@ -68,7 +68,7 @@ test('ASR and history survive rejected/unknown quality while only passed audio s
   }
   assert.equal(asrCalls, 3)
   assert.equal(qualityCalls, 3)
-  assert.equal(spots, 1)
+  assert.deepEqual(spots.map(({ node, source }) => ({ node, source })), [{ node: '1900', source: '1901' }])
   assert.deepEqual(historySeen.map(turn => turn.text), texts.slice(0, 2))
   const stored = repository.list(1, 10).items
   assert.equal(stored.length, 3)

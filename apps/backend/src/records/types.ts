@@ -31,6 +31,7 @@ export interface StoredSpot {
   callsign: string
   id: string
   node: string
+  source: string | null
 }
 
 export interface SpeechHour {

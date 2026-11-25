@@ -79,7 +79,7 @@ export class SpotStore {
 
   private send(spot: SpotEvent): void {
     try {
-      this.connection?.publish(this.subject(spot), JSON.stringify(spot))
+      this.connection?.publish(this.subject(spot), JSON.stringify({ ...spot, source: spot.source ?? null }))
     }
     catch (error) {
       console.warn(`[AI] spot 发布失败: ${errorMessage(error)}`)

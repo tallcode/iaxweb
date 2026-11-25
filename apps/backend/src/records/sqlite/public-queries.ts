@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { PublicRecordQueries } from '../ports.js'
 import type { SpeechHour, StoredSpot } from '../types.js'
-import { requiredNumber, requiredString } from './row-values.js'
+import { nullableString, requiredNumber, requiredString } from './row-values.js'
 
 export class SqlitePublicRecordQueries implements PublicRecordQueries {
   constructor(private readonly database: DatabaseSync) {}
@@ -32,6 +32,7 @@ export class SqlitePublicRecordQueries implements PublicRecordQueries {
         SELECT
           id,
           node_id,
+          source_repeater_id,
           captured_at,
           effective_callsign,
           ROW_NUMBER() OVER (
@@ -42,7 +43,7 @@ export class SqlitePublicRecordQueries implements PublicRecordQueries {
         WHERE effective_callsign IS NOT NULL
           AND effective_callsign <> 'N0CALL'
       )
-      SELECT id, node_id, captured_at, effective_callsign
+      SELECT id, node_id, source_repeater_id, captured_at, effective_callsign
       FROM ranked
       WHERE row_number = 1
       ORDER BY captured_at DESC, id DESC
@@ -53,6 +54,7 @@ export class SqlitePublicRecordQueries implements PublicRecordQueries {
       callsign: requiredString(row.effective_callsign),
       id: requiredString(row.id),
       node: requiredString(row.node_id),
+      source: nullableString(row.source_repeater_id),
     }))
   }
 }

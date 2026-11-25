@@ -216,6 +216,7 @@ export class SegmentRecognition {
           callsign: record.callsign,
           id: record.id,
           node: nodeId,
+          source: record.sourceRepeaterId ?? null,
         })
       }
     }

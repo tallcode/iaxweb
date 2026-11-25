@@ -1,3 +1,4 @@
+import type { SpotEvent } from '@iaxweb/contracts'
 import type { NatsConnection, Subscription } from '@nats-io/transport-node'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -38,7 +39,7 @@ function fakeConnection() {
     } as unknown as NatsConnection,
     disconnect: (error?: Error) => resolveClosed(error),
     published,
-    receive: (event: ReturnType<typeof spot>) => receive?.(new TextEncoder().encode(JSON.stringify(event))),
+    receive: (event: SpotEvent) => receive?.(new TextEncoder().encode(JSON.stringify(event))),
     subscribed,
   }
 }
@@ -48,11 +49,15 @@ test('publishes displayable spots under the configured Core NATS root', async ()
   const store = new SpotStore({ createConnection: async () => fake.connection, subjectPrefix: 'custom.nodes' })
   await store.start(() => undefined)
 
-  store.publish(spot('BG5XXX'))
+  const withSource = { ...spot('BG5XXX'), source: '1901' }
+  store.publish(withSource)
   assert.deepEqual(fake.published, [{
-    data: JSON.stringify(spot('BG5XXX')),
+    data: JSON.stringify(withSource),
     subject: 'custom.nodes.1900.ai.spot.BG5XXX',
   }])
+  const withoutSource = spot('BG5YYY')
+  store.publish(withoutSource)
+  assert.deepEqual(JSON.parse(fake.published[1]!.data), { ...withoutSource, source: null })
   assert.deepEqual(fake.subscribed, ['custom.nodes.*.ai.spot.*'])
   await store.close()
 })
@@ -125,11 +130,11 @@ test('forwards valid Core NATS spots and filters N0CALL', async () => {
 
 test('forwards manual review events including N0CALL by record id', async () => {
   const fake = fakeConnection()
-  const received: Array<{ at: string, callsign: string, id: string, node: string }> = []
+  const received: SpotEvent[] = []
   const store = new SpotStore({ createConnection: async () => fake.connection })
   await store.start(event => received.push(event))
 
-  const reviewed = spot(NO_CALLSIGN)
+  const reviewed = { ...spot(NO_CALLSIGN), source: '1901' }
   store.publishReview(reviewed)
   assert.equal(fake.published[0]?.subject, 'iaxmon.nodes.1900.ai.spot.N0CALL')
   fake.receive(reviewed)

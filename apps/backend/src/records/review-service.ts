@@ -55,6 +55,12 @@ export class RecordReviewService {
   }
 
   private publish(record: PersistedRecord, callsign: string): void {
-    this.spots?.publishReview({ at: record.capturedAt, callsign, id: record.id, node: record.nodeId })
+    this.spots?.publishReview({
+      at: record.capturedAt,
+      callsign,
+      id: record.id,
+      node: record.nodeId,
+      source: record.sourceRepeaterId ?? null,
+    })
   }
 }

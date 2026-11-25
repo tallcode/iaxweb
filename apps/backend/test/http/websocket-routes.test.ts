@@ -93,7 +93,7 @@ test('status updates use the state last sent to each connection', async (context
   streams.publishSnapshot(current)
   streams.publishAudioState('1234', { type: 'state', listeners: 1, online: true, speaking: false }, current)
   streams.publishSnapshot({})
-  const spot = { at: '2026-11-23T00:00:00.000Z', callsign: 'BG5ABC', id: 'spot-1', node: '1234' }
+  const spot = { at: '2026-11-23T00:00:00.000Z', callsign: 'BG5ABC', id: 'spot-1', node: '1234', source: '1235' }
   streams.publishSpot(spot)
   await new Promise<void>(resolve => setImmediate(resolve))
   oldClient.terminate()

@@ -1,3 +1,4 @@
+import type { SpotEvent } from '@iaxweb/contracts'
 import type { SegmentRecord } from '../../src/ai/segment-store.js'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -7,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
 import { RecordRepository } from '../../src/records/record-repository.js'
+import { RecordReviewService } from '../../src/records/review-service.js'
 
 test('only reviewed records receive durable voiceprint jobs; cancellation keeps vectors', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-reviewed-embedding-'))
@@ -435,15 +437,18 @@ test('rejects empty manual patches', () => {
 
 test('returns the newest effective spot per callsign and excludes N0CALL', () => {
   const repository = new RecordRepository(':memory:')
-  const first = record({ callsign: 'BG5AAA', id: 'one', timestamp: '2026-08-10T12:00:00.000Z' })
-  const second = record({ callsign: 'BG5AAA', id: 'two', timestamp: '2026-08-11T12:00:00.000Z' })
+  const first = record({ callsign: 'BG5AAA', id: 'one', sourceRepeaterId: '1903', timestamp: '2026-08-10T12:00:00.000Z' })
+  const second = record({ callsign: 'BG5AAA', id: 'two', sourceRepeaterId: '1904', timestamp: '2026-08-11T12:00:00.000Z' })
   const reviewed = record({ callsign: 'BG5BBB', id: 'three', timestamp: '2026-08-12T12:00:00.000Z' })
+  const unknown = record({ callsign: 'BG5CCC', id: 'four', timestamp: '2026-08-09T12:00:00.000Z' })
   repository.insert('1900', first)
   repository.insert('1901', second)
   repository.insert('1902', reviewed)
+  repository.insert('1900', unknown)
   repository.updateAutomaticCallsign(first)
   repository.updateAutomaticCallsign(second)
   repository.updateAutomaticCallsign(reviewed)
+  repository.updateAutomaticCallsign(unknown)
   repository.updateManualReview(reviewed.id, { callsign: 'N0CALL' })
 
   assert.deepEqual(repository.recentSpots(), [{
@@ -451,8 +456,43 @@ test('returns the newest effective spot per callsign and excludes N0CALL', () =>
     callsign: 'BG5AAA',
     id: second.id,
     node: '1901',
+    source: '1904',
+  }, {
+    at: unknown.timestamp,
+    callsign: 'BG5CCC',
+    id: unknown.id,
+    node: '1900',
+    source: null,
   }])
   repository.close()
+})
+
+test('published corrections and removals carry the recorded repeater source', (context) => {
+  const repository = new RecordRepository(':memory:')
+  context.after(() => repository.close())
+  const segment = record({ sourceRepeaterId: '1901' })
+  repository.insert('1900', segment)
+  const published: SpotEvent[] = []
+  const review = new RecordReviewService(repository, { remove() {} }, {
+    publishReview: spot => published.push(spot),
+  })
+
+  review.update(segment.id, { callsign: 'BG5AAA' }, { role: 'editor', username: 'operator' })
+  review.delete(segment.id)
+
+  assert.deepEqual(published, [{
+    at: segment.timestamp,
+    callsign: 'BG5AAA',
+    id: segment.id,
+    node: '1900',
+    source: '1901',
+  }, {
+    at: segment.timestamp,
+    callsign: 'N0CALL',
+    id: segment.id,
+    node: '1900',
+    source: '1901',
+  }])
 })
 
 test('lists segments newest first with pagination', () => {
