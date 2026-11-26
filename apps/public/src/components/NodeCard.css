@@ -236,8 +236,6 @@
   border-radius: 50%;
   color: #b9ecea;
   background: var(--audio-background);
-  font: inherit;
-  font-size: 0.58rem;
   cursor: pointer;
   place-items: center;
 }
@@ -351,7 +349,6 @@
     border: none;
     border-radius: 0;
     background: transparent;
-    font-size: 0.65rem;
   }
 
   .audio-toggle::before {

@@ -208,7 +208,10 @@ function transmitLabel(value: TransmitSource): string {
           :aria-pressed="isPlaying"
           @click="toggleAudio"
         >
-          {{ isPlaying ? '■' : '▶' }}
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+            <rect v-if="isPlaying" x="3.5" y="3.5" width="9" height="9" rx="1" />
+            <path v-else d="M5.25 3L13.5 8 5.25 13Z" />
+          </svg>
         </button>
       </div>
     </div>

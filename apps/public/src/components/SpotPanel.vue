@@ -7,16 +7,17 @@ const spotListElement = ref<HTMLUListElement | null>(null)
 const visibleSpotCount = ref(0)
 const visibleSpots = computed(() => props.spots.slice(0, visibleSpotCount.value).map(spot => ({
   spot,
-  source: props.showSource ? sourceSuffix(spot.source) : undefined,
+  source: props.showSource ? sourceRepeater(spot.source) : undefined,
 })))
 const highlightedSpotKeys = ref(new Set<string>())
 let resizeObserver: ResizeObserver | undefined
 
-function sourceSuffix(source: SpotEvent['source']): string | undefined {
-  const node = source ? props.nodes[source] : undefined
-  if (node?.TYPE !== 'REPEATER')
-    return undefined
-  return node.NAME?.trim().match(/^[A-Z0-9]*[A-Z]\d+([A-Z]{2})[A-Z]?$/i)?.[1]?.toUpperCase()
+function sourceRepeater(sourceId: SpotEvent['source']): { callsign: string, suffix: string } | undefined {
+  const node = sourceId ? props.nodes[sourceId] : undefined
+  const callsign = node?.TYPE === 'REPEATER' ? node.NAME?.trim().toUpperCase() : undefined
+  const suffix = callsign?.match(/^[A-Z0-9]*[A-Z]\d+([A-Z]{2})[A-Z]?$/)?.[1]
+  if (callsign && suffix)
+    return { callsign, suffix }
 }
 
 function spotKey(spot: SpotEvent): string {
@@ -97,7 +98,7 @@ function relativeTime(iso: string): string {
     <ul v-if="spots.length" ref="spotListElement" class="spot-list">
       <li v-for="{ spot, source } in visibleSpots" :key="spotKey(spot)" class="spot-item" :class="{ 'is-new': highlightedSpotKeys.has(spotKey(spot)) }" @animationend="highlightedSpotKeys.delete(spotKey(spot))">
         <span v-if="showSource" class="spot-source-slot">
-          <span v-if="source" class="spot-source" title="来源中继">{{ source }}</span>
+          <span v-if="source" class="spot-source" :title="`来源：${source.callsign}`">{{ source.suffix }}</span>
         </span>
         <a
           class="spot-callsign"
