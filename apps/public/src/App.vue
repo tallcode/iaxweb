@@ -90,7 +90,7 @@ function markPageReady(routePath: string): void {
     <RouterView v-slot="{ Component, route: pageRoute }">
       <component :is="Component" :key="pageRoute.fullPath" @page-ready="markPageReady(pageRoute.fullPath)" />
     </RouterView>
-    <SpotPanel v-if="showSpotPanel" :history-ready="spotHistoryReady" :spots="recentSpots" />
+    <SpotPanel v-if="showSpotPanel" :history-ready="spotHistoryReady" :nodes="statusSnapshot" :show-source="!isMobile" :spots="recentSpots" />
     <footer class="site-footer">
       <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">浙ICP备20025327号-6</a>
     </footer>

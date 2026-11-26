@@ -61,7 +61,7 @@ body {
 
 .map-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 12.5rem;
+  grid-template-columns: minmax(0, 1fr) 12rem;
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
     'header header'

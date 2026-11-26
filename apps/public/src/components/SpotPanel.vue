@@ -1,13 +1,23 @@
 <script setup lang="ts">
-import type { SpotEvent } from '@iaxweb/contracts'
+import type { PublicStatusSnapshot, SpotEvent } from '@iaxweb/contracts'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-const props = defineProps<{ historyReady: boolean, spots: SpotEvent[] }>()
+const props = defineProps<{ historyReady: boolean, nodes: PublicStatusSnapshot, showSource: boolean, spots: SpotEvent[] }>()
 const spotListElement = ref<HTMLUListElement | null>(null)
 const visibleSpotCount = ref(0)
-const visibleSpots = computed(() => props.spots.slice(0, visibleSpotCount.value))
+const visibleSpots = computed(() => props.spots.slice(0, visibleSpotCount.value).map(spot => ({
+  spot,
+  source: props.showSource ? sourceSuffix(spot.source) : undefined,
+})))
 const highlightedSpotKeys = ref(new Set<string>())
 let resizeObserver: ResizeObserver | undefined
+
+function sourceSuffix(source: SpotEvent['source']): string | undefined {
+  const node = source ? props.nodes[source] : undefined
+  if (node?.TYPE !== 'REPEATER')
+    return undefined
+  return node.NAME?.trim().match(/^[A-Z0-9]*[A-Z]\d+([A-Z]{2})[A-Z]?$/i)?.[1]?.toUpperCase()
+}
 
 function spotKey(spot: SpotEvent): string {
   return `${spot.id}|${spot.callsign}|${spot.at}`
@@ -69,7 +79,7 @@ function relativeTime(iso: string): string {
 </script>
 
 <template>
-  <aside class="spot-panel" aria-label="AI Spots 最近呼号">
+  <aside class="spot-panel" :class="{ 'has-source-column': showSource }" aria-label="AI Spots 最近呼号">
     <div class="spot-panel-heading">
       <h2 class="spot-panel-title">
         AI Spots
@@ -85,7 +95,10 @@ function relativeTime(iso: string): string {
       </p>
     </div>
     <ul v-if="spots.length" ref="spotListElement" class="spot-list">
-      <li v-for="spot in visibleSpots" :key="spotKey(spot)" class="spot-item" :class="{ 'is-new': highlightedSpotKeys.has(spotKey(spot)) }" @animationend="highlightedSpotKeys.delete(spotKey(spot))">
+      <li v-for="{ spot, source } in visibleSpots" :key="spotKey(spot)" class="spot-item" :class="{ 'is-new': highlightedSpotKeys.has(spotKey(spot)) }" @animationend="highlightedSpotKeys.delete(spotKey(spot))">
+        <span v-if="showSource" class="spot-source-slot">
+          <span v-if="source" class="spot-source" title="来源中继">{{ source }}</span>
+        </span>
         <a
           class="spot-callsign"
           :href="`https://www.qrz.com/db/${encodeURIComponent(spot.callsign)}`"
