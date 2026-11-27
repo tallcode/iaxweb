@@ -9,6 +9,7 @@ interface StatusStreamOptions {
   onOpen?: () => void
   onSnapshot: (snapshot: PublicStatusSnapshot) => void
   onSpot?: (spot: SpotEvent) => void
+  onSpotHistory?: (spots: SpotEvent[]) => void
 }
 
 export class StatusStreamClient {
@@ -27,6 +28,7 @@ export class StatusStreamClient {
           options.onExpired()
         }
       },
+      onExhausted: options.onInvalidMessage,
       onMessage: event => this.handleMessage(event, options),
       ...(options.onOpen ? { onOpen: options.onOpen } : {}),
     })
@@ -63,6 +65,10 @@ export class StatusStreamClient {
     }
 
     const message = statusStreamMessageSchema.safeParse(parsed).data
+    if (message?.type === 'history') {
+      options.onSpotHistory?.(message.spots)
+      return
+    }
     if (message?.type === 'snapshot')
       this.fullSnapshot = message.nodes
     const snapshot = message?.type === 'state'

@@ -64,6 +64,7 @@ export function createApplication({ config, aiConfig, nodeDefinitions, repositor
   const streams = new PublicStreams({
     audioSources: natsAudio,
     hasAiListener: nodeId => aiNodeIds.includes(nodeId),
+    ...(spotPublishingEnabled ? { recentSpots: () => recordRepository?.recentSpots() ?? [] } : {}),
     spotPublishingEnabled,
   })
   const allmon3 = new Allmon3StatusService({
@@ -127,7 +128,6 @@ export function createApplication({ config, aiConfig, nodeDefinitions, repositor
       allmon3: Boolean(allmon3.currentSnapshot),
       nats: natsAudio.size > 0 && [...natsAudio.values()].every(service => service.connected),
     }),
-    ...(spotPublishingEnabled && recordRepository ? { recentSpots: () => recordRepository.recentSpots() } : {}),
     ...(stats ? { stats } : {}),
   })
   app.register(registerCoverageRoutes, { directory: resolve(repositoryRoot, 'data/coverage') })

@@ -70,6 +70,7 @@ export {
   AUDIO_QUALITY_GATE_VERSION,
   audioQualitySchema,
   audioStateSchema,
+  computeWebSocketProof,
   createUserSchema,
   loginSchema,
   manualCallsignSchema,
@@ -85,4 +86,7 @@ export {
   spotHistorySchema,
   statusStreamMessageSchema,
   updateUserSchema,
+  WEBSOCKET_VERIFICATION_FAILED,
+  webSocketChallengeSchema,
+  webSocketVerifySchema,
 } from './schemas.js'

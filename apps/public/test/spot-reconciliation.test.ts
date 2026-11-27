@@ -9,7 +9,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('reconciles on reconnect and replays corrections received during a stale history response', async () => {
+it('replaces spot history on reconnect and applies subsequent live corrections and removals', async () => {
   vi.useFakeTimers()
   const sockets: EventTarget[] = []
   vi.stubGlobal('WebSocket', class extends EventTarget {
@@ -20,11 +20,9 @@ it('reconciles on reconnect and replays corrections received during a stale hist
 
     close(): void {}
   })
-  let resolveHistory!: (response: Response) => void
   const first = { id: 'first', node: '1900', callsign: 'BG5AAA', at: '2026-11-17T00:00:00.000Z' }
-  const fetchMock = vi.fn().mockResolvedValueOnce(Response.json([first])).mockImplementationOnce(() => new Promise<Response>((resolve) => {
-    resolveHistory = resolve
-  }))
+  const next = { ...first, id: 'second', callsign: 'BG5BBB' }
+  const fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
   setActivePinia(createPinia())
   const store = useStatusStore()
@@ -38,28 +36,36 @@ it('reconciles on reconnect and replays corrections received during a stale hist
   try {
     store.startStatusStream()
     sockets[0]!.dispatchEvent(new Event('open'))
+    send({ type: 'history', spots: [first] })
+    expect(store.spotHistoryReady).toBe(true)
+    expect(store.recentSpots).toEqual([first])
+    expect(store.connectionState).toBe('waiting-snapshot')
     send(snapshot)
     send(runtime)
     expect(store.statusSnapshot).toEqual({ 1900: { AI: true, NAME: 'Hub', ONLINE: true } })
-    await vi.waitFor(() => expect(store.recentSpots).toHaveLength(1))
+    expect(store.spotHistoryReady).toBe(true)
+    expect(store.recentSpots).toEqual([first])
     sockets[0]!.dispatchEvent(new Event('close'))
     await vi.advanceTimersByTimeAsync(1000)
     sockets[1]!.dispatchEvent(new Event('open'))
     send(runtime)
     expect(store.connectionState).toBe('invalid-data')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    send({ type: 'history', spots: [next] })
+    expect(store.recentSpots).toEqual([next])
     send(snapshot)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    sendSpot({ ...first, callsign: 'N0CALL' })
-    sendSpot({ ...first, id: 'second', callsign: 'BG5BBB' })
-    resolveHistory(Response.json([first]))
-    await vi.waitFor(() => expect(store.recentSpots.map(spot => spot.callsign)).toEqual(['BG5BBB']))
+    sendSpot({ ...next, callsign: 'BG5ABC' })
+    send({ type: 'snapshot', nodes: { 1900: { AI: true, NAME: 'Updated Hub', ONLINE: false } } })
+    expect(store.recentSpots.map(spot => spot.callsign)).toEqual(['BG5ABC'])
+    sendSpot({ ...next, callsign: 'N0CALL' })
+    expect(store.recentSpots).toEqual([])
 
+    sendSpot(next)
+    expect(store.recentSpots).toHaveLength(1)
     send({ type: 'snapshot', nodes: { 1900: { AI: true, AI_SPOT: false } } })
     sendSpot(first)
     expect(store.aiSpotEnabled).toBe(false)
-    expect(store.recentSpots).toHaveLength(0)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(store.recentSpots).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
   }
   finally {
     store.stopStatusStream()

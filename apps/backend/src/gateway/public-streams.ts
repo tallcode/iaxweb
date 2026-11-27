@@ -12,6 +12,7 @@ interface AudioSource {
 interface PublicStreamsOptions {
   audioSources: ReadonlyMap<string, AudioSource>
   hasAiListener: (nodeId: string) => boolean
+  recentSpots?: () => SpotEvent[]
   spotPublishingEnabled?: boolean
 }
 
@@ -56,6 +57,15 @@ export class PublicStreams {
   }
 
   listenToStatus(client: WebSocket, snapshot: StatusSnapshot | undefined): void {
+    if (this.options.recentSpots) {
+      try {
+        const spots = this.options.recentSpots()
+        client.send(JSON.stringify({ type: 'history', spots } satisfies StatusStreamMessage))
+      }
+      catch (error) {
+        console.warn('Unable to send Spot history:', error)
+      }
+    }
     this.statusClients.set(client, undefined)
     client.once('close', () => this.statusClients.delete(client))
     if (snapshot)

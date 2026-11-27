@@ -1,6 +1,6 @@
 import type { PublicStatusSnapshot, SpotEvent } from '@iaxweb/contracts'
 import type { StatusConnectionState } from '../services/status-presentation'
-import { NO_CALLSIGN, spotHistorySchema } from '@iaxweb/contracts'
+import { NO_CALLSIGN } from '@iaxweb/contracts'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { markSnapshotOffline, StatusStreamClient } from '../services/status-stream'
@@ -17,9 +17,6 @@ export const useStatusStore = defineStore('status', () => {
   const currentTime = ref(Date.now())
   let streamClient: StatusStreamClient | undefined
   let clockTimerId: ReturnType<typeof setInterval> | undefined
-  let needsSpotReconciliation = true
-  let historyRequest: AbortController | undefined
-  let pendingSpotEvents: SpotEvent[] | undefined
 
   const aiSpotEnabled = computed(() => Object.values(statusSnapshot.value).some(node => (node.AI_SPOT ?? node.AI) === true))
   const recentSpots = computed(() => {
@@ -43,32 +40,25 @@ export const useStatusStore = defineStore('status', () => {
       onConnecting: () => connectionState.value = 'reconnecting',
       onExpired: () => statusSnapshot.value = markSnapshotOffline(statusSnapshot.value),
       onInvalidMessage: () => connectionState.value = 'invalid-data',
-      onOpen: () => {
-        connectionState.value = 'waiting-snapshot'
-        needsSpotReconciliation = true
-      },
+      onOpen: () => connectionState.value = 'waiting-snapshot',
       onSnapshot: (nextSnapshot) => {
         statusSnapshot.value = nextSnapshot
         hasInitialSnapshot.value = true
         connectionState.value = 'ready'
         if (!aiSpotEnabled.value) {
-          historyRequest?.abort()
-          historyRequest = undefined
-          pendingSpotEvents = undefined
           spotsById.value.clear()
           spotHistoryReady.value = false
-          needsSpotReconciliation = true
-        }
-        else if (needsSpotReconciliation) {
-          needsSpotReconciliation = false
-          void loadSpotHistory()
         }
       },
       onSpot: (spot) => {
         if (hasInitialSnapshot.value && !aiSpotEnabled.value)
           return
-        pendingSpotEvents?.push(spot)
         applySpot(spot)
+      },
+      onSpotHistory: (spots) => {
+        spotsById.value = new Map()
+        spots.forEach(applySpot)
+        spotHistoryReady.value = true
       },
     })
     streamClient.start()
@@ -76,10 +66,6 @@ export const useStatusStore = defineStore('status', () => {
   }
 
   function stopStatusStream(): void {
-    historyRequest?.abort()
-    historyRequest = undefined
-    pendingSpotEvents = undefined
-    needsSpotReconciliation = true
     streamClient?.stop()
     streamClient = undefined
     if (clockTimerId)
@@ -104,38 +90,6 @@ export const useStatusStore = defineStore('status', () => {
           if (oldest)
             spotsById.value.delete(oldest.id)
         }
-      }
-    }
-  }
-
-  async function loadSpotHistory(): Promise<void> {
-    historyRequest?.abort()
-    const request = new AbortController()
-    const events: SpotEvent[] = []
-    historyRequest = request
-    pendingSpotEvents = events
-    try {
-      const response = await fetch('/api/spots', { signal: request.signal })
-      if (!response.ok)
-        throw new Error('Spot history is unavailable')
-      const history = spotHistorySchema.parse(await response.json())
-      if (request.signal.aborted || historyRequest !== request)
-        return
-      // Replace the stale cache, then replay events received during the request.
-      // This includes N0CALL removals, so a late response cannot resurrect them.
-      spotsById.value = new Map()
-      history.forEach(applySpot)
-      events.forEach(applySpot)
-    }
-    catch {
-      if (!request.signal.aborted)
-        needsSpotReconciliation = true
-    }
-    finally {
-      if (historyRequest === request) {
-        historyRequest = undefined
-        pendingSpotEvents = undefined
-        spotHistoryReady.value = true
       }
     }
   }

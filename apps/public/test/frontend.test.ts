@@ -1,5 +1,5 @@
 import type { PublicStatusSnapshot } from '@iaxweb/contracts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { isFaviconTransmission } from '../src/composables/use-transmission-favicon'
 import { mapRepeaterMarkers } from '../src/services/map-county-status'
 import { MAP_MAX_ZOOM, mapViewBox, panMapViewport, zoomMapViewport, zoomMapViewportTowardCenter } from '../src/services/map-viewport'
@@ -10,13 +10,58 @@ import { buildTopologyEdges, createTopologySignature } from '../src/services/top
 
 class FakeSocket extends EventTarget {
   binaryType: BinaryType = 'blob'
+  readonly sent: string[] = []
 
-  close(): void {
-    this.dispatchEvent(new Event('close'))
+  send(data: string): void {
+    this.sent.push(data)
+  }
+
+  close(code = 1000, reason = ''): void {
+    this.dispatchEvent(Object.assign(new Event('close'), { code, reason }))
   }
 }
 
 describe('reconnecting WebSocket', () => {
+  it('verifies the initial challenge without forwarding it to the message handler', () => {
+    const socket = new FakeSocket()
+    const onMessage = vi.fn()
+    const connection = new ReconnectingWebSocket('/status', {
+      createSocket: () => socket,
+      onMessage,
+      url: () => 'ws://example/status',
+    })
+    const nonce = '0123456789abcdef0123456789abcdef'
+    const challenge = new MessageEvent('message', { data: JSON.stringify({ type: 'challenge', nonce }) })
+    const snapshot = new MessageEvent('message', { data: JSON.stringify({ type: 'snapshot', nodes: {} }) })
+    const audio = new MessageEvent('message', { data: new ArrayBuffer(12) })
+
+    connection.start()
+    socket.dispatchEvent(new Event('open'))
+    socket.dispatchEvent(challenge)
+    expect(socket.sent.map(message => JSON.parse(message))).toEqual([{ type: 'verify', proof: '86d04db5' }])
+    expect(onMessage).not.toHaveBeenCalled()
+
+    socket.dispatchEvent(snapshot)
+    socket.dispatchEvent(audio)
+    expect(onMessage.mock.calls).toEqual([[snapshot], [audio]])
+    connection.stop()
+  })
+
+  it('does not retry after the server rejects verification', () => {
+    const socket = new FakeSocket()
+    const setTimer = vi.fn(() => 1 as unknown as ReturnType<typeof setTimeout>)
+    const connection = new ReconnectingWebSocket('/status', {
+      createSocket: () => socket,
+      setTimer,
+      url: () => 'ws://example/status',
+    })
+
+    connection.start()
+    socket.close(1008, 'Verification failed')
+    expect(setTimer).not.toHaveBeenCalled()
+    connection.stop()
+  })
+
   it('resets retry failures only after valid data is marked healthy', () => {
     const sockets: FakeSocket[] = []
     const timers: Array<{ callback: () => void, delay: number }> = []

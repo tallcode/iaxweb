@@ -57,6 +57,19 @@ export const audioStateSchema = z.object({
   speaking: z.boolean(),
   listeners: z.number().int().nonnegative().optional(),
 })
+const webSocketNonce = z.string().regex(/^[0-9a-f]{32}$/)
+export const WEBSOCKET_VERIFICATION_FAILED = 'Verification failed'
+export const webSocketChallengeSchema = z.object({ type: z.literal('challenge'), nonce: webSocketNonce })
+export const webSocketVerifySchema = z.object({ type: z.literal('verify'), proof: z.string().regex(/^[0-9a-f]{8}$/) })
+
+export function computeWebSocketProof(nonce: string): string {
+  // FNV-1a over the ASCII characters of the hexadecimal nonce.
+  let hash = 0x811C9DC5
+  for (let index = 0; index < nonce.length; index++)
+    hash = Math.imul(hash ^ nonce.charCodeAt(index), 0x01000193)
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
 const publicConnectionStatusSchema = z.object({ CSTATE: z.literal('ESTABLISHED') })
 export const nodeLocationSchema = z.object({
   lat: z.number().min(-90).max(90),
@@ -91,6 +104,7 @@ export const publicStatusRuntimeSnapshotSchema = z.record(publicNodeIdSchema, pu
 export const statusStreamMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('snapshot'), nodes: publicStatusSnapshotSchema }),
   z.object({ type: z.literal('state'), nodes: publicStatusRuntimeSnapshotSchema }),
+  z.object({ type: z.literal('history'), spots: spotHistorySchema }),
 ])
 const callsign = z.string().regex(CALLSIGN_PATTERN).nullable()
 const manualCallsign = z.string().regex(MANUAL_CALLSIGN_PATTERN).nullable()

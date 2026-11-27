@@ -1,6 +1,9 @@
+import { computeWebSocketProof, WEBSOCKET_VERIFICATION_FAILED, webSocketChallengeSchema } from '@iaxweb/contracts'
+
 export interface SocketLike extends EventTarget {
   binaryType?: BinaryType
   close: (code?: number, reason?: string) => void
+  send: (data: string) => void
 }
 
 export interface ReconnectingWebSocketOptions {
@@ -84,14 +87,35 @@ export class ReconnectingWebSocket {
       socket.binaryType = this.binaryType
     this.socket = socket
 
+    let firstMessage = true
     socket.addEventListener('open', () => this.onOpen())
-    socket.addEventListener('message', event => this.onMessage(event as MessageEvent<ArrayBuffer | string>))
-    socket.addEventListener('error', () => socket.close())
-    socket.addEventListener('close', () => {
-      if (this.socket === socket)
-        this.socket = null
-      if (!this.active)
+    socket.addEventListener('message', (event) => {
+      if (this.socket !== socket)
         return
+
+      const message = event as MessageEvent<ArrayBuffer | string>
+      if (firstMessage) {
+        firstMessage = false
+        const challenge = typeof message.data === 'string' ? parseChallenge(message.data) : undefined
+        if (challenge) {
+          socket.send(JSON.stringify({ type: 'verify', proof: computeWebSocketProof(challenge.nonce) }))
+          return
+        }
+      }
+      this.onMessage(message)
+    })
+    socket.addEventListener('error', () => socket.close())
+    socket.addEventListener('close', (event) => {
+      if (!this.active || this.socket !== socket)
+        return
+      this.socket = null
+
+      const { code, reason } = event as CloseEvent
+      if (code === 1008 && reason === WEBSOCKET_VERIFICATION_FAILED) {
+        this.active = false
+        this.onExhausted()
+        return
+      }
 
       this.failures++
       this.onDisconnect(this.failures)
@@ -107,5 +131,14 @@ export class ReconnectingWebSocket {
         this.connect()
       }, delay)
     })
+  }
+}
+
+function parseChallenge(text: string) {
+  try {
+    return webSocketChallengeSchema.safeParse(JSON.parse(text)).data
+  }
+  catch {
+    return undefined
   }
 }
