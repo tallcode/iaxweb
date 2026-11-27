@@ -91,7 +91,7 @@
 
 .spot-source,
 .spot-callsign {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 
 .spot-source {
