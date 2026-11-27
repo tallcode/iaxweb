@@ -18,6 +18,7 @@ import { PublicStreams } from './gateway/public-streams.js'
 import { startWebSocketHeartbeat } from './gateway/websocket-heartbeat.js'
 import { registerAdminRoutes } from './http/admin-routes.js'
 import { registerCoverageRoutes } from './http/coverage-routes.js'
+import { registerNotFoundHandler } from './http/not-found.js'
 import { registerPublicRoutes } from './http/public-routes.js'
 import { registerStaticRoutes } from './http/static-routes.js'
 import { registerWebSocketRoutes } from './http/websocket-routes.js'
@@ -107,6 +108,7 @@ export function createApplication({ config, aiConfig, nodeDefinitions, repositor
   }
 
   const app = Fastify({ bodyLimit: 16_384, logger: true })
+  registerNotFoundHandler(app)
   const stats = recordRepository && new StatsCache(
     resolve(repositoryRoot, 'data/stats/speech-activity.json'),
     recordRepository,
