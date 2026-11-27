@@ -181,15 +181,15 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   assert.equal(partialSearch.statusCode, 200)
   assert.equal(partialSearch.json().total, 0)
 
-  await context.test('filters the effective caller by a single leading-percent suffix', async () => {
+  await context.test('filters the effective caller by a suffix without wildcard syntax', async () => {
     repository.updateManualReview(segment.id, { callsign: 'BA3XAA' })
     const search = (callsign: string, page = 1) => {
       const query = new URLSearchParams({ callsign, page: String(page), pageSize: '1' })
       return app.inject({ headers, url: `/api/admin/records?${query}` })
     }
 
-    const first = await search('%aa')
-    const second = await search('%aa', 2)
+    const first = await search('aa')
+    const second = await search('aa', 2)
     assert.equal(first.statusCode, 200)
     assert.equal(second.statusCode, 200)
     const firstPage = first.json<AdminRecordPage>()
@@ -200,16 +200,20 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
     assert.equal(secondPage.items[0]?.sourceRepeaterId, '1902')
     assert.equal(secondPage.items[0]?.sourceRepeaterName, null)
 
-    const original = await search('%aaa')
+    const fullCallsign = await search('ba3xaa')
+    assert.equal(fullCallsign.statusCode, 200)
+    assert.equal(fullCallsign.json<AdminRecordPage>().total, 1)
+    assert.equal(fullCallsign.json<AdminRecordPage>().items[0]?.id, segment.id)
+    const original = await search('aaa')
     assert.equal(original.statusCode, 200)
     assert.equal(original.json<AdminRecordPage>().total, 1)
     assert.equal(original.json<AdminRecordPage>().items[0]?.id, emptyCaller.id)
-    for (const callsign of ['%5a', '%bbb']) {
+    for (const callsign of ['5a', 'bbb']) {
       const response = await search(callsign)
       assert.equal(response.statusCode, 200)
       assert.equal(response.json<AdminRecordPage>().total, 0)
     }
-    for (const callsign of ['%A', 'A%', '%%AA', '%AA%', '_', '%A_', '%éa']) {
+    for (const callsign of ['A', '%AA', 'A%', '%%AA', '%AA%', '_', 'A_', 'éa']) {
       assert.equal((await search(callsign)).statusCode, 400, callsign)
     }
   })
@@ -243,6 +247,63 @@ test('admin routes use hardened Fastify cookies and tolerate malformed cookies',
   rmSync(wav, { recursive: true })
   assert.equal((await app.inject({ headers, method: 'DELETE', url: deleteUrl })).statusCode, 204)
   assert.equal(repository.find(deletable.id), undefined)
+})
+
+test('authenticated readers can locate an unfiltered record page by ID', async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-record-location-'))
+  context.after(() => rmSync(directory, { recursive: true, force: true }))
+  const usersFile = join(directory, 'admin.json')
+  writeFileSync(usersFile, JSON.stringify({ users: [{ username: 'admin', passwordHash: hashPassword('secret'), role: 'admin' }] }))
+  const auth = new AdminAuth(usersFile, join(directory, 'sessions.json'))
+  await auth.createUser('reader', 'secret', 'viewer')
+  const token = await auth.login('reader', 'secret')
+  const headers = { cookie: `admin_token=${token}` }
+  const repository = new RecordRepository(':memory:')
+  context.after(() => repository.close())
+  const app = Fastify()
+  context.after(() => app.close())
+  await app.register(fastifyCookie)
+  await app.register(registerAdminRoutes, {
+    adminAuth: auth,
+    loginRateLimiter: new LoginRateLimiter(),
+    prefix: '/api/admin',
+    recordingsDirectory: directory,
+    recordRepository: repository,
+    sessionMaxAgeSeconds: AdminAuth.sessionMaxAgeSeconds,
+  })
+  for (const [id, timestamp] of [
+    ['latest', '2026-08-12T12:00:00.000Z'],
+    ['same-z', '2026-08-11T12:00:00.000Z'],
+    ['same-m', '2026-08-11T12:00:00.000Z'],
+    ['same-a', '2026-08-11T12:00:00.000Z'],
+    ['oldest', '2026-08-10T12:00:00.000Z'],
+  ] as const) {
+    repository.insert('1900', { id, timestamp, recognition: '示例消息', durationMs: 1000, voicedMs: 900 })
+  }
+  repository.updateManualReview('same-m', { callsign: 'BG5AAA' })
+
+  const response = await app.inject({
+    headers,
+    url: '/api/admin/records?recordId=same-m&pageSize=2&page=999&callsign=ZZ&editedOnly=true&reviewedOnly=true',
+  })
+  assert.equal(response.statusCode, 200)
+  const located = response.json<AdminRecordPage>()
+  assert.equal(located.page, 2)
+  assert.equal(located.pageSize, 2)
+  assert.equal(located.total, 5)
+  assert.deepEqual(located.items.map(item => item.id), ['same-m', 'same-a'])
+  assert.ok(located.items.every(item => item.hasAudio === false))
+  assert.equal(response.headers['cache-control'], 'no-store')
+  const boundary = await app.inject({ headers, url: '/api/admin/records?recordId=same-z&pageSize=2' })
+  assert.equal(boundary.json<AdminRecordPage>().page, 1)
+  const last = await app.inject({ headers, url: '/api/admin/records?recordId=oldest&pageSize=2' })
+  assert.equal(last.json<AdminRecordPage>().page, 3)
+  assert.deepEqual(last.json<AdminRecordPage>().items.map(item => item.id), ['oldest'])
+  assert.equal((await app.inject({ headers, url: '/api/admin/records?recordId=missing' })).statusCode, 404)
+  for (const query of ['recordId=', 'recordId=%20', `recordId=${'a'.repeat(129)}`, 'recordId=same-m&recordId=same-z', 'recordId=same-m&pageSize=0', 'recordId=same-m&pageSize=101', 'recordId=same-m&pageSize=2.5']) {
+    assert.equal((await app.inject({ headers, url: `/api/admin/records?${query}` })).statusCode, 400, query)
+  }
+  assert.equal((await app.inject({ url: '/api/admin/records?recordId=same-m' })).statusCode, 401)
 })
 
 test('admin routes report disabled persistence without parsing a request body', async (context) => {

@@ -4,7 +4,8 @@ import { hasCallerCallsign } from '@iaxweb/contracts'
 import { useRecordInteractions, useRecordsQueryContext } from './use-records-context'
 
 export function useRecordRows(view: RecordView) {
-  const { records, isLoading } = useRecordsQueryContext().state
+  const query = useRecordsQueryContext()
+  const { records, isLoading, isFiltered, highlightedRecordId } = query.state
   const actions = useRecordInteractions()
 
   function actionsDisabled(): boolean {
@@ -51,6 +52,9 @@ export function useRecordRows(view: RecordView) {
 
   return {
     records,
+    isFiltered,
+    highlightedRecordId,
+    showContext: query.actions.showContext,
     isAdministrator: actions.isAdministrator,
     activeEditor: actions.activeEditor,
     playingRecordId: actions.playingRecordId,

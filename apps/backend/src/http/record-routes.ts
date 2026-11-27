@@ -11,7 +11,7 @@ import { RecordingStore } from '../records/recording-store.js'
 import { RecordReviewError, RecordReviewService } from '../records/review-service.js'
 
 interface RecordParams { id: string }
-interface RecordQuery { callsign?: string, editedOnly?: string, reviewedOnly?: string, page?: string, pageSize?: string }
+interface RecordQuery { callsign?: string, editedOnly?: string, reviewedOnly?: string, page?: string, pageSize?: string, recordId?: string }
 type Guard = (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply | undefined>
 interface RecordRoutesOptions {
   adminAuth: AdminAuth
@@ -40,18 +40,25 @@ export async function registerRecordRoutes(app: FastifyInstance, options: Record
   app.get<{ Querystring: RecordQuery }>('/records', { preHandler: requireAuthentication }, async (request, reply) => {
     const page = parsePage(request.query.page, 1)
     const pageSize = parsePage(request.query.pageSize, 50)
+    const recordId = request.query.recordId
+    if (recordId !== undefined && (typeof recordId !== 'string' || !recordId.trim() || recordId.length > 128))
+      return reply.code(400).send('Invalid record ID')
     const filter = request.query.callsign
     const callsign = typeof filter === 'string' ? filter.trim().toUpperCase() : undefined
-    if (filter !== undefined && (callsign === undefined || !RECORD_CALLSIGN_FILTER_PATTERN.test(callsign)))
+    if (recordId === undefined && filter !== undefined && (callsign === undefined || !RECORD_CALLSIGN_FILTER_PATTERN.test(callsign)))
       return reply.code(400).send('Invalid callsign')
     let result
     const queryStarted = performance.now()
     try {
-      result = recordRepository.list(page, pageSize, callsign, request.query.editedOnly === 'true', request.query.reviewedOnly === 'true')
+      result = recordId === undefined
+        ? recordRepository.list(page, pageSize, callsign, request.query.editedOnly === 'true', request.query.reviewedOnly === 'true')
+        : recordRepository.listContaining(recordId, pageSize)
     }
     catch {
       return reply.code(400).send('Invalid pagination')
     }
+    if (!result)
+      return reply.code(404).send({ message: '记录已不存在，请刷新列表。' })
     const queryDuration = performance.now() - queryStarted
     const recordingStarted = performance.now()
     const items = await Promise.all(result.items.map(async item => ({

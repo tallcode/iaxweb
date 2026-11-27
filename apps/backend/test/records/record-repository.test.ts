@@ -9,6 +9,7 @@ import test from 'node:test'
 import { SPEAKER_DIMENSIONS, SPEAKER_VERSION } from '../../src/ai/speaker-model.mjs'
 import { RecordRepository } from '../../src/records/record-repository.js'
 import { RecordReviewService } from '../../src/records/review-service.js'
+import { SqliteRecordStore } from '../../src/records/sqlite/record-store.js'
 
 test('only reviewed records receive durable voiceprint jobs; cancellation keeps vectors', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'iaxweb-reviewed-embedding-'))
@@ -510,6 +511,75 @@ test('lists segments newest first with pagination', () => {
   repository.close()
 })
 
+test('locates a record page in complete capture order, including tied timestamps and boundaries', (context) => {
+  const repository = new RecordRepository(':memory:')
+  context.after(() => repository.close())
+  const captures = [
+    ['latest', '2026-08-12T12:00:00.000Z'],
+    ['same-z', '2026-08-11T12:00:00.000Z'],
+    ['same-m', '2026-08-11T12:00:00.000Z'],
+    ['same-a', '2026-08-11T12:00:00.000Z'],
+    ['oldest', '2026-08-10T12:00:00.000Z'],
+  ] as const
+  for (const [id, timestamp] of captures)
+    repository.insert('1900', record({ id, timestamp }))
+
+  for (const [id, expectedPage] of [['latest', 1], ['same-z', 1], ['same-m', 2], ['same-a', 2], ['oldest', 3]] as const) {
+    const located = repository.listContaining(id, 2)
+    assert.ok(located)
+    assert.equal(located.page, expectedPage)
+    assert.equal(located.pageSize, 2)
+    assert.equal(located.total, 5)
+    assert.deepEqual(located, repository.list(expectedPage, 2))
+    assert.ok(located.items.some(item => item.id === id))
+  }
+  assert.equal(repository.listContaining('missing', 2), undefined)
+  assert.equal(repository.listContaining('latest', 100)?.total, 5, 'a missing target must not leave the transaction open')
+  for (const pageSize of [0, 101, 1.5, Number.NaN])
+    assert.throws(() => repository.listContaining('latest', pageSize), /Invalid segment page/)
+})
+
+test('record location keeps ranking and page rows in one snapshot during a concurrent insertion', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'iaxweb-record-snapshot-'))
+  const filename = join(directory, 'records.sqlite')
+  const seed = new RecordRepository(filename)
+  for (const [id, timestamp] of [
+    ['latest', '2026-08-12T12:00:00.000Z'],
+    ['target', '2026-08-11T12:00:00.000Z'],
+    ['oldest', '2026-08-10T12:00:00.000Z'],
+  ] as const) {
+    seed.insert('1900', record({ id, timestamp }))
+  }
+  seed.close()
+  const reader = new DatabaseSync(filename)
+  const writer = new DatabaseSync(filename)
+  context.after(() => {
+    reader.close()
+    writer.close()
+    rmSync(directory, { recursive: true, force: true })
+  })
+  const prepare = reader.prepare.bind(reader)
+  let inserted = false
+  context.mock.method(reader, 'prepare', (sql: string) => {
+    if (!inserted && sql.includes('COUNT(*) AS total') && sql.includes('FROM ai_segments_effective')) {
+      inserted = true
+      writer.prepare(`
+        INSERT INTO ai_segments (id, node_id, captured_at, duration_ms, voiced_ms, recognition)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run('newest', '1900', '2026-08-13T12:00:00.000Z', 1000, 900, '并发新增消息')
+    }
+    return prepare(sql)
+  })
+  const records = new SqliteRecordStore(reader, { prepareReviewedVoiceprint: () => false })
+  const located = records.listContaining('target', 2)
+  assert.equal(inserted, true)
+  assert.equal(located?.total, 3)
+  assert.equal(located?.page, 1)
+  assert.deepEqual(located?.items.map(item => item.id), ['latest', 'target'])
+  assert.equal(records.list(1, 2).total, 4)
+  assert.deepEqual(records.list(1, 2).items.map(item => item.id), ['newest', 'latest'])
+})
+
 test('deletes records and rolls back when recording removal fails', () => {
   const repository = new RecordRepository(':memory:')
   const segment = record({ callsign: 'BG5AAA' })
@@ -533,7 +603,7 @@ test('deletes records and rolls back when recording removal fails', () => {
   repository.close()
 })
 
-test('filters pages by exact effective callsign without case sensitivity', () => {
+test('filters pages by effective callsign suffix without case sensitivity', () => {
   const repository = new RecordRepository(':memory:')
   const firstMatch = record({ callsign: 'BG5AAA', id: 'first-match', timestamp: '2026-08-10T12:00:00.000Z' })
   const overridden = record({ callsign: 'BG5AAA', id: 'overridden', timestamp: '2026-08-11T12:00:00.000Z' })
@@ -547,7 +617,11 @@ test('filters pages by exact effective callsign without case sensitivity', () =>
   const result = repository.list(1, 50, 'bg5aaa')
   assert.equal(result.total, 2)
   assert.deepEqual(result.items.map(item => item.id), ['latest-match', 'first-match'])
+  assert.deepEqual(repository.list(1, 50, 'aa').items.map(item => item.id), ['latest-match', 'first-match'])
+  assert.equal(repository.list(1, 1, 'aaa').total, 2)
+  assert.equal(repository.list(2, 1, 'aaa').items[0]?.id, 'first-match')
   assert.equal(repository.list(1, 50, 'BG5BBB').items[0]?.id, 'overridden')
+  assert.equal(repository.list(1, 50, 'bbb').items[0]?.id, 'overridden')
   assert.equal(repository.list(1, 50, 'BG5AA').total, 0)
   repository.close()
 })

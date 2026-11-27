@@ -24,6 +24,18 @@ body {
   padding-top: calc(4rem + var(--records-toolbar-height, 4rem));
 }
 
+.record-row-target {
+  scroll-margin-top: calc(4rem + var(--records-toolbar-height, 4rem) + 1rem);
+}
+
+tr.record-row-target {
+  scroll-margin-top: calc(4rem + var(--records-toolbar-height, 4rem) + 4rem);
+}
+
+.record-context-highlight {
+  box-shadow: inset 3px 0 0 rgb(254 240 138 / 65%);
+}
+
 button:enabled {
   cursor: pointer;
 }

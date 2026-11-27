@@ -158,14 +158,9 @@ export class SqliteRecordStore {
       conditions.push('(manual_recognition IS NOT NULL OR manual_callsign IS NOT NULL OR callee_callsign IS NOT NULL)')
     if (reviewedOnly)
       conditions.push('reviewed = 1')
-    if (callsign?.startsWith('%')) {
-      const suffix = callsign.slice(1)
+    if (callsign !== undefined) {
       conditions.push('substr(effective_callsign, -length(?)) = ? COLLATE NOCASE')
-      parameters.push(suffix, suffix)
-    }
-    else if (callsign !== undefined) {
-      conditions.push('effective_callsign = ? COLLATE NOCASE')
-      parameters.push(callsign)
+      parameters.push(callsign, callsign)
     }
     const whereClause = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`
     const totalRow = this.database.prepare(`
@@ -182,6 +177,33 @@ export class SqliteRecordStore {
       LIMIT ? OFFSET ?
     `).all(...parameters, pageSize, (page - 1) * pageSize)
     return { items: rows.map(mapRow), page, pageSize, total }
+  }
+
+  listContaining(id: string, pageSize: number): RecordPage | undefined {
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
+      throw new Error('Invalid segment page')
+    // Position and page rows must come from one snapshot. A recording arriving
+    // between these reads must not move the target onto a different page.
+    this.database.exec('BEGIN')
+    try {
+      const target = this.database.prepare('SELECT captured_at FROM ai_segments WHERE id = ?').get(id)
+      if (!target) {
+        this.database.exec('COMMIT')
+        return undefined
+      }
+      const before = this.database.prepare(`
+        SELECT COUNT(*) AS total FROM ai_segments
+        WHERE (captured_at, id) > (?, ?)
+      `).get(requiredString(target.captured_at), id)
+      const page = Math.floor(requiredNumber(before?.total) / pageSize) + 1
+      const result = this.list(page, pageSize)
+      this.database.exec('COMMIT')
+      return result
+    }
+    catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
   }
 }
 

@@ -74,6 +74,10 @@ export class RecordRepository implements RecognitionRepository, RecordListReposi
     return this.records.list(page, pageSize, callsign, editedOnly, reviewedOnly)
   }
 
+  listContaining(id: string, pageSize: number): RecordPage | undefined {
+    return this.records.listContaining(id, pageSize)
+  }
+
   updateVoiceprint(id: string, voiceprint: Voiceprint): boolean {
     return this.speakers.updateVoiceprint(id, voiceprint)
   }

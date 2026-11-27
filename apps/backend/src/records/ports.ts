@@ -29,6 +29,7 @@ export interface ReviewRepository extends RecordLookup {
 
 export interface RecordListRepository extends ReviewRepository {
   list: (page: number, pageSize: number, callsign?: string, editedOnly?: boolean, reviewedOnly?: boolean) => RecordPage
+  listContaining: (id: string, pageSize: number) => RecordPage | undefined
 }
 
 export interface PublicRecordQueries {

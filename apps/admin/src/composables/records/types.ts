@@ -29,6 +29,8 @@ export interface RecordsQueryState {
   callsignFilter: ReadonlyRef<string>
   editedOnly: ReadonlyRef<boolean>
   reviewedOnly: ReadonlyRef<boolean>
+  isFiltered: ReadonlyRef<boolean>
+  highlightedRecordId: ReadonlyRef<string | null>
   isLoading: ReadonlyRef<boolean>
   disabled: ReadonlyRef<boolean>
 }
@@ -40,6 +42,7 @@ export interface RecordsQueryActions {
   searchCallsign: () => Promise<void>
   applyFilters: () => Promise<void>
   clearCallsignSearch: () => Promise<void>
+  showContext: (id: string) => Promise<void>
   changePage: (page: number) => Promise<void>
   goToPage: () => Promise<void>
 }

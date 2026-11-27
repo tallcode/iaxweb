@@ -6,6 +6,7 @@ import { parseInput, request, requestJson } from './client'
 export interface RecordsQuery {
   page: number
   pageSize: number
+  recordId?: string
   callsign?: string
   editedOnly?: boolean
   reviewedOnly?: boolean
@@ -22,11 +23,13 @@ function update(id: string, field: string, body: unknown): Promise<PersistedReco
 export const recordsApi = {
   list(query: RecordsQuery, signal?: AbortSignal) {
     const search = new URLSearchParams({ page: String(query.page), pageSize: String(query.pageSize) })
-    if (query.callsign)
+    if (query.recordId)
+      search.set('recordId', query.recordId)
+    else if (query.callsign)
       search.set('callsign', query.callsign)
-    if (query.editedOnly)
+    if (!query.recordId && query.editedOnly)
       search.set('editedOnly', 'true')
-    if (query.reviewedOnly)
+    if (!query.recordId && query.reviewedOnly)
       search.set('reviewedOnly', 'true')
     return requestJson(`/api/admin/records?${search}`, adminRecordPageSchema, { signal })
   },

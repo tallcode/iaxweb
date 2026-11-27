@@ -603,7 +603,7 @@ describe('record callsign editing', () => {
 
   it.each([
     ['BG5AAA', 'BG5AAA'],
-    ['%aa', '%25AA'],
+    ['aa', 'AA'],
   ])('applies edit and review filters immediately and combines them with callsign search %s', async (callsign, encodedCallsign) => {
     vi.stubGlobal('Audio', class extends EventTarget {
       src = ''
@@ -648,6 +648,46 @@ describe('record callsign editing', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    ['BG6AAA', true],
+    ['BG5BBB', false],
+  ])('retains the default suffix filter after changing a callsign to %s', async (callsign, stillMatches) => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+    const page: AdminRecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
+    const updated = { ...record(), manualCallsign: callsign, effectiveCallsign: callsign }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(page))
+      .mockResolvedValueOnce(jsonResponse(page))
+      .mockResolvedValueOnce(jsonResponse(updated))
+      .mockResolvedValueOnce(jsonResponse({ ...page, items: [], total: 0 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('aa')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('callsign=AA')
+
+    await wrapper.get('button[aria-label="编辑主叫呼号"]').trigger('click')
+    const editor = wrapper.get('input[aria-label="编辑主叫呼号"]')
+    await editor.setValue(callsign)
+    await editor.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(wrapper.findAll('tbody tr')).toHaveLength(stillMatches ? 1 : 0)
+    expect(fetchMock).toHaveBeenCalledTimes(stillMatches ? 3 : 4)
+    if (stillMatches)
+      expect(wrapper.text()).toContain(callsign)
+    else
+      expect(fetchMock.mock.calls[3]?.[0]).toContain('callsign=AA')
+    wrapper.unmount()
+  })
+
   it('refreshes immediately after the page becomes visible when a refresh is overdue', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('Audio', class extends EventTarget {
@@ -679,6 +719,241 @@ describe('record callsign editing', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     wrapper.unmount()
     delete (document as { visibilityState?: string }).visibilityState
+  })
+})
+
+describe('record context navigation', () => {
+  let visibleView: 'card' | 'table'
+  let scrolled: HTMLElement[]
+  let scrollIntoView: ReturnType<typeof vi.fn>
+  let previousScrollIntoView: PropertyDescriptor | undefined
+  let previousVisibility: PropertyDescriptor | undefined
+  let rectangles: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    visibleView = 'card'
+    scrolled = []
+    previousScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+    scrollIntoView = vi.fn(function (this: HTMLElement) {
+      scrolled.push(this)
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+    rectangles = vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(function (this: Element) {
+      return (this.getAttribute('data-record-view') === visibleView ? [new DOMRect(0, 200, 600, 100)] : []) as unknown as DOMRectList
+    })
+    previousVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    vi.stubGlobal('scrollY', 0)
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+  })
+
+  afterEach(() => {
+    rectangles.mockRestore()
+    if (previousScrollIntoView)
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previousScrollIntoView)
+    else
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView
+    if (previousVisibility)
+      Object.defineProperty(document, 'visibilityState', previousVisibility)
+    else
+      delete (document as { visibilityState?: string }).visibilityState
+  })
+
+  it.each(['card', 'table'] as const)('loads the unfiltered page, scrolls to the visible %s row and highlights it', async (view) => {
+    visibleView = view
+    const selected = { ...record(), reviewed: true }
+    const context: AdminRecordPage = {
+      items: [
+        { ...record(), id: 'previous-record', recognition: '上一条上下文' },
+        selected,
+        { ...record(), id: 'next-record', recognition: '下一条上下文' },
+      ],
+      page: 3,
+      pageSize: 50,
+      total: 145,
+    }
+    const fetchMock = vi.fn(async (path: string) => {
+      const query = new URL(path, 'https://example.invalid').searchParams
+      return jsonResponse(query.has('recordId') ? context : { items: [selected], page: 1, pageSize: 50, total: 1 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage, { attachTo: document.body })
+    await flushPromises()
+    expect(wrapper.findAll('button[aria-label="查看上下文"]')).toHaveLength(0)
+    await wrapper.get('input[aria-label="筛选已编辑"]').setValue(true)
+    await flushPromises()
+    await wrapper.get('input[aria-label="筛选已标注"]').setValue(true)
+    await flushPromises()
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('aa')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    await wrapper.get(`[data-record-view="${view}"] button[aria-label="查看上下文"]`).trigger('click')
+    await flushPromises()
+
+    const contextRequest = fetchMock.mock.calls.map(([path]) => new URL(path, 'https://example.invalid')).find(url => url.searchParams.has('recordId'))!
+    expect(contextRequest.searchParams.get('recordId')).toBe(selected.id)
+    expect(contextRequest.searchParams.get('pageSize')).toBe('50')
+    expect(contextRequest.searchParams.has('callsign')).toBe(false)
+    expect(contextRequest.searchParams.has('editedOnly')).toBe(false)
+    expect(contextRequest.searchParams.has('reviewedOnly')).toBe(false)
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="呼号搜索"]').element.value).toBe('')
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="筛选已编辑"]').element.checked).toBe(false)
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="筛选已标注"]').element.checked).toBe(false)
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="页码"]').element.value).toBe('3')
+    expect(wrapper.text()).toContain('共 145 条记录')
+    expect(wrapper.text()).toContain('上一条上下文')
+    expect(wrapper.text()).toContain('下一条上下文')
+    expect(wrapper.findAll('button[aria-label="查看上下文"]')).toHaveLength(0)
+    for (const row of wrapper.findAll(`[data-record-id="${selected.id}"]`))
+      expect(row.classes()).toContain('bg-amber-200/15')
+    expect(scrolled).toHaveLength(1)
+    expect(scrolled[0]?.getAttribute('data-record-id')).toBe(selected.id)
+    expect(scrolled[0]?.getAttribute('data-record-view')).toBe(view)
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'center' }))
+    wrapper.unmount()
+  })
+
+  it('keeps the applied search and list when the context target has been deleted', async () => {
+    const page = { items: [record()], page: 1, pageSize: 50, total: 1 }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => path.includes('recordId=')
+      ? new Response(JSON.stringify({ message: '记录已不存在，请刷新列表。' }), { status: 404 })
+      : jsonResponse(page)))
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('aa')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    await wrapper.get('article button[aria-label="查看上下文"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="呼号搜索"]').element.value).toBe('AA')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+    expect(wrapper.text()).toContain('记录已不存在')
+    expect(wrapper.findAll('.record-context-highlight')).toHaveLength(0)
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(wrapper.get('article button[aria-label="查看上下文"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('ignores a late context response after a newer callsign search', async () => {
+    let resolveContext!: (response: Response) => void
+    let contextSignal: AbortSignal | undefined
+    const pendingContext = new Promise<Response>((resolve) => {
+      resolveContext = resolve
+    })
+    const replacement = { ...record(), id: 'new-search-record', callsign: 'BG5BBB', effectiveCallsign: 'BG5BBB', recognition: '新的搜索结果' }
+    const fetchMock = vi.fn((path: string, options?: RequestInit) => {
+      const query = new URL(path, 'https://example.invalid').searchParams
+      if (query.has('recordId')) {
+        contextSignal = options?.signal ?? undefined
+        return pendingContext
+      }
+      return Promise.resolve(jsonResponse({ items: [query.get('callsign') === 'BB' ? replacement : record()], page: 1, pageSize: 50, total: 1 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('aa')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    await wrapper.get('article button[aria-label="查看上下文"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('bb')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    resolveContext(jsonResponse({ items: [record()], page: 3, pageSize: 50, total: 145 }))
+    await flushPromises()
+
+    expect(contextSignal?.aborted).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="呼号搜索"]').element.value).toBe('BB')
+    expect(wrapper.text()).toContain('新的搜索结果')
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="页码"]').element.value).toBe('1')
+    expect(wrapper.findAll('.record-context-highlight')).toHaveLength(0)
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not scroll or apply a context response after leaving the records page', async () => {
+    let resolveContext!: (response: Response) => void
+    let contextSignal: AbortSignal | undefined
+    const pendingContext = new Promise<Response>((resolve) => {
+      resolveContext = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn((path: string, options?: RequestInit) => {
+      if (path.includes('recordId=')) {
+        contextSignal = options?.signal ?? undefined
+        return pendingContext
+      }
+      return Promise.resolve(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 1 }))
+    }))
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('aa')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    await wrapper.get('article button[aria-label="查看上下文"]').trigger('click')
+    await flushPromises()
+    wrapper.unmount()
+    resolveContext(jsonResponse({ items: [record()], page: 2, pageSize: 50, total: 100 }))
+    await flushPromises()
+
+    expect(contextSignal?.aborted).toBe(true)
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it.each(['viewer', 'editor'] as const)('offers context navigation to a %s without exposing admin actions', async (role) => {
+    adminSession.value = { username: 'user', role }
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ items: [record()], page: 1, pageSize: 50, total: 1 }))))
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage, { attachTo: document.body })
+    await flushPromises()
+    expect(wrapper.findAll('button[aria-label="查看上下文"]')).toHaveLength(0)
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('aa')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.findAll('button[aria-label="查看上下文"]')).toHaveLength(2)
+    expect(wrapper.findAll('th').some(header => header.text() === '操作')).toBe(true)
+    expect(wrapper.findAll('button[aria-label="识别"]')).toHaveLength(0)
+    expect(wrapper.findAll('button[aria-label="标注记录"]')).toHaveLength(0)
+    expect(wrapper.findAll('button[aria-label="删除记录"]')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('keeps the first-page context stable until the user navigates again', async () => {
+    vi.useFakeTimers()
+    const page = { items: [record()], page: 1, pageSize: 50, total: 60 }
+    const fetchMock = vi.fn(async (path: string) => {
+      const query = new URL(path, 'https://example.invalid').searchParams
+      return jsonResponse({ ...page, page: query.get('page') === '2' ? 2 : 1 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('input[aria-label="呼号搜索"]').setValue('aa')
+    await wrapper.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    await wrapper.get('article button[aria-label="查看上下文"]').trigger('click')
+    await flushPromises()
+    const callsAfterContext = fetchMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(120_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(callsAfterContext)
+    expect(wrapper.findAll('.record-context-highlight')).toHaveLength(2)
+    await wrapper.findAll('button').find(button => button.text() === '下一页')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.record-context-highlight')).toHaveLength(0)
+    wrapper.unmount()
   })
 })
 
