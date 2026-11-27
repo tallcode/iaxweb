@@ -144,7 +144,7 @@ export function useRecordsQuery(options: QueryOptions): RecordsQueryController {
   async function searchCallsign(): Promise<void> {
     if (!options.canChange())
       return
-    const callsign = searchInput.value.trim().toUpperCase()
+    const callsign = searchInput.value.replaceAll(/\s+/g, '').toUpperCase()
     searchInput.value = callsign
     if (callsign && !RECORD_CALLSIGN_FILTER_PATTERN.test(callsign)) {
       options.feedback.showError(`搜索失败：${RECORD_CALLSIGN_FILTER_HINT}`)

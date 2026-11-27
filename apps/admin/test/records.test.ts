@@ -722,6 +722,94 @@ describe('record callsign editing', () => {
   })
 })
 
+describe('callsign search composition input', () => {
+  beforeEach(() => {
+    vi.stubGlobal('Audio', class extends EventTarget {
+      load(): void {}
+      pause(): void {}
+      removeAttribute(): void {}
+    })
+  })
+
+  async function mountSearch() {
+    const page: AdminRecordPage = { items: [record()], page: 1, pageSize: 50, total: 1 }
+    const fetchMock = vi.fn(async (_path: string) => jsonResponse(page))
+    vi.stubGlobal('fetch', fetchMock)
+    const { default: RecordsPage } = await import('../src/pages/RecordsPage.vue')
+    const wrapper = mount(RecordsPage)
+    await flushPromises()
+    return {
+      wrapper,
+      fetchMock,
+      input: wrapper.get<HTMLInputElement>('input[aria-label="呼号搜索"]'),
+      form: wrapper.get('form[role="search"]'),
+    }
+  }
+
+  it.each(['compositionend', 'change'] as const)('preserves native composition until %s and uppercases only on search', async (finishEvent) => {
+    const { wrapper, fetchMock, input, form } = await mountSearch()
+    await input.setValue('b g')
+    expect(input.element.value).toBe('b g')
+    expect(input.attributes('pattern')).toBeUndefined()
+    expect(input.element.validity.customError).toBe(false)
+
+    await input.trigger('compositionstart')
+    const raw = 'b g 5 hcu'
+    input.element.value = raw
+    await input.trigger('input')
+    expect(input.element.value).toBe(raw)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await input.trigger(finishEvent)
+    expect(input.element.value).toBe(finishEvent === 'compositionend' ? 'bg5hcu' : raw)
+    await form.trigger('submit')
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('callsign=BG5HCU')
+    expect(input.element.value).toBe('BG5HCU')
+    expect(input.element.validity.customError).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['呼号!@#，。', ''],
+    ['bg5中h-cu! 🙂', 'bg5hcu'],
+  ])('removes Chinese and special characters after composition ends: %s', async (raw, cleaned) => {
+    const { wrapper, fetchMock, input, form } = await mountSearch()
+    await input.trigger('compositionstart')
+    input.element.value = raw
+    await input.trigger('input')
+    expect(input.element.value).toBe(raw)
+    await input.trigger('compositionend')
+    expect(input.element.value).toBe(cleaned)
+    await input.trigger('input')
+    expect(input.element.value).toBe(cleaned)
+    expect(input.element.validity.customError).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    if (cleaned) {
+      await form.trigger('submit')
+      await flushPromises()
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock.mock.calls[1]?.[0]).toContain('callsign=BG5HCU')
+    }
+    wrapper.unmount()
+  })
+
+  it('retains the caret position when cleaning a composition in the middle of a callsign', async () => {
+    const { wrapper, input } = await mountSearch()
+    await input.setValue('bg5hcu')
+    await input.trigger('compositionstart')
+    input.element.value = 'bg5中!hcu'
+    input.element.setSelectionRange(5, 5)
+    await input.trigger('input')
+    await input.trigger('compositionend')
+    expect(input.element.value).toBe('bg5hcu')
+    expect(input.element.selectionStart).toBe(3)
+    expect(input.element.selectionEnd).toBe(3)
+    wrapper.unmount()
+  })
+})
+
 describe('record context navigation', () => {
   let visibleView: 'card' | 'table'
   let scrolled: HTMLElement[]
