@@ -151,11 +151,14 @@ export function decide(input: Input, options: DecisionOptions = {}): Decision {
       for (const reference of stage.items) {
         if (ambiguity && !ambiguity.has(reference.callsign))
           continue
+        // Medium-confidence spellings may corroborate an exact call, but
+        // only high-confidence spellings may correct a compact self report.
+        const allowedDistance = stage.source === 'spelling' && reference.confidence !== 'high' ? 0 : maxDistance
         for (const anchor of passAnchors) {
           const editDistance = callDistance(anchor.callsign, reference.callsign)
           const separate = independent(anchor, reference)
           comparisons.push({ self: anchor.callsign, reference: reference.callsign, distance: editDistance, independent: separate })
-          if (separate && editDistance <= maxDistance)
+          if (separate && editDistance <= allowedDistance)
             matches.add(reference.callsign)
         }
       }

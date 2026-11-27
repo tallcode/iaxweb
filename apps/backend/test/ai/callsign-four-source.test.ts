@@ -144,6 +144,65 @@ test('an exact tail takes priority over near spelling and feature corroboration'
   assert.equal(result.decision.steps.every(step => step.maxDistance === 0), true)
 })
 
+test('medium spelling still confirms an exact compact self before other sources', () => {
+  const result = resolve({ selfCallsigns: [compact()], spelledCallsigns: [spelled(A, 'medium')] }, [feature(B)], [tail(C)])
+  assert.equal(result.callsign, A)
+  assert.equal(result.algorithm, 'stage1_text')
+  assert.equal(result.decision.steps.at(-1)?.source, 'spelling')
+  assert.equal(result.decision.steps.every(step => step.maxDistance === 0), true)
+})
+
+test('only high historical spelling may remove W from a literal GWL self', () => {
+  const turn = { id: 'current', text: 'CQ, CQ, CQ. This is BG5GWL, BG5GWL. We are local 555 with giving mark. Can you hear me? Over.' }
+  const previous = { id: 'previous', text: 'CQ, CQ, CQ. This is BG5GWL, BG5GWL. Bravo Golf 5 Golf with Lima. Calling CQ, over.' }
+  for (const confidence of ['medium', 'high'] as const) {
+    const raw: CallsignExtraction = {
+      selfCallsigns: [{ identityEvidence: 'This is', quote: 'BG5GWL', type: 'compact', callsign: 'BG5GWL', confidence: 'medium' }],
+      spelledCallsigns: [{ sourceId: previous.id, quote: 'Bravo Golf 5 Golf with Lima', correctedSpelling: 'Bravo Golf Five Golf Lima', callsign: 'BG5GL', confidence }],
+    }
+    const prepared = prepareCallsignExtraction(raw, turn, [previous], schema)
+    assert.ok(prepared)
+    // This candidate survives character/source validation. Its confidence,
+    // rather than a missing quote or malformed format, controls correction.
+    assert.equal(prepared.input.spellings.length, 1)
+    assert.equal(prepared.input.spellings[0]?.callsign, 'BG5GL')
+    assert.equal(prepared.input.spellings[0]?.confidence, confidence)
+    const result = resolveCallsign(prepared)
+    assert.equal(result.callsign, confidence === 'high' ? 'BG5GL' : undefined)
+    assert.equal(result.algorithm, confidence === 'high' ? 'stage1_text' : undefined)
+    const correction = result.decision.steps.find(step => step.source === 'spelling' && step.maxDistance === 1)
+    assert.ok(correction)
+    assert.equal(correction.comparisons[0]?.distance, 1)
+    assert.deepEqual(correction.matched, confidence === 'high' ? ['BG5GL'] : [])
+  }
+})
+
+test('medium near spelling does not block one-character feature or tail correction', () => {
+  const raw = { selfCallsigns: [compact()], spelledCallsigns: [spelled(B, 'medium')] }
+  for (const support of [
+    { matches: [feature(C, 'medium')], signals: [], source: 'feature' },
+    { matches: [], signals: [tail(C)], source: 'tail' },
+  ] as const) {
+    const result = resolve(raw, support.matches, support.signals)
+    assert.equal(result.callsign, C)
+    assert.equal(result.algorithm, 'stage1_text')
+    assert.equal(result.decision.steps.at(-1)?.source, support.source)
+    assert.equal(result.decision.steps.at(-1)?.maxDistance, 1)
+    assert.deepEqual(result.decision.steps.find(step => step.source === 'spelling' && step.maxDistance === 1)?.matched, [])
+  }
+})
+
+test('a missing self can still use a high feature with exact medium spelling in stage 2', () => {
+  const raw = { selfCallsigns: [], spelledCallsigns: [spelled(A, 'medium')] }
+  const turn = { id: 'current', text: `${A}，收到您的信号。` }
+  const result = resolve(raw, [feature(A)], [], turn)
+  assert.equal(result.callsign, A)
+  assert.equal(result.algorithm, 'stage2_feature')
+  assert.equal(result.decision.steps.at(-1)?.source, 'spelling')
+  assert.equal(result.decision.steps.every(step => step.maxDistance === 0), true)
+  assert.equal(resolve(raw, [feature(B)], [], turn).callsign, undefined)
+})
+
 test('correction retains source priority after every exact source has failed', () => {
   const raw = { selfCallsigns: [compact()], spelledCallsigns: [spelled(B)] }
   const result = resolve(raw, [feature(C)], [tail(C)])
