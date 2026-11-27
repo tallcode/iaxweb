@@ -1,6 +1,6 @@
 import type { RadioSignal, SpeakerMatch } from '@iaxweb/contracts'
 import type { TranscriptTurn } from './callsign-evidence.js'
-import type { Candidate, Confidence, Decision, Input, Span } from './callsign-policy.js'
+import type { Candidate, Confidence, Decision, DecisionOptions, Input, Span } from './callsign-policy.js'
 import { decide } from './callsign-policy.js'
 import { deriveStandardSpelling, validSpelling } from './callsign-spelling.js'
 import { correctExplanationText } from './phonetic-corrector.js'
@@ -198,11 +198,11 @@ export function prepareCallsignExtraction(value: unknown, current: TranscriptTur
   }
 }
 
-export function resolveCallsign(prepared: PreparedCallsignExtraction, matches: readonly Pick<SpeakerMatch, 'callsign' | 'confidence'>[] = [], signals: readonly RadioSignal[] = []): CallsignResolution {
+export function resolveCallsign(prepared: PreparedCallsignExtraction, matches: readonly Pick<SpeakerMatch, 'callsign' | 'confidence'>[] = [], signals: readonly RadioSignal[] = [], options: DecisionOptions = {}): CallsignResolution {
   const features: Candidate[] = matches.flatMap(item => item.confidence
     ? [{ callsign: item.callsign, confidence: item.confidence, kind: 'feature' as const, spans: [] }]
     : [])
-  const decision = decide({ ...prepared.input, features, signals: [...signals] })
+  const decision = decide({ ...prepared.input, features, signals: [...signals] }, options)
   if (!decision.callsign)
     return { decision }
   return { callsign: decision.callsign, algorithm: decision.selfOrigin === 'self' ? 'stage1_text' : 'stage2_feature', decision }

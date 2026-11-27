@@ -186,8 +186,8 @@ export class SegmentRecognition {
       record.callsign = parsed.callsign
       record.callsignAlgorithm = parsed.algorithm
       if (!record.callsign && parsed.prepared) {
-        // Resolve both sources together: an earlier feature source must not be
-        // bypassed merely because the lower-priority tail finishes first.
+        // Text corrections are deferred by parse(). Resolve all sources only
+        // after their exact matches are available, regardless of finish order.
         const [matches, signals] = await Promise.all([
           featureMatches ?? Promise.resolve([]),
           signaling ?? Promise.resolve(null),

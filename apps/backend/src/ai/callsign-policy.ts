@@ -35,6 +35,11 @@ export interface Decision {
   selected: { self: string[], spelling: string[], feature: string[], tail: string[] }
   steps: Step[]
 }
+export interface DecisionOptions {
+  // A partial-source caller may confirm exact evidence, but must wait for all
+  // sources before allowing a compact self-report to be corrected.
+  allowCompactCorrection?: boolean
+}
 
 const rank = { low: 1, medium: 2, high: 3 } as const
 const calls = (items: readonly Candidate[]) => [...new Set(items.map(item => item.callsign))].sort()
@@ -83,7 +88,7 @@ function callDistance(self: string, reference: string): number {
   return distance(self, isFull(self) ? reference : reference.slice(-self.length))
 }
 
-export function decide(input: Input): Decision {
+export function decide(input: Input, options: DecisionOptions = {}): Decision {
   const self = highest(input.selves
     .filter(item => isFull(item.callsign) || isSuffix(item.callsign))
     .map(item => item.kind === 'compact' && item.confidence === 'high' ? { ...item, confidence: 'medium' as const } : item))
@@ -133,30 +138,34 @@ export function decide(input: Input): Decision {
     ...(level !== 'low' ? [{ source: 'tail' as const, items: tail }] : []),
   ]
   let ambiguity: Set<string> | undefined
-  for (const stage of stages) {
-    // Only a compact self-report can be corrected by non-voiceprint evidence.
-    const allowsCompactMismatch = level !== 'low' && origin === 'self' && stage.source !== 'feature'
-    const maxDistance = allowsCompactMismatch && anchors.some(anchor => anchor.kind === 'compact') ? 1 : 0
-    const comparisons: Step['comparisons'] = []
-    const matches = new Set<string>()
-    for (const reference of stage.items) {
-      if (ambiguity && !ambiguity.has(reference.callsign))
-        continue
-      for (const anchor of anchors) {
-        const editDistance = callDistance(anchor.callsign, reference.callsign)
-        const separate = independent(anchor, reference)
-        comparisons.push({ self: anchor.callsign, reference: reference.callsign, distance: editDistance, independent: separate })
-        const allowedDistance = anchor.kind === 'compact' ? maxDistance : 0
-        if (separate && editDistance <= allowedDistance)
-          matches.add(reference.callsign)
+  const canCorrect = options.allowCompactCorrection !== false && origin === 'self'
+    && level === 'medium' && anchors.some(anchor => anchor.kind === 'compact')
+  // All exact sources outrank every approximate source. Only a compact self
+  // can enter the second pass; reference calls and other anchor kinds are fixed.
+  const passes = canCorrect ? [0, 1] : [0]
+  for (const maxDistance of passes) {
+    const passAnchors = maxDistance === 0 ? anchors : anchors.filter(anchor => anchor.kind === 'compact')
+    for (const stage of stages) {
+      const comparisons: Step['comparisons'] = []
+      const matches = new Set<string>()
+      for (const reference of stage.items) {
+        if (ambiguity && !ambiguity.has(reference.callsign))
+          continue
+        for (const anchor of passAnchors) {
+          const editDistance = callDistance(anchor.callsign, reference.callsign)
+          const separate = independent(anchor, reference)
+          comparisons.push({ self: anchor.callsign, reference: reference.callsign, distance: editDistance, independent: separate })
+          if (separate && editDistance <= maxDistance)
+            matches.add(reference.callsign)
+        }
       }
+      const matched = [...matches].sort()
+      result.steps.push({ source: stage.source, maxDistance, matched, ambiguityBefore: ambiguity ? [...ambiguity].sort() : null, comparisons })
+      if (matched.length === 1)
+        return { ...result, callsign: matched[0]!, reason: `${origin}_${level}_with_${stage.source}` }
+      if (matched.length > 1)
+        ambiguity = matches
     }
-    const matched = [...matches].sort()
-    result.steps.push({ source: stage.source, maxDistance, matched, ambiguityBefore: ambiguity ? [...ambiguity].sort() : null, comparisons })
-    if (matched.length === 1)
-      return { ...result, callsign: matched[0]!, reason: `${origin}_${level}_with_${stage.source}` }
-    if (matched.length > 1)
-      ambiguity = matches
   }
   return { ...result, reason: ambiguity ? 'unresolved_ambiguity' : 'no_support' }
 }

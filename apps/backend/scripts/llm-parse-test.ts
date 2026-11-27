@@ -37,10 +37,13 @@ try {
     console.error('LLM 解析未生效：提示词或 schema 不可用')
     process.exit(1)
   }
+  // This text-only command has no pending feature or tail sources. Complete
+  // the correction round after the parser's exact-only fast path.
+  const matched = parser.resolve(parsed)
   console.log(JSON.stringify({
     ...(parsed.extraction ?? { selfCallsigns: [], spelledCallsigns: [] }),
-    matchedCallsign: parsed.callsign ?? null,
-    callsignAlgorithm: parsed.algorithm ?? null,
+    matchedCallsign: matched?.callsign ?? null,
+    callsignAlgorithm: matched?.algorithm ?? null,
   }, null, 2))
 }
 catch (error) {

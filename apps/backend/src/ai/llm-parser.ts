@@ -67,7 +67,10 @@ export class LlmParser {
     const prepared = raw && prepareCallsignExtraction(raw, { ...metadata, text: transcript }, turns, schema.object)
     if (!prepared || schema.validate(prepared.extraction))
       return {}
-    const { callsign, algorithm } = resolveCallsign(prepared)
+    // A text correction must wait until feature and tail exact matches have
+    // had their turn. Only exact text evidence and direct high spelled self
+    // may finish before the supporting sources have settled.
+    const { callsign, algorithm } = resolveCallsign(prepared, [], [], { allowCompactCorrection: false })
     return { extraction: prepared.extraction, prepared, ...(callsign && algorithm ? { callsign, algorithm } : {}) }
   }
 

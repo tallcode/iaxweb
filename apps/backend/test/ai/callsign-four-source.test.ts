@@ -24,9 +24,12 @@ function resolve(extraction: CallsignExtraction, matches: readonly Pick<SpeakerM
   return resolveCallsign(prepared, matches, signals)
 }
 
-test('a feature corroborates an LLM self only when the callsign matches exactly', () => {
+test('a feature may correct a medium compact self and returns the reference callsign', () => {
   const raw = { selfCallsigns: [compact()], spelledCallsigns: [] }
-  assert.equal(resolve(raw, [feature(B, 'medium')]).callsign, undefined)
+  const corrected = resolve(raw, [feature(B, 'medium')])
+  assert.equal(corrected.callsign, B)
+  assert.notEqual(corrected.callsign, A)
+  assert.equal(corrected.algorithm, 'stage1_text')
   const result = resolve(raw, [feature(A, 'medium')])
   assert.equal(result.callsign, A)
   assert.equal(result.algorithm, 'stage1_text')
@@ -73,12 +76,14 @@ test('an independent historical spelling can corroborate medium spelled self', (
   assert.equal(result.algorithm, 'stage1_text')
 })
 
-test('a medium spelled self requires exact spelling or tail corroboration', () => {
+test('a medium spelled self requires exact spelling, feature or tail corroboration', () => {
   const raw: CallsignExtraction = {
     selfCallsigns: [{ identityEvidence: '这里是', quote: words, type: 'spelling', callsign: A, confidence: 'medium' }],
     spelledCallsigns: [spelled(A, 'medium', 'current')],
   }
   assert.equal(resolve({ ...raw, spelledCallsigns: [...raw.spelledCallsigns, spelled(B)] }).callsign, undefined)
+  assert.equal(resolve(raw, [feature(B)]).callsign, undefined)
+  assert.equal(resolve(raw, [feature()]).callsign, A)
   assert.equal(resolve(raw, [], [tail(B)]).callsign, undefined)
   assert.equal(resolve(raw, [], [tail()]).callsign, A)
 })
@@ -109,17 +114,70 @@ test('the highest feature tier is selected before distance matching', () => {
   assert.equal(result.callsign, undefined)
 })
 
-test('an ambiguous spelling set can only be narrowed within both candidate sets', () => {
+test('an exact spelling match wins over a near match from the same source', () => {
   const raw = { selfCallsigns: [compact()], spelledCallsigns: [spelled(), spelled(B)] }
-  assert.equal(resolve(raw, [feature(C)]).callsign, undefined)
-  assert.equal(resolve(raw, [feature(B)]).callsign, undefined)
+  assert.equal(resolve(raw, [feature(C)]).callsign, A)
+  assert.equal(resolve(raw, [feature(B)]).callsign, A)
   assert.equal(resolve(raw, [feature(A)]).callsign, A)
-  assert.equal(resolve(raw, [], [tail(B)]).callsign, B)
+  assert.equal(resolve(raw, [], [tail(B)]).callsign, A)
 })
 
-test('unique spelling corroboration takes priority over feature and tail', () => {
+test('an ambiguous exact spelling set can only be narrowed within both candidate sets', () => {
+  const raw = { selfCallsigns: [compact(), compact(B)], spelledCallsigns: [spelled(), spelled(B)] }
+  const turn = { id: 'current', text: `这里是 ${A}，这里是 ${B}。` }
+  assert.equal(resolve(raw, [feature(C)], [], turn).callsign, undefined)
+  assert.equal(resolve(raw, [feature(B)], [], turn).callsign, B)
+  assert.equal(resolve(raw, [feature(A)], [], turn).callsign, A)
+})
+
+test('an exact feature takes priority over near spelling corroboration', () => {
   const result = resolve({ selfCallsigns: [compact()], spelledCallsigns: [spelled(B)] }, [feature(A)], [tail(C)])
+  assert.equal(result.callsign, A)
+  assert.equal(result.decision.steps.at(-1)?.source, 'feature')
+  assert.equal(result.decision.steps.every(step => step.maxDistance === 0), true)
+})
+
+test('an exact tail takes priority over near spelling and feature corroboration', () => {
+  const result = resolve({ selfCallsigns: [compact()], spelledCallsigns: [spelled(B)] }, [feature(C)], [tail(A)])
+  assert.equal(result.callsign, A)
+  assert.equal(result.decision.steps.at(-1)?.source, 'tail')
+  assert.equal(result.decision.steps.every(step => step.maxDistance === 0), true)
+})
+
+test('correction retains source priority after every exact source has failed', () => {
+  const raw = { selfCallsigns: [compact()], spelledCallsigns: [spelled(B)] }
+  const result = resolve(raw, [feature(C)], [tail(C)])
   assert.equal(result.callsign, B)
+  assert.deepEqual(result.decision.steps.slice(0, 3).map(step => [step.source, step.maxDistance]), [['spelling', 0], ['feature', 0], ['tail', 0]])
+  assert.equal(result.decision.steps.at(-1)?.maxDistance, 1)
+  assert.equal(resolve({ ...raw, spelledCallsigns: [] }, [feature(C)], [tail(B)]).callsign, C)
+})
+
+test('exact-only resolution leaves compact correction pending until other sources arrive', () => {
+  const raw = { selfCallsigns: [compact()], spelledCallsigns: [spelled(B)] }
+  const prepared = prepareCallsignExtraction(raw, current, history, schema)
+  assert.ok(prepared)
+  const partial = resolveCallsign(prepared, [], [], { allowCompactCorrection: false })
+  assert.equal(partial.callsign, undefined)
+  assert.equal(partial.decision.steps.every(step => step.maxDistance === 0), true)
+  assert.equal(resolveCallsign(prepared).callsign, B)
+  assert.equal(resolveCallsign(prepared, [feature(A)]).callsign, A)
+})
+
+test('low compact self and a downgraded abbreviation never receive one-character correction', () => {
+  const low = { selfCallsigns: [compact(A, 'low')], spelledCallsigns: [] }
+  assert.equal(resolve(low, [feature(B)]).callsign, undefined)
+  assert.equal(resolve(low, [feature(A)]).callsign, A)
+  const short = { selfCallsigns: [compact('GZX')], spelledCallsigns: [] }
+  const turn = { id: 'current', text: '这里是 GZX，B。' }
+  assert.equal(resolve(short, [feature(B)], [], turn).callsign, undefined)
+  assert.equal(resolve(short, [feature(A)], [], turn).callsign, A)
+})
+
+test('two-character compact errors remain unsupported', () => {
+  const raw = { selfCallsigns: [compact('BG5SU')], spelledCallsigns: [] }
+  const turn = { id: 'current', text: '这里是 BG5SU。' }
+  assert.equal(resolve(raw, [feature('BG5HCU')], [tail('BG5HCU')], turn).callsign, undefined)
 })
 
 test('multiple self calls are downgraded only once and require exact high evidence', () => {

@@ -139,7 +139,7 @@ test('an LLM self corroborated by features or a tail remains algorithm stage 1',
   const { parser, calls } = makeParser(JSON.stringify(compact('BG5BUD')))
   const parsed = await parser.parse('这里是 BG5BUD')
   assert.equal(parsed?.callsign, undefined)
-  assert.equal(parser.resolve(parsed!, [medium]), undefined)
+  assert.deepEqual(parser.resolve(parsed!, [medium]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
   assert.deepEqual(parser.resolve(parsed!, [{ ...medium, callsign: 'BG5BUD' }]), { callsign: 'BG5BUD', algorithm: 'stage1_text' })
   assert.deepEqual(parser.resolve(parsed!, [], [{ type: 'BSS', content: 'BG5BUT/P' }]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
   assert.equal(calls.length, 1)
@@ -168,7 +168,7 @@ test('only genuinely missing self can use a downgraded feature substitute and be
   assert.equal(invalid.parser.resolve(invalidParsed!, [high]), undefined)
 })
 
-test('highest feature tier is selected before exact matching', async () => {
+test('highest feature tier is selected before exact and corrected matching', async () => {
   const { parser } = makeParser(JSON.stringify(compact('BG5BUT')))
   const parsed = await parser.parse('这里是 BG5BUT')
   const far = { callsign: 'BG5XYZ', confidence: 'high' } as const
@@ -176,6 +176,42 @@ test('highest feature tier is selected before exact matching', async () => {
   assert.equal(parser.resolve(parsed!, [far, medium]), undefined)
   assert.deepEqual(parser.resolve(parsed!, [close, high]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
   assert.deepEqual(parser.resolve(parsed!, [far, high, high]), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
+})
+
+test('a near text result waits for feature and tail exact matches without another model call', async () => {
+  const value: CallsignExtraction = { ...compact('BG5BUD'), spelledCallsigns: [pastBut] }
+  const { parser, calls } = makeParser(JSON.stringify(value))
+  const parsed = await parser.parse('这里是 BG5BUD', [{ id: 'past', text: but }])
+  assert.equal(parsed?.callsign, undefined)
+  assert.ok(parsed?.prepared)
+  assert.deepEqual(parser.resolve(parsed!, [{ ...high, callsign: 'BG5BUD' }]), { callsign: 'BG5BUD', algorithm: 'stage1_text' })
+  assert.deepEqual(parser.resolve(parsed!, [], [{ type: 'BSS', content: 'BG5BUD' }]), { callsign: 'BG5BUD', algorithm: 'stage1_text' })
+  assert.deepEqual(parser.resolve(parsed!), { callsign: 'BG5BUT', algorithm: 'stage1_text' })
+  assert.equal(calls.length, 1)
+})
+
+test('exact text matching remains a fast path even when another spelling differs by one character', async () => {
+  const bud = 'Bravo Golf Five Bravo Uniform Delta'
+  const value: CallsignExtraction = {
+    ...compact('BG5BUD'),
+    spelledCallsigns: [pastBut, { sourceId: 'past', quote: bud, correctedSpelling: bud, callsign: 'BG5BUD', confidence: 'high' }],
+  }
+  const { parser, calls } = makeParser(JSON.stringify(value))
+  const parsed = await parser.parse('这里是 BG5BUD', [{ id: 'past', text: `${but}。${bud}` }])
+  assert.equal(parsed?.callsign, 'BG5BUD')
+  assert.equal(parsed?.algorithm, 'stage1_text')
+  assert.equal(calls.length, 1)
+})
+
+test('a medium spelled self never uses one-character correction from any source', async () => {
+  const value: CallsignExtraction = {
+    selfCallsigns: [{ identityEvidence: '这里是', quote: but, type: 'spelling', callsign: 'BG5BUT', confidence: 'medium' }],
+    spelledCallsigns: [{ ...pastBut, sourceId: 'current', confidence: 'medium' }],
+  }
+  const { parser } = makeParser(JSON.stringify(value))
+  const parsed = await parser.parse(`这里是 ${but}`)
+  assert.equal(parsed?.callsign, undefined)
+  assert.equal(parser.resolve(parsed!, [{ callsign: 'BG5BUD', confidence: 'high' }], [{ type: 'BSS', content: 'BG5BUD' }]), undefined)
 })
 
 test('resolve preserves a direct spelled self and makes no further model requests', async () => {
